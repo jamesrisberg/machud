@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MacHUD</title>
+<meta name="description" content="MacHUD is an open-source omni-tool for macOS: a heads-up display for your Mac that turns the desktop into a working surface you lay out yourself, with a family of small HUD apps.">
+<link rel="stylesheet" href="style.css">
+<link rel="alternate" type="application/json" href="catalog.json" title="MacHUD app catalog">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#"><span class="mono" id="brand-mark">M</span>MacHUD</a>
+    <nav class="links">
+      <a href="#apps">Apps</a>
+      <a href="#build">Build your own</a>
+      <a href="#install" class="hide-sm">Install notes</a>
+      <a href="https://github.com/jamesrisberg/machud">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="wrap">
+      <div>
+        <h1>A <span class="accent">heads-up display</span> for your Mac.</h1>
+        <p class="what">MacHUD is an open-source omni-tool for macOS. The idea: your desktop is a
+          working surface, not a pile of windows. You draw the regions, decide what goes where, and
+          keep small single-purpose tools at the edges, ready when you look for them.</p>
+        <ul class="points">
+          <li>Draw a layout once. Shift-drag any window into it; a loadout puts every app and page
+            back in its place, on any display or desktop.</li>
+          <li>Tools live in a dock and slide out as panels: clipboard, scratchpad, files, ffmpeg,
+            ImageMagick, dev servers. Each is its own small app.</li>
+          <li>Everything is a command. The whole HUD talks JSON over a socket, so scripts and agents
+            can work your desktop the way you do.</li>
+          <li>Build your own: macOS apps built on <a href="https://github.com/jamesrisberg/hudkit">HUDKit</a>
+            can be presented as slide-out tools or windowed apps.</li>
+        </ul>
+        <div class="cta">
+          <a class="btn primary" id="hero-download" href="https://github.com/jamesrisberg/machud/releases/latest">Download MacHUD</a>
+          <a class="btn" href="https://github.com/jamesrisberg/machud/releases">All releases</a>
+        </div>
+        <p class="meta" id="hero-meta">Free and open source · macOS 14 or later · notarized by Apple</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="apps">
+    <div class="wrap">
+      <h2>The apps</h2>
+      <p class="lede">Small tools that live in MacHUD's dock and panels. Each is its own notarized app:
+        download it here, or install it from MacHUD with <b>Get Apps…</b> in the menu bar
+        (or <code>machud apps install &lt;name&gt;</code>).</p>
+      <div class="grid-apps" id="app-grid" aria-live="polite">
+        <div class="empty">Loading the catalog…</div>
+      </div>
+      <noscript><p class="meta">This list is built from <a href="catalog.json">catalog.json</a> with JavaScript.
+        Without it, see the <a href="apps.html">static app list</a>.</p></noscript>
+    </div>
+  </section>
+
+  <section id="build">
+    <div class="wrap">
+      <h2>Build your own</h2>
+      <p class="lede">A MacHUD app is an ordinary Swift app built on <a href="https://github.com/jamesrisberg/hudkit">HUDKit</a>:
+        it ships a <code>machud.json</code> manifest, answers a small JSON socket contract, and MacHUD
+        finds it, docks it and places its panels. The guides are written so a coding agent can follow them.</p>
+      <div class="cols">
+        <div class="note">
+          <h3><a href="https://github.com/jamesrisberg/hudkit/blob/main/docs/AGENT-GUIDE.md">Agent guide</a></h3>
+          <p>Start here: scaffold an app with <code>hud-new-app.sh</code>, build, run and check it against MacHUD.</p>
+        </div>
+        <div class="note">
+          <h3><a href="https://github.com/jamesrisberg/hudkit/blob/main/docs/CONTRACT.md">The contract</a></h3>
+          <p>The manifest, the socket commands every app answers (<code>hello</code>, <code>panel</code>,
+            <code>state</code>, <code>settings</code>…) and how MacHUD drives them.</p>
+        </div>
+        <div class="note">
+          <h3><a href="https://github.com/jamesrisberg/machud/blob/main/docs/API.md">MacHUD's API</a></h3>
+          <p>Every <code>machud</code> command: layouts, loadouts, the tool dock, apps, the catalog and installs.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="wrap">
+      <h2>Install notes</h2>
+      <div class="cols">
+        <div class="note">
+          <h3>Notarized downloads</h3>
+          <p>Every zip here is signed with a Developer ID and notarized by Apple, so Gatekeeper opens it
+            without warnings. Unzip, drag the app to <b>Applications</b>, open it.</p>
+          <p>MacHUD checks each download's size and SHA-256 against the catalog and refuses anything
+            Gatekeeper rejects.</p>
+        </div>
+        <div class="note">
+          <h3>First launch</h3>
+          <p>MacHUD lives in the menu bar (no Dock icon). With no HUD apps installed it opens
+            <b>Settings → Apps</b> once with the bundled tools selected: one click installs them.</p>
+          <p>Apps install into <code>/Applications</code> (or <code>~/Applications</code> when that is
+            not writable) and update in place.</p>
+        </div>
+        <div class="note">
+          <h3>Accessibility</h3>
+          <p>To see and move other apps' windows MacHUD needs <b>Accessibility</b> access: System Settings →
+            Privacy &amp; Security → Accessibility. It starts snapping as soon as access is granted.</p>
+          <p>Loadouts that open browser pages may also ask for Automation access to that browser.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>MacHUD · open source on <a href="https://github.com/jamesrisberg/machud">GitHub</a></span>
+    <span id="catalog-meta"><a href="catalog.json">catalog.json</a></span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+  var CATALOG = "catalog.json";
+  var RELEASES = "https://github.com/jamesrisberg/machud/releases/latest";
+  var KINDS = { windowed: "Window", hover: "Hover panel", umbrella: "Umbrella" };
+
+  function el(tag, attrs, children) {
+    var node = document.createElement(tag);
+    Object.keys(attrs || {}).forEach(function (k) {
+      if (k === "text") node.textContent = attrs[k];
+      else if (k === "class") node.className = attrs[k];
+      else node.setAttribute(k, attrs[k]);
+    });
+    (children || []).forEach(function (c) { if (c) node.appendChild(c); });
+    return node;
+  }
+  function resolve(raw, base) {
+    if (!raw) return null;
+    try { return new URL(raw, base).href; } catch (e) { return null; }
+  }
+  function megabytes(size) {
+    return typeof size === "number" && size > 0 ? (size / 1048576).toFixed(1) + " MB" : "";
+  }
+  // The homepage when it is a GitHub repo, else `repo` (a bare name is under jamesrisberg).
+  function releasePage(app) {
+    var gh = /^https:\/\/github\.com\/[^\/]+\/[^\/]+\/?$/;
+    if (app.homepage && gh.test(app.homepage)) return app.homepage.replace(/\/$/, "") + "/releases/latest";
+    if (app.repo) return "https://github.com/" + (app.repo.indexOf("/") < 0 ? "jamesrisberg/" : "") + app.repo + "/releases/latest";
+    return app.homepage || RELEASES;
+  }
+  function icon(app, base) {
+    var src = resolve(app.icon, base);
+    var mono = el("span", { "class": "mono", text: (app.name || "?").charAt(0).toUpperCase(), "aria-hidden": "true" });
+    if (!src) return mono;
+    var img = el("img", { "class": "icon", src: src, alt: "", loading: "lazy", width: "52", height: "52" });
+    img.onerror = function () { img.replaceWith(mono); };
+    return img;
+  }
+
+  function card(app, base) {
+    var title = el("h3", { text: app.name }, [
+      el("span", { "class": "badge", text: KINDS[app.kind] || app.kind || "app" }),
+      app.bundled ? el("span", { "class": "badge bundled", text: "bundled", title: "Installed by MacHUD's “Install bundled tools”" }) : null
+    ]);
+    var details = ["v" + app.version, megabytes(app.size), app.minOS ? "macOS " + app.minOS + "+" : ""].filter(Boolean).join(" · ");
+    var name = app.homepage ? el("a", { href: app.homepage }, [title]) : title;
+    var download = resolve(app.download, base);
+    return el("article", { "class": "card", id: "app-" + (app.id || app.name) }, [
+      el("div", { "class": "head" }, [icon(app, base), el("div", {}, [name, el("div", { "class": "meta", text: details })])]),
+      el("p", { text: app.summary || "" }),
+      el("div", { "class": "foot" }, [
+        el("a", { "class": "meta", href: releasePage(app), text: "Release notes" }),
+        download ? el("a", { "class": "btn small primary", href: download, text: "Download" })
+                 : el("a", { "class": "btn small", href: releasePage(app), text: "Releases" })
+      ])
+    ]);
+  }
+
+  function render(catalog, base) {
+    var apps = Array.isArray(catalog.apps) ? catalog.apps : [];
+    var umbrella = apps.filter(function (a) { return a.kind === "umbrella"; })[0];
+    if (umbrella) {
+      var hero = document.getElementById("hero-download");
+      hero.href = resolve(umbrella.download, base) || releasePage(umbrella);
+      hero.textContent = "Download MacHUD " + umbrella.version;
+      var bits = [megabytes(umbrella.size), "macOS " + (umbrella.minOS || "14") + " or later", "notarized by Apple", "free and open source"];
+      document.getElementById("hero-meta").textContent = bits.filter(Boolean).join(" · ");
+      var mark = resolve(umbrella.icon, base);
+      if (mark) {
+        var img = el("img", { src: mark, alt: "" });
+        img.onerror = function () { img.remove(); };
+        var brand = document.getElementById("brand-mark");
+        brand.replaceWith(img);
+      }
+    }
+    var grid = document.getElementById("app-grid");
+    grid.textContent = "";
+    var tools = apps.filter(function (a) { return a.kind !== "umbrella"; })
+      .sort(function (a, b) { return (b.bundled ? 1 : 0) - (a.bundled ? 1 : 0) || String(a.name).localeCompare(String(b.name)); });
+    if (!tools.length) grid.appendChild(el("div", { "class": "empty", text: "No apps have been published yet. Check back soon." }));
+    tools.forEach(function (app) { grid.appendChild(card(app, base)); });
+    if (catalog.updatedAt) {
+      var when = new Date(catalog.updatedAt);
+      document.getElementById("catalog-meta").prepend(document.createTextNode(
+        "Catalog updated " + (isNaN(when) ? catalog.updatedAt : when.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })) + " · "));
+    }
+  }
+
+  var base = new URL(CATALOG, document.baseURI).href;
+  fetch(base, { cache: "no-cache" })
+    .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then(function (catalog) { render(catalog, base); })
+    .catch(function (err) {
+      var grid = document.getElementById("app-grid");
+      grid.textContent = "";
+      var box = el("div", { "class": "error" }, [document.createTextNode("Could not load the catalog (" + err.message + "). See the ")]);
+      box.appendChild(el("a", { href: "apps.html", text: "static app list" }));
+      box.appendChild(document.createTextNode("."));
+      grid.appendChild(box);
+    });
+
+  window.MacHUDSite = { render: render, card: card, resolve: resolve };
+})();
+</script>
+</body>
+</html>

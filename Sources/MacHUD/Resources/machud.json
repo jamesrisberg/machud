@@ -1,0 +1,13 @@
+{
+  "id": "com.jrisberg.machud",
+  "name": "MacHUD",
+  "socket": "machud",
+  "panels": [
+    {
+      "id": "menubar",
+      "title": "Menu Bar",
+      "symbol": "menubar.rectangle",
+      "verbs": ["show", "hide", "toggle", "mode"]
+    }
+  ]
+}

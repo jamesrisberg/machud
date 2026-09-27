@@ -1,0 +1,39 @@
+#!/bin/zsh
+# machud — command-line control of the running MacHUD app.
+#   machud <command> [key=value ...]     talk to the running app (JSON out)
+#   machud help                          list commands the running app accepts
+#   machud --help                        usage + full API reference
+#   machud --launch                      start the app if it is not running
+# MACHUD_APP points at a specific binary; MACHUD_SOCKET at a specific socket.
+set -euo pipefail
+
+# Directory of the repo this script lives in, following symlinks.
+repo_dir() { echo "${${(%):-%x}:A:h:h}"; }
+
+find_binary() {
+  local candidates=(
+    "${MACHUD_APP:-}"
+    "/Applications/MacHUD.app/Contents/MacOS/MacHUD"
+    "$HOME/Applications/MacHUD.app/Contents/MacOS/MacHUD"
+    "$(repo_dir)/build/MacHUD.app/Contents/MacOS/MacHUD"
+  )
+  for c in "${candidates[@]}"; do
+    [[ -n "$c" && -x "$c" ]] && { echo "$c"; return; }
+  done
+  echo "machud: cannot find MacHUD.app (set MACHUD_APP=/path/to/MacHUD.app/Contents/MacOS/MacHUD)" >&2
+  exit 1
+}
+
+case "${1:-}" in
+  ""|--help|-h)
+    doc="$(repo_dir)/docs/API.md"
+    if [[ -f "$doc" ]]; then cat "$doc"; else sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//'; fi
+    ;;
+  --launch)
+    bin="$(find_binary)"
+    if "$bin" ctl ping >/dev/null 2>&1; then echo "already running"; else open "${bin%/Contents/MacOS/*}"; sleep 1; "$bin" ctl ping; fi
+    ;;
+  *)
+    exec "$(find_binary)" ctl "$@"
+    ;;
+esac

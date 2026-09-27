@@ -1,0 +1,18 @@
+{
+  "comment": "The MacHUD family, checked out side by side (~/dev/<name>). Paths are relative to this file. Replace OWNER in the git urls before `hud-workspace.sh clone`. kind: swiftpm-app (build.sh, swift test, install.sh), swiftpm-library (swift build, swift test), xcode (status only; build prints the xcodebuild command).",
+  "repos": [
+    {"name": "machud",     "path": ".",             "git": "git@github.com:OWNER/machud.git",     "kind": "swiftpm-app"},
+    {"name": "hudkit",     "path": "../hudkit",     "git": "git@github.com:OWNER/hudkit.git",     "kind": "swiftpm-library"},
+    {"name": "sift",       "path": "../sift",       "git": "git@github.com:OWNER/sift.git",       "kind": "swiftpm-app"},
+    {"name": "stash",      "path": "../stash",      "git": "git@github.com:OWNER/stash.git",      "kind": "swiftpm-app"},
+    {"name": "scratch",    "path": "../scratch",    "git": "git@github.com:OWNER/scratch.git",    "kind": "swiftpm-app"},
+    {"name": "mechahud",   "path": "../mechahud",   "git": "git@github.com:OWNER/mechahud.git",   "kind": "swiftpm-app"},
+    {"name": "ffmpeghud",  "path": "../ffmpeghud",  "git": "git@github.com:OWNER/ffmpeghud.git",  "kind": "swiftpm-app"},
+    {"name": "magickhud",  "path": "../magickhud",  "git": "git@github.com:OWNER/magickhud.git",  "kind": "swiftpm-app"},
+    {"name": "servershud", "path": "../servershud", "git": "git@github.com:OWNER/servershud.git", "kind": "swiftpm-app"},
+    {"name": "wormhole",   "path": "../wormhole",   "git": "https://github.com/jamesrisberg/wormhole.git",  "kind": "xcode",
+     "project": "wormhole.xcodeproj", "scheme": "wormhole"},
+    {"name": "archibald",  "path": "../archibald",  "git": "https://github.com/jamesrisberg/archibald.git", "kind": "xcode",
+     "project": "archibald/archibald.xcodeproj", "scheme": "archibald"}
+  ]
+}
