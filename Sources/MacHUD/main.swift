@@ -1,0 +1,3 @@
+import MacHUDCore
+
+MacHUDApp.main()

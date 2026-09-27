@@ -1,0 +1,20 @@
+# SwiftPM / Xcode
+.build/
+.swiftpm/
+build/
+*.xcodeproj
+xcuserdata/
+DerivedData/
+
+# Coverage and crash artefacts
+*.profraw
+*.profdata
+
+# macOS
+.DS_Store
+
+# Site: generated on deploy by site/generate.sh
+site/apps.html
+
+# Local notes and task docs (never committed)
+dev/
