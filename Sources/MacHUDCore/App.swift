@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBar: MenuBarManager!
     private var menuHost: MenuHostPublisher!
     private var toolDock: ToolDock!
+    private var voice: VoiceServices!
     private var startup: StartupLoadout?
     private var trustTimer: Timer?
 
@@ -62,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         machud = MacHUDServices(externals: externals, host: hudHost)
         machud.registerControl(control)
         installCatalog()
+        installVoice()
         installMenuBar()
         installToolDock()
         installMenuHost()
@@ -93,6 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         statusMenu.hudSections.append { [weak menuBar] in menuBar?.menuItems() ?? [] }
+        statusMenu.hudSections.append { [weak voice] in voice.map { [$0.menuItem()] } ?? [] }
         statusMenu.hudSections.append { [weak panels] in
             // Sibling apps' panels are in the Apps section below.
             (panels?.panels ?? []).filter { !($0 is ExternalPanel) && !($0 is MenuBarPanel) && !($0 is ToolDock) }.map { p in
@@ -156,6 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension AppDelegate {
     func applicationWillTerminate(_ notification: Notification) {
+        voice?.stop()
         toolDock?.withdraw()
         menuHost?.withdraw()
     }
@@ -299,6 +303,18 @@ extension AppDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak catalog] in
             MainActor.assumeIsolated { _ = catalog?.firstRunIfNeeded() }
         }
+    }
+
+    /// The built-in voice host: MacHUD runs it as a child process (`VoiceHostSupervisor`),
+    /// forwards `voice …` to its socket, and adds the Voice and Brain settings tabs and the
+    /// status menu's Voice submenu.
+    fileprivate func installVoice() {
+        let services = VoiceServices.live()
+        services.openSettings = { [weak machud] tab in machud?.settingsWindow.show(select: tab) }
+        services.registerControl(control)
+        machud.settingsWindow.model.voice = services.settingsModel
+        voice = services
+        services.start()
     }
 
     fileprivate func installToolDock() {

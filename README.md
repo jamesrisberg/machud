@@ -22,6 +22,8 @@ apps that make up the rest of the HUD:
 - **Tool dock**: a Dock-like strip of the sibling apps (**⌃⌥D**).
 - **Parking**: tuck windows off an edge behind a hover orb.
 - **Menu bar**: hide menu bar items behind a separator, Hidden Bar style.
+- **Voice**: MacHUD runs its voice host (dictation and the agent brain) as a helper process,
+  restarts it if it stops, and has Voice and Brain tabs in its settings.
 - **CLI and API**: everything is scriptable through `machud <command>` (JSON over a
   Unix socket). See [docs/API.md](docs/API.md); a Claude Code skill lives in
   `.claude/skills/machud`.
@@ -302,8 +304,11 @@ One JSON object per line in, one out: `{"command": "ping", "args": {}}` →
 ## Settings
 
 - The **settings window** (status menu › Settings…, or `machud settings-window show`)
-  has a tab for MacHUD and one per discovered sibling, rendered from each app's
-  settings schema.
+  has a tab for MacHUD, Voice and Brain tabs for the voice host, and one per discovered
+  sibling, rendered from each app's settings schema.
+- Voice settings live with the voice host: the Voice and Brain tabs, or `machud voice
+  settings get` and `machud voice settings set voice.speakReplies=true`. See
+  [docs/API.md#voice](docs/API.md#voice).
 - MacHUD's own settings over the socket: `machud settings get`, `machud settings set
   gap=12 trigger=option`, `machud settings schema`. Keys: `enabled`, `trigger`
   (shift/option/control/command/always), `gap`, `browser`, `orbsHidden`,
@@ -360,6 +365,10 @@ MACHUD_SOCKET=/tmp/machud-try.sock scripts/machud quit
 | `MACHUD_APP` | The binary the `machud` CLI runs |
 | `MACHUD_FIRST_RUN` | `1`: an isolated copy opens the first-run Apps tab too |
 | `MACHUD_INSTALL_SKIP_GATEKEEPER` | `1`: installs skip the `spctl` check so a dev-signed zip installs. Test-only |
+| `MACHUD_VOICE_SOCKET` | The voice host's socket. An isolated copy without it uses `<MACHUD_SOCKET>-voice.sock` (else `machud-voice.sock` beside `MACHUD_CONFIG`) |
+
+The voice host inherits MacHUD's environment, so `MACHUD_CONFIG`, `MACHUD_NO_HOTKEYS` and the
+voice host's own `MACHUD_VOICE_*` switches reach it.
 
 Setting `MACHUD_SOCKET` or `MACHUD_CONFIG` marks the instance isolated: it does not serve
 the contract socket or show permission prompts. Never `pkill MacHUD`: that

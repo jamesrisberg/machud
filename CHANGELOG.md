@@ -6,6 +6,17 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 
 ## [Unreleased]
 
+### Voice
+- MacHUD runs its voice host as a helper inside the app and keeps it running: it starts with
+  MacHUD, comes back after a crash, and stops when you turn voice off or quit MacHUD.
+- Voice and Brain tabs in the settings window: voice on/off, fn key mode, the agent gesture,
+  the wake word and its sensitivity, the reply voice, spoken replies and a Grok key kept in the
+  Keychain; the brain's runtime, workspace, assistant name, port and tool paths.
+- A Voice submenu in the menu bar menu: Mute/Unmute and Voice Settings….
+- `machud voice state|status|action|settings|secret` drives the voice host from the command
+  line; `machud voice settings set voice.speakReplies=true` changes one setting.
+- MacHUD asks for the microphone, which the voice host uses under MacHUD's permission.
+
 ## [0.1.0] — 2026-09-27
 
 ### Snapping and the layout editor
