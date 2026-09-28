@@ -344,6 +344,196 @@ final class VoiceHostControllerTests: XCTestCase {
         XCTAssertNil(controller.state.card)
     }
 
+    // MARK: Review fixes: one turn at a time, brain loss, mute, speech into the mic
+
+    func testAgentTakeWhileATurnRunsIsRefused() async {
+        let controller = makeController()
+        await startTurn(controller, "first")
+        let approval = AgentApproval(id: "a1", kind: "command", reason: "Run ls")
+        brain.push(status: "approval", approvals: [approval])
+        let starts = dictation.starts.count
+        controller.perform(.start(.agent))
+        XCTAssertEqual(dictation.starts.count, starts)
+        XCTAssertEqual(controller.state.phase, .failed(VoiceHostController.agentBusy))
+        XCTAssertEqual(controller.state.card?.prompt, "first")
+        XCTAssertEqual(controller.state.card?.approval?.id, "a1")
+        XCTAssertEqual(brain.submitted.count, 1)
+        // The running turn is still followed.
+        brain.push(status: "idle", output: "done")
+        XCTAssertEqual(controller.state.card?.reply, "done")
+    }
+
+    func testWakeWhileATurnRunsIsRefused() async {
+        var settings = VoiceHostSettings()
+        settings.voice.wakeWordEnabled = true
+        let controller = makeController(settings)
+        await startTurn(controller)
+        let starts = dictation.starts.count
+        wake.onWake?()
+        XCTAssertEqual(dictation.starts.count, starts)
+        XCTAssertEqual(controller.state.phase, .failed(VoiceHostController.agentBusy))
+    }
+
+    func testFnAlternateWhileATurnRunsPastesInstead() async {
+        let controller = makeController()
+        await startTurn(controller, "first")
+        keys.send(.begin(.primary))
+        keys.send(.retarget(.alternate))
+        XCTAssertTrue(dictation.retargets.isEmpty, "the take stays at the cursor")
+        XCTAssertEqual(controller.state.phase, .listening(.dictation))
+        keys.send(.end)
+        dictation.finish("second")
+        await settled(controller)
+        XCTAssertEqual(brain.submitted.map(\.text), ["first"])
+        XCTAssertEqual(controller.state.phase, .failed(VoiceHostController.agentBusyPasted))
+        XCTAssertEqual(controller.state.card?.prompt, "first")
+    }
+
+    func testCardAndTurnChangeOnlyAfterTheBrainAccepts() async {
+        let controller = makeController()
+        await startTurn(controller, "first")
+        brain.push(status: "idle", output: "one")
+        brain.submitError = AgentSessionError.server(409, "turn already active")
+        await startTurn(controller, "second")
+        XCTAssertEqual(controller.state.card?.prompt, "first")
+        guard case .failed = controller.state.phase else { return XCTFail("\(controller.state.phase)") }
+    }
+
+    func testCancelReachesTheBrainWhileItWorksWithoutOurTurn() async {
+        let controller = makeController()
+        brain.push(status: "running", output: "someone else's", requestId: "other")
+        controller.perform(.cancel)
+        await settled(controller)
+        XCTAssertEqual(brain.cancels, 1)
+    }
+
+    func testAgentTakeRefusedWhileTheBrainWorksOnAnotherRequest() {
+        let controller = makeController()
+        brain.push(status: "running", requestId: "other")
+        controller.perform(.start(.agent))
+        XCTAssertEqual(controller.state.phase, .failed(VoiceHostController.agentBusy))
+        brain.push(status: "idle", requestId: "other")
+        controller.perform(.start(.agent))
+        XCTAssertEqual(controller.state.phase, .listening(.agent))
+    }
+
+    func testBrainTurnedOffMidTurnSettles() async {
+        let controller = makeController()
+        await startTurn(controller)
+        var settings = controller.settings
+        settings.brainEnabled = false
+        controller.apply(settings)
+        XCTAssertEqual(controller.state.phase, .idle)
+        brain.push(status: "idle", output: "late")
+        XCTAssertEqual(controller.state.card?.reply, "")
+    }
+
+    func testBrainStoppingMidTurnSettles() async {
+        let controller = makeController()
+        await startTurn(controller)
+        brain.onStopped?()
+        XCTAssertEqual(controller.state.phase, .idle)
+    }
+
+    func testFailedCancelSettles() async {
+        let controller = makeController()
+        await startTurn(controller)
+        brain.cancelError = AgentSessionError.server(500, "gone")
+        controller.perform(.cancel)
+        await settled(controller)
+        XCTAssertEqual(controller.state.phase, .idle)
+        controller.perform(.start(.agent))
+        XCTAssertEqual(controller.state.phase, .listening(.agent), "the host is not wedged")
+    }
+
+    func testMuteCancelsTheTake() {
+        let controller = makeController()
+        controller.perform(.start(.agent))
+        controller.perform(.setMuted(true))
+        XCTAssertEqual(dictation.cancels, 1)
+        XCTAssertEqual(controller.state.phase, .idle)
+    }
+
+    func testKeyChangeCancelsAnFnTake() {
+        let controller = makeController()
+        keys.send(.begin(.primary))
+        var settings = controller.settings
+        settings.keyMode = .toggle
+        controller.apply(settings)
+        XCTAssertEqual(dictation.cancels, 1)
+    }
+
+    func testKeyChangeLeavesASocketTake() {
+        let controller = makeController()
+        controller.perform(.start(.dictation))
+        var settings = controller.settings
+        settings.agentGesture = false
+        controller.apply(settings)
+        XCTAssertEqual(dictation.cancels, 0)
+        XCTAssertEqual(controller.state.phase, .listening(.dictation))
+    }
+
+    func testReplyIsNotSpokenIntoANewTake() async {
+        var settings = VoiceHostSettings()
+        settings.voice.speakReplies = true
+        let controller = makeController(settings)
+        await startTurn(controller)
+        keys.send(.begin(.primary))
+        brain.push(status: "running", output: "Streaming while you talk.")
+        XCTAssertEqual(speaker.spoken, "")
+        keys.send(.end)
+        dictation.finish("note")
+        brain.push(status: "idle", output: "Streaming while you talk. Done.")
+        XCTAssertEqual(speaker.spoken, "")
+        XCTAssertEqual(controller.state.card?.reply, "Streaming while you talk. Done.")
+    }
+
+    func testAlternateWithTheBrainOffPastesInstead() {
+        var settings = VoiceHostSettings()
+        settings.brainEnabled = false
+        let controller = makeController(settings)
+        keys.send(.begin(.primary))
+        keys.send(.retarget(.alternate))
+        XCTAssertTrue(dictation.retargets.isEmpty)
+        keys.send(.end)
+        dictation.finish("remember milk")
+        XCTAssertEqual(controller.state.phase, .failed(VoiceHostController.brainOffPasted))
+    }
+
+    func testAgentTextPastedWhenTheBrainWentOffDuringTheTake() {
+        let controller = makeController()
+        controller.perform(.start(.agent))
+        controller.perform(.stop)
+        var settings = controller.settings
+        settings.brainEnabled = false
+        controller.apply(settings)
+        dictation.finish("remember milk")
+        XCTAssertEqual(dictation.inserted, ["remember milk"])
+        XCTAssertEqual(controller.state.phase, .failed(VoiceHostController.brainOffPasted))
+    }
+
+    func testFailureShowsForThreeSeconds() {
+        dictation.unavailable = .modelMissing(recordingKept: false)
+        let controller = makeController()
+        controller.perform(.start(.dictation))
+        clock.advance(to: 2.9)
+        XCTAssertNotEqual(controller.state.phase, .idle)
+        clock.advance(to: 3)
+        XCTAssertEqual(controller.state.phase, .idle)
+    }
+
+    func testDisabledOrMutedRefusesSocketTakes() {
+        var settings = VoiceHostSettings()
+        settings.enabled = false
+        let controller = makeController(settings)
+        XCTAssertEqual(controller.refusal(for: .dictation), VoiceHostController.voiceOff)
+        settings.enabled = true
+        controller.apply(settings)
+        XCTAssertNil(controller.refusal(for: .agent))
+        controller.perform(.setMuted(true))
+        XCTAssertEqual(controller.refusal(for: .agent), VoiceHostController.voiceMuted)
+    }
+
     // MARK: Speech
 
     private func speakingSettings() -> VoiceHostSettings {

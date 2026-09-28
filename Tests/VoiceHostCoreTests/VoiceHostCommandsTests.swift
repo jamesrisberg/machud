@@ -91,6 +91,18 @@ final class VoiceHostCommandsTests: XCTestCase {
         XCTAssertEqual(dictation.starts.last, .caller)
     }
 
+    func testTakesRefusedWhileMutedOrOff() {
+        _ = commands.handle("action", ["name": "mute"])
+        let muted = commands.handle("action", ["name": "dictate"])
+        XCTAssertEqual(muted["ok"] as? Bool, false)
+        XCTAssertEqual(muted["error"] as? String, VoiceHostController.voiceMuted)
+        _ = commands.handle("action", ["name": "unmute"])
+        _ = commands.handle("settings", ["action": "set", "settings": #"{"enabled":false}"#])
+        let off = commands.handle("action", ["name": "ask"])
+        XCTAssertEqual(off["error"] as? String, VoiceHostController.voiceOff)
+        XCTAssertTrue(dictation.starts.isEmpty)
+    }
+
     func testApproveNeedsAnID() async {
         XCTAssertEqual(commands.handle("action", ["name": "approve"])["ok"] as? Bool, false)
         XCTAssertEqual(commands.handle("action", ["name": "deny", "id": "a"])["ok"] as? Bool, true)
@@ -100,13 +112,10 @@ final class VoiceHostCommandsTests: XCTestCase {
     }
 
     func testSecretsAreWrittenNeverReturned() {
-        var changed = 0
-        commands.onSecretsChanged = { changed += 1 }
         let reply = commands.handle("secret", ["_": "set", "name": "grok", "value": "xai-123"])
         XCTAssertEqual(reply["ok"] as? Bool, true)
         XCTAssertEqual(secrets.string(forKey: VoiceSecrets.grokAPIKey), "xai-123")
         XCTAssertFalse("\(reply)".contains("xai-123"))
-        XCTAssertEqual(changed, 1)
         XCTAssertEqual(commands.handle("secret", ["action": "clear", "name": "grok"])["ok"] as? Bool, true)
         XCTAssertNil(secrets.string(forKey: VoiceSecrets.grokAPIKey))
         XCTAssertEqual(commands.handle("secret", ["_": "set", "name": "openai", "value": "x"])["ok"] as? Bool, false)

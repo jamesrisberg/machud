@@ -12,6 +12,7 @@ final class BrainConnection: BrainDriving {
 
     var onAvailabilityChanged: ((Bool) -> Void)?
     var onSnapshot: ((AgentSessionSnapshot) -> Void)?
+    var onStopped: (() -> Void)?
 
     private let service: BrainService
     private var client: AgentSessionClient?
@@ -28,7 +29,10 @@ final class BrainConnection: BrainDriving {
         serviceObserver = service.service.$state.sink { [weak self] state in
             // `$state` publishes before the change lands; act on the new value.
             guard state != .running else { return }
-            MainActor.assumeIsolated { self?.dropClient() }
+            MainActor.assumeIsolated {
+                self?.dropClient()
+                self?.onStopped?()
+            }
         }
     }
 

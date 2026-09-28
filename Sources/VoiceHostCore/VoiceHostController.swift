@@ -12,6 +12,10 @@ import VoiceKit
 /// alternate gesture; the orb, the wake word and the socket's `ask` start an agent take that
 /// ends on a click, `stop`, or a `SilenceEndpointer`. An agent take's text becomes a brain
 /// turn whose snapshots fill the card and, with `voice.speakReplies`, are spoken as they stream.
+///
+/// One turn at a time: the companion refuses a second one, so while the brain works an agent
+/// take is refused, and a take moved to the agent then (or while the brain is off) is typed at
+/// the cursor instead.
 @MainActor
 public final class VoiceHostController: VoiceHostActing {
     public private(set) var state = VoiceHostState() {
@@ -33,8 +37,13 @@ public final class VoiceHostController: VoiceHostActing {
     var pendingWork: Task<Void, Never>?
 
     /// How long a failure shows before the orb rests again.
-    static let failureDisplay: TimeInterval = 4
+    static let failureDisplay: TimeInterval = 3
     static let brainOff = "The brain is off"
+    static let brainOffPasted = "The brain is off — pasted instead"
+    static let agentBusy = "The agent is still working"
+    static let agentBusyPasted = "The agent is still working — pasted instead"
+    static let voiceOff = "Voice is off"
+    static let voiceMuted = "Voice is muted"
     static let modelMissing = "Speech model not installed"
     /// Progress lines kept on the card.
     static let progressLimit = 4
@@ -54,6 +63,10 @@ public final class VoiceHostController: VoiceHostActing {
         var mode: VoiceMode
         /// Hands-free takes only.
         var endpointer: SilenceEndpointer?
+        /// Started by the fn key: a change to the key setup ends it.
+        var fromKeys = false
+        /// The take was kept at the cursor instead of going to the agent; shown when it ends.
+        var pastedNotice: String?
     }
 
     private struct Turn {
@@ -76,12 +89,18 @@ public final class VoiceHostController: VoiceHostActing {
     /// The most recent take; only its outcome moves the phase.
     private var latestTakeID: UUID?
     private var turn: Turn?
+    /// A turn submitted and not yet accepted.
+    private var submitting: String?
+    /// The brain's latest snapshot, whoever's request it is.
+    private var lastSnapshot: AgentSessionSnapshot?
     private var runningKeys: KeySetup?
     private var runningWake: VoiceSettings?
     /// The brain configuration last applied; `.none` until the first apply.
     private var appliedBrain: BrainServiceConfiguration??
     private var appliedVoice: VoiceSettings?
     private var failureToken = UUID()
+    /// The notice of the take being transcribed.
+    private var pendingNotice: String?
     private var started = false
 
     /// - Parameters:
@@ -114,13 +133,14 @@ public final class VoiceHostController: VoiceHostActing {
             state.brainAvailable = available && brainEnabled
         }
         brain?.onSnapshot = { [weak self] in self?.handle($0) }
+        brain?.onStopped = { [weak self] in self?.brainLost() }
         speaker?.onFinished = { [weak self] in
             guard let self, state.phase == .speaking else { return }
             state.phase = .idle
         }
         wake?.onWake = { [weak self] in
             guard let self else { return }
-            startTake(.agent, handsFree: true)
+            startTake(.agent, handsFree: true, fromKeys: false)
             // The listener stays quiet after a wake; with no take to pause it, listen again now.
             if take == nil { restartWake() }
         }
@@ -152,11 +172,11 @@ public final class VoiceHostController: VoiceHostActing {
             if isSpeaking { return stopSpeech() }
             if take != nil { return dictation.stop() }
             switch state.phase {
-            case .idle, .failed: startTake(.agent, handsFree: true)
+            case .idle, .failed: startTake(.agent, handsFree: true, fromKeys: false)
             default: break
             }
         case .start(let mode):
-            startTake(mode, handsFree: mode == .agent)
+            startTake(mode, handsFree: mode == .agent, fromKeys: false)
         case .stop:
             if take != nil { dictation.stop() } else if isSpeaking { stopSpeech() }
         case .cancel:
@@ -174,26 +194,58 @@ public final class VoiceHostController: VoiceHostActing {
             if muted {
                 stopSpeech()
                 turn?.speaks = false
+                cancelTake()
             }
             refreshKeys()
             refreshWake()
         }
     }
 
+    /// Why a socket `dictate` or `ask` would not start, or nil.
+    func refusal(for mode: VoiceMode) -> String? {
+        if !settings.enabled { return Self.voiceOff }
+        if state.muted { return Self.voiceMuted }
+        return nil
+    }
+
     private func cancel() {
         if take != nil || dictation.isCapturing {
-            dictation.cancel()
-            if take != nil {
-                // The session reported nothing (no take was capturing after all).
-                take = nil
-                settle(.idle)
-            }
-        } else if turn != nil, let brain {
+            cancelTake()
+        } else if agentBusy, let brain {
             stopSpeech()
-            pendingWork = Task { try? await brain.cancel() }
+            pendingWork = Task { [weak self] in
+                do {
+                    try await brain.cancel()
+                } catch {
+                    // The brain is gone or refused: nothing will report the turn's end.
+                    self?.brainLost()
+                }
+            }
         } else if isSpeaking {
             stopSpeech()
         }
+    }
+
+    private func cancelTake() {
+        guard take != nil || dictation.isCapturing else { return }
+        dictation.cancel()
+        if take != nil {
+            // The session reported nothing (no take was capturing after all).
+            take = nil
+            refreshWake()
+            settle(.idle)
+        }
+    }
+
+    /// The brain went away (stopped, restarted, or a cancel failed): no snapshot will end the
+    /// turn, so it ends here.
+    private func brainLost() {
+        lastSnapshot = nil
+        submitting = nil
+        guard turn != nil else { return }
+        turn = nil
+        speaker?.stop()
+        if take == nil, [.working, .awaitingApproval, .speaking].contains(state.phase) { settle(.idle) }
     }
 
     // MARK: - Takes
@@ -201,11 +253,20 @@ public final class VoiceHostController: VoiceHostActing {
     /// The brain runs only while voice is on; `enabled` off leaves the host idle.
     private var brainEnabled: Bool { settings.enabled && settings.brainEnabled && brain != nil }
 
-    private func startTake(_ mode: VoiceMode, handsFree: Bool) {
+    /// A turn is submitted, running or waiting on an approval (ours or another client's).
+    private var agentBusy: Bool {
+        turn != nil || submitting != nil || lastSnapshot?.isWorking == true
+    }
+
+    private func startTake(_ mode: VoiceMode, handsFree: Bool, fromKeys: Bool) {
         stopSpeech()
+        // A reply still streaming is never spoken into the open microphone.
+        turn?.speaks = false
+        if !settings.enabled { return fail(Self.voiceOff) }
         if mode == .agent, !brainEnabled { return fail(Self.brainOff) }
+        if mode == .agent, agentBusy { return fail(Self.agentBusy) }
         guard take == nil, !dictation.isCapturing else { return }
-        take = Take(id: nil, mode: mode, endpointer: handsFree ? SilenceEndpointer() : nil)
+        take = Take(id: nil, mode: mode, endpointer: handsFree ? SilenceEndpointer() : nil, fromKeys: fromKeys)
         refreshWake()
         switch dictation.start(mode == .agent ? .caller : .cursor) {
         case .started(let id), .resumed(let id):
@@ -224,9 +285,18 @@ public final class VoiceHostController: VoiceHostActing {
         // Any fn press interrupts a reply being spoken.
         stopSpeech()
         switch intent {
-        case .begin(.primary): startTake(.dictation, handsFree: false)
-        case .begin(.alternate): startTake(.agent, handsFree: false)
-        case .retarget(let target): dictation.retarget(target == .alternate ? .caller : .cursor)
+        case .begin(.primary): startTake(.dictation, handsFree: false, fromKeys: true)
+        case .begin(.alternate): startTake(.agent, handsFree: false, fromKeys: true)
+        case .retarget(.alternate):
+            // The agent cannot take it: keep the words at the cursor and say why at the end.
+            if !brainEnabled {
+                take?.pastedNotice = Self.brainOffPasted
+            } else if agentBusy {
+                take?.pastedNotice = Self.agentBusyPasted
+            } else {
+                dictation.retarget(.caller)
+            }
+        case .retarget(.primary): dictation.retarget(.cursor)
         case .end: if take != nil { dictation.stop() }
         case .discard: dictation.cancel()
         }
@@ -256,7 +326,10 @@ public final class VoiceHostController: VoiceHostActing {
             guard isCurrent else { return }
             state.partialTranscript = text
         case .transcribing:
-            guard isCurrent, let mode = take?.mode else { return }
+            guard isCurrent, let current = take else { return }
+            let mode = current.mode
+            // Keep the take's notice for its outcome.
+            pendingNotice = current.pastedNotice
             take = nil
             var next = state
             next.phase = .transcribing(mode)
@@ -264,13 +337,16 @@ public final class VoiceHostController: VoiceHostActing {
             state = next
             refreshWake()
         case .finished(let text, let destination):
+            let notice = isCurrent ? take?.pastedNotice : pendingNotice
+            pendingNotice = nil
             endCapture(ifCurrent: isCurrent)
             if destination == .caller {
                 submit(text, isLatest: isLatest)
             } else if isLatest {
-                settle(.idle)
+                if let notice { fail(notice) } else { settle(.idle) }
             }
         case .failed(let failure):
+            pendingNotice = nil
             endCapture(ifCurrent: isCurrent)
             guard isLatest else { return }
             if let message = Self.message(for: failure) { fail(message) } else { settle(.idle) }
@@ -323,30 +399,48 @@ public final class VoiceHostController: VoiceHostActing {
             if isLatest { settle(.idle) }
             return
         }
-        guard brainEnabled, let brain else { return fail(Self.brainOff) }
+        // The brain went off, or another turn started, while this take was recording.
+        guard brainEnabled, let brain else { return paste(prompt, notice: Self.brainOffPasted) }
+        guard !agentBusy else { return paste(prompt, notice: Self.agentBusyPasted) }
         stopSpeech()
         let requestId = UUID().uuidString
-        turn = Turn(requestId: requestId, speaks: settings.voice.speakReplies && !state.muted)
-        var next = state
-        next.card = VoiceCard(prompt: prompt)
-        if isLatest {
-            next.phase = .working
-            next.inputLevel = 0
-            next.partialTranscript = ""
-        }
-        state = next
+        submitting = requestId
         pendingWork = Task { [weak self] in
             do {
                 try await brain.submit(prompt, requestId: requestId)
+                self?.accepted(prompt, requestId: requestId, isLatest: isLatest)
             } catch {
-                guard let self, turn?.requestId == requestId else { return }
-                turn = nil
+                guard let self, submitting == requestId else { return }
+                submitting = nil
                 fail(error.localizedDescription)
             }
         }
     }
 
+    /// The brain took the turn: the card and the turn are ours from here.
+    private func accepted(_ prompt: String, requestId: String, isLatest: Bool) {
+        guard submitting == requestId else { return }
+        submitting = nil
+        turn = Turn(requestId: requestId, speaks: settings.voice.speakReplies && !state.muted && take == nil)
+        var next = state
+        next.card = VoiceCard(prompt: prompt)
+        if isLatest, take == nil {
+            next.phase = .working
+            next.inputLevel = 0
+            next.partialTranscript = ""
+        }
+        state = next
+        // A snapshot for this request may have arrived before the reply did.
+        if let lastSnapshot, lastSnapshot.requestId == requestId { handle(lastSnapshot) }
+    }
+
+    private func paste(_ text: String, notice: String) {
+        dictation.insert(text)
+        fail(notice)
+    }
+
     private func handle(_ snapshot: AgentSessionSnapshot) {
+        lastSnapshot = snapshot
         guard var turn, snapshot.requestId == turn.requestId else { return }
         var next = state
         if !turn.cardDismissed {
@@ -362,7 +456,7 @@ public final class VoiceHostController: VoiceHostActing {
             }
             next.card = card
         }
-        if turn.speaks, let speaker, snapshot.output.count > turn.spoken {
+        if turn.speaks, take == nil, let speaker, snapshot.output.count > turn.spoken {
             speaker.append(String(snapshot.output.dropFirst(turn.spoken)))
             turn.spoken = snapshot.output.count
         }
@@ -426,6 +520,8 @@ public final class VoiceHostController: VoiceHostActing {
             ? KeySetup(mode: settings.keyMode == .toggle ? .toggle : .hold, alternateEnabled: settings.agentGesture)
             : nil
         guard wanted != runningKeys else { return }
+        // The new key source cannot end a take the old one began.
+        if take?.fromKeys == true { cancelTake() }
         if runningKeys != nil { keys.stop() }
         runningKeys = wanted
         guard let wanted else { return }
@@ -462,5 +558,8 @@ public final class VoiceHostController: VoiceHostActing {
         guard let brain, appliedBrain != .some(wanted) else { return }
         appliedBrain = .some(wanted)
         brain.configure(wanted)
+        // Turned off: the companion's turn ends with its process. (A restart reports through
+        // `onStopped`.)
+        if wanted == nil { brainLost() }
     }
 }

@@ -53,10 +53,36 @@ final class VoiceHostSettingsStoreTests: XCTestCase {
         XCTAssertTrue(VoiceHostEnvironment(environment: ["MACHUD_NO_HOTKEYS": ""]).noHotkeys)
     }
 
+    func testKeychainServiceCanBeIsolated() {
+        XCTAssertEqual(VoiceHostEnvironment(environment: [:]).keychainService, "com.jrisberg.machud.voice")
+        XCTAssertEqual(VoiceHostEnvironment(environment: ["MACHUD_VOICE_KEYCHAIN_SERVICE": "test.voice"]).keychainService,
+                       "test.voice")
+        XCTAssertEqual(VoiceHostEnvironment(environment: ["MACHUD_VOICE_KEYCHAIN_SERVICE": ""]).keychainService,
+                       "com.jrisberg.machud.voice")
+    }
+
     func testEnvironmentDefaults() {
         let env = VoiceHostEnvironment(environment: [:])
         XCTAssertTrue(env.configDirectory.path.hasSuffix("/.config/machud"))
         XCTAssertTrue(env.socketPath.hasSuffix("/machud-voice.sock"))
         XCTAssertFalse(env.noMicrophone || env.noHotkeys || env.noBrain || env.parentPipe)
+    }
+}
+
+@MainActor
+final class DictationLeftoversTests: XCTestCase {
+    func testLeftoverRecordingsAndMarkerAreRemoved() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("voice-dictation-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: dir) }
+        let recordings = dir.appendingPathComponent("recordings")
+        try fm.createDirectory(at: recordings, withIntermediateDirectories: true)
+        try Data("wav".utf8).write(to: recordings.appendingPathComponent("recording-1.wav"))
+        try Data("{}".utf8).write(to: dir.appendingPathComponent(".recording-in-progress.json"))
+        try Data("{}".utf8).write(to: dir.appendingPathComponent("config.json"))
+        SpeakFreeDictation.removeLeftovers(in: dir)
+        XCTAssertFalse(fm.fileExists(atPath: recordings.path))
+        XCTAssertFalse(fm.fileExists(atPath: dir.appendingPathComponent(".recording-in-progress.json").path))
+        XCTAssertTrue(fm.fileExists(atPath: dir.appendingPathComponent("config.json").path))
     }
 }
