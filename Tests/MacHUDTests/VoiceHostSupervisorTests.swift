@@ -50,11 +50,12 @@ final class VoiceHostSupervisorTests: XCTestCase {
         enabled = true
     }
 
-    private func makeSupervisor(helper: URL? = nil, environment: [String: String] = ["PATH": "/usr/bin"]) -> VoiceHostSupervisor {
+    private func makeSupervisor(helper: URL? = nil, environment: [String: String] = ["PATH": "/usr/bin"],
+                                isolated: Bool = false) -> VoiceHostSupervisor {
         let supervisor = VoiceHostSupervisor(
             launcher: launcher, helper: { [helper = helper ?? self.helper] in helper },
             isEnabled: { [unowned self] in self.enabled },
-            socketPath: "/tmp/voice-test.sock", environment: environment,
+            socketPath: "/tmp/voice-test.sock", environment: environment, isolated: isolated,
             schedule: { [unowned self] delay, work in self.scheduled.append((delay, work)) })
         supervisor.now = { [unowned self] in self.clock }
         return supervisor
@@ -84,6 +85,32 @@ final class VoiceHostSupervisorTests: XCTestCase {
         XCTAssertEqual(supervisor.status, .running(pid: 1000))
     }
 
+    func testTheDefaultInstanceRunsTheHostLive() {
+        makeSupervisor().start()
+        let env = launcher.launches[0].environment
+        for key in ["MACHUD_VOICE_NO_MIC", "MACHUD_VOICE_NO_BRAIN", "MACHUD_VOICE_HEADLESS", "MACHUD_VOICE_KEYCHAIN_SERVICE"] {
+            XCTAssertNil(env[key], key)
+        }
+    }
+
+    func testAnIsolatedInstanceKeepsTheHostOffTheMicBrainScreenAndKeychain() {
+        makeSupervisor(isolated: true).start()
+        let env = launcher.launches[0].environment
+        XCTAssertEqual(env["MACHUD_VOICE_NO_MIC"], "1")
+        XCTAssertEqual(env["MACHUD_VOICE_NO_BRAIN"], "1")
+        XCTAssertEqual(env["MACHUD_VOICE_HEADLESS"], "1")
+        XCTAssertEqual(env["MACHUD_VOICE_KEYCHAIN_SERVICE"], VoiceHostSupervisor.isolatedKeychainService)
+    }
+
+    func testAnIsolatedInstanceCanOptIntoALiveHost() {
+        makeSupervisor(environment: ["MACHUD_VOICE_LIVE": "1", "MACHUD_VOICE_KEYCHAIN_SERVICE": "my.test"], isolated: true).start()
+        let env = launcher.launches[0].environment
+        XCTAssertNil(env["MACHUD_VOICE_NO_MIC"])
+        XCTAssertNil(env["MACHUD_VOICE_NO_BRAIN"])
+        XCTAssertNil(env["MACHUD_VOICE_HEADLESS"])
+        XCTAssertEqual(env["MACHUD_VOICE_KEYCHAIN_SERVICE"], "my.test", "an explicit service wins; never the real one by default")
+    }
+
     func testDisabledIsNotStarted() {
         enabled = false
         let supervisor = makeSupervisor()
@@ -94,7 +121,7 @@ final class VoiceHostSupervisorTests: XCTestCase {
 
     func testMissingHelperIsReported() {
         let supervisor = VoiceHostSupervisor(launcher: launcher, helper: { nil }, isEnabled: { true },
-                                             socketPath: "/tmp/v.sock", environment: [:], schedule: { _, _ in })
+                                             socketPath: "/tmp/v.sock", environment: [:], isolated: false, schedule: { _, _ in })
         supervisor.start()
         XCTAssertTrue(launcher.launches.isEmpty)
         XCTAssertEqual(supervisor.status, .notInstalled)
@@ -143,6 +170,7 @@ final class VoiceHostSupervisorTests: XCTestCase {
         settle()
         XCTAssertTrue(scheduled.isEmpty)
         guard case .failed = supervisor.status else { return XCTFail("status \(supervisor.status)") }
+        XCTAssertTrue(supervisor.canRestart)
         supervisor.start()
         XCTAssertEqual(launcher.launches.count, VoiceHostSupervisor.maxQuickRestarts + 2, "start() tries again")
     }
@@ -152,6 +180,7 @@ final class VoiceHostSupervisorTests: XCTestCase {
         supervisor.start()
         supervisor.stop()
         settle()
+        XCTAssertTrue(supervisor.canRestart)
         XCTAssertTrue(launcher.children[0].terminated)
         XCTAssertTrue(scheduled.isEmpty)
         XCTAssertEqual(supervisor.status, .stopped)
@@ -259,6 +288,43 @@ final class VoiceHostPathsTests: XCTestCase {
 /// The real launcher against a shell script standing in for the helper.
 @MainActor
 final class ChildProcessLauncherTests: XCTestCase {
+    private func script(_ body: String) throws -> URL {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("voice-child-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("fake-helper")
+        try Data("#!/bin/sh\n\(body)\n".utf8).write(to: url)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        return url
+    }
+
+    private func launchAndTerminate(_ body: String, grace: TimeInterval) throws -> (status: Int32?, seconds: TimeInterval) {
+        let exited = expectation(description: "exited")
+        let status = LockedBox<Int32?>(nil)
+        let child = try ChildProcessLauncher(grace: grace).launch(try script(body), environment: [:]) {
+            status.value = $0
+            exited.fulfill()
+        }
+        _ = spin(until: { false }, timeout: 0.2)
+        let start = Date()
+        child.terminate()
+        wait(for: [exited], timeout: 10)
+        return (status.value, Date().timeIntervalSince(start))
+    }
+
+    func testTerminateLetsTheHostExitOnEOFFirst() throws {
+        // Exits cleanly on end-of-file; a SIGTERM would read as status 15.
+        let r = try launchAndTerminate("cat > /dev/null\nexit 0", grace: 2)
+        XCTAssertEqual(r.status, 0)
+        XCTAssertLessThan(r.seconds, 1.5)
+    }
+
+    func testTerminateSignalsAHostThatIgnoresEOF() throws {
+        let r = try launchAndTerminate("exec sleep 30", grace: 0.3)
+        XCTAssertEqual(r.status, SIGTERM)
+        XCTAssertGreaterThanOrEqual(r.seconds, 0.3)
+    }
+
     func testChildSeesEOFWhenTheParentLetsGo() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("voice-child-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
