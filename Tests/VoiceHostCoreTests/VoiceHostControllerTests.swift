@@ -111,11 +111,26 @@ final class VoiceHostControllerTests: XCTestCase {
         XCTAssertTrue(wake.listening)
     }
 
-    func testDisabledVoiceStartsNoKeys() {
+    func testDisabledVoiceIdlesUntilTurnedOn() {
         var settings = VoiceHostSettings()
         settings.enabled = false
-        _ = makeController(settings)
+        settings.voice.wakeWordEnabled = true
+        let controller = makeController(settings)
         XCTAssertTrue(keys.starts.isEmpty)
+        XCTAssertTrue(wake.starts.isEmpty)
+        XCTAssertEqual(brain.configurations.count, 1)
+        XCTAssertNil(brain.configurations[0])
+        XCTAssertEqual(controller.state.phase, .idle)
+        settings.enabled = true
+        controller.apply(settings)
+        XCTAssertTrue(keys.running)
+        XCTAssertTrue(wake.listening)
+        XCTAssertNotNil(brain.configurations.last ?? nil)
+        settings.enabled = false
+        controller.apply(settings)
+        XCTAssertFalse(keys.running)
+        XCTAssertFalse(wake.listening)
+        XCTAssertNil(brain.configurations.last ?? nil)
     }
 
     func testChangingKeyModeRestartsTheKeys() {
