@@ -102,9 +102,9 @@ final class VoiceHost {
         terminationSource = source
     }
 
-    /// The orb sits on the screen with the notch, else the menu-bar screen.
+    /// The orb sits on the primary (menu-bar) screen; see `VoiceOrbScreen`.
     private func updateFullScreen() {
-        let screen = NSScreen.screens.first { $0.safeAreaInsets.top > 0 } ?? NSScreen.screens.first
+        let screen = VoiceOrbScreen.current()
         controller.setHiddenForFullScreen(screen.map { fullscreen.isFullScreen(screenID: HUDScreenSnapshot.id(for: $0)) } ?? false)
     }
 
