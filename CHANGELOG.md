@@ -9,6 +9,15 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 ### Voice
 - MacHUD runs its voice host as a helper inside the app and keeps it running: it starts with
   MacHUD, comes back after a crash, and stops when you turn voice off or quit MacHUD.
+- A small orb sits under the camera housing (or hangs from the menu bar on a screen without
+  one), always visible: it stretches into a waveform while you dictate, pulses while the agent
+  is listening, shows a subtle motion while it is working, and grows a reply card underneath
+  with the agent's answer and any approval it needs. Right-click it for Mute/Unmute and Dismiss;
+  hover the resting orb to peek the last reply.
+- Talk to it three ways: hold the fn key to dictate at the cursor, or tap the agent gesture while
+  holding to send the words to the agent instead; click the orb, or say the wake phrase once it
+  is turned on, to start a hands-free turn with the agent that listens until you stop talking or
+  click again; the agent's reply is read aloud when spoken replies are on.
 - Voice and Brain tabs in the settings window: voice on/off, fn key mode, the agent gesture,
   the wake word and its sensitivity, the reply voice, spoken replies and a Grok key kept in the
   Keychain; the brain's runtime, workspace, assistant name, port and tool paths.
