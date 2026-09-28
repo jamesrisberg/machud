@@ -97,22 +97,11 @@ enum OrbLayout {
         }
     }
 
-    /// The shape as a path in a top-down (flipped) rect.
+    /// The shape as a path in a top-down (flipped) rect: `HUDNotchGeometry`'s notch-body path
+    /// (the same shape SpeakFree's `OverlayLayout.notchBodyPath` draws), which the orb also uses
+    /// for its round resting state and every point of the morph, not only the flush waveform.
     static func path(in rect: CGRect, topRadius: CGFloat, bottomRadius: CGFloat) -> CGPath {
-        let path = CGMutablePath()
-        let (minX, maxX, minY, maxY) = (rect.minX, rect.maxX, rect.minY, rect.maxY)
-        path.move(to: CGPoint(x: minX, y: minY + topRadius))
-        if topRadius > 0 {
-            path.addArc(tangent1End: CGPoint(x: minX, y: minY), tangent2End: CGPoint(x: minX + topRadius, y: minY), radius: topRadius)
-            path.addArc(tangent1End: CGPoint(x: maxX, y: minY), tangent2End: CGPoint(x: maxX, y: minY + topRadius), radius: topRadius)
-        } else {
-            path.addLine(to: CGPoint(x: minX, y: minY))
-            path.addLine(to: CGPoint(x: maxX, y: minY))
-        }
-        path.addArc(tangent1End: CGPoint(x: maxX, y: maxY), tangent2End: CGPoint(x: maxX - bottomRadius, y: maxY), radius: bottomRadius)
-        path.addArc(tangent1End: CGPoint(x: minX, y: maxY), tangent2End: CGPoint(x: minX, y: maxY - bottomRadius), radius: bottomRadius)
-        path.closeSubpath()
-        return path
+        HUDNotchGeometry.bodyPath(in: rect, topRadius: topRadius, bottomRadius: bottomRadius)
     }
 
     static func lerp(_ a: CGFloat, _ b: CGFloat, _ t: CGFloat) -> CGFloat { a + (b - a) * t }
