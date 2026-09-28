@@ -112,3 +112,10 @@ public enum VoiceHostAction: Codable, Equatable, Sendable {
 public protocol VoiceHostActing: AnyObject {
     func perform(_ action: VoiceHostAction)
 }
+
+/// Draws the voice host. The controller calls `render` on every state change; the presenter
+/// sends user input back through the `VoiceHostActing` it was given.
+@MainActor
+public protocol VoiceHostPresenting: AnyObject {
+    func render(_ state: VoiceHostState)
+}
