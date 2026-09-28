@@ -1,3 +1,4 @@
+import SpeakFreeLib
 import XCTest
 @testable import VoiceHostCore
 
@@ -71,6 +72,12 @@ final class VoiceHostSettingsStoreTests: XCTestCase {
 
 @MainActor
 final class DictationLeftoversTests: XCTestCase {
+    func testRetentionKeepsNothing() {
+        let config = SpeakFreeDictation.retentionConfig()
+        XCTAssertEqual(config.saveRecordings?.value, false)
+        XCTAssertNil(config.preserveAllRecordings)
+    }
+
     func testLeftoverRecordingsAndMarkerAreRemoved() throws {
         let fm = FileManager.default
         let dir = fm.temporaryDirectory.appendingPathComponent("voice-dictation-\(UUID().uuidString)")
