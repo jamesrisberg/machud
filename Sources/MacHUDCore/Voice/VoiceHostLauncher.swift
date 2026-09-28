@@ -24,24 +24,35 @@ struct ChildProcessLauncher: VoiceHostLaunching {
     final class Child: VoiceHostChild {
         let process: Process
         private let parentPipe: Pipe
+        private let grace: TimeInterval
 
-        init(process: Process, parentPipe: Pipe) {
+        init(process: Process, parentPipe: Pipe, grace: TimeInterval) {
             self.process = process
             self.parentPipe = parentPipe
+            self.grace = grace
         }
 
         var pid: Int32 { process.processIdentifier }
 
+        /// Closes the parent pipe so the host shuts down on its own (stopping the brain and
+        /// releasing the microphone), and sends SIGTERM only if it is still running `grace`
+        /// seconds later.
         func terminate() {
             closeParentPipe()
-            if process.isRunning { process.terminate() }
+            let process = self.process
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + grace) {
+                if process.isRunning { process.terminate() }
+            }
         }
 
         /// The helper reads EOF, as when MacHUD dies.
         func closeParentPipe() { try? parentPipe.fileHandleForWriting.close() }
     }
 
-    nonisolated init() {}
+    /// How long `terminate()` waits for the host to exit on end-of-file before SIGTERM.
+    let grace: TimeInterval
+
+    nonisolated init(grace: TimeInterval = 2) { self.grace = grace }
 
     func launch(_ executable: URL, environment: [String: String],
                 onExit: @escaping @Sendable (Int32) -> Void) throws -> VoiceHostChild {
@@ -54,6 +65,6 @@ struct ChildProcessLauncher: VoiceHostLaunching {
         try process.run()
         // Only the child reads; MacHUD keeps the write end and never writes.
         try? pipe.fileHandleForReading.close()
-        return Child(process: process, parentPipe: pipe)
+        return Child(process: process, parentPipe: pipe, grace: grace)
     }
 }

@@ -102,6 +102,12 @@ final class VoiceSettingsModel: ObservableObject {
         }
     }
 
+    /// The tabs' Retry: restarts a stopped or failed host, then loads.
+    func retry(completion: (() -> Void)? = nil) {
+        if let services, services.supervisor.canRestart { services.supervisor.start() }
+        load(completion: completion)
+    }
+
     func turnOn() {
         status = .loading
         services?.turnOn { [weak self] error in
@@ -204,7 +210,7 @@ struct VoiceTabFrame<Content: View>: View {
                 case .unavailable(let why):
                     Text(why).foregroundStyle(.secondary).lineLimit(2)
                     if model.isOff { Button("Turn On Voice") { model.turnOn() } }
-                    else { Button("Retry") { model.load() } }
+                    else { Button("Retry") { model.retry() } }
                 case .loading:
                     ProgressView().controlSize(.small)
                 case .ready:

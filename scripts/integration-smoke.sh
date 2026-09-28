@@ -22,6 +22,11 @@ export MACHUD_SOCKET="${MACHUD_SOCKET:-/tmp/machud-test-int.sock}"
 TEST_DIR="${TEST_DIR:-/tmp/machud-test-int}"
 export MACHUD_CONFIG="$TEST_DIR/layouts.json"
 export MACHUD_NO_HOTKEYS=1
+# The instance's voice host: MacHUD already keeps an isolated instance's host off the
+# microphone, the brain, the screen and the real Keychain item; stated here so the run
+# does not depend on it.
+export MACHUD_VOICE_NO_MIC=1 MACHUD_VOICE_NO_BRAIN=1 MACHUD_VOICE_HEADLESS=1
+export MACHUD_VOICE_KEYCHAIN_SERVICE="${MACHUD_VOICE_KEYCHAIN_SERVICE:-com.jrisberg.machud.voice.isolated}"
 SIFT_BUILD="${SIFT_BUILD:-$HOME/dev/sift/build}"
 MECHAHUD_BUILD="${MECHAHUD_BUILD:-$HOME/dev/mechahud/build}"
 WORMHOLE_BUILD="${WORMHOLE_BUILD:-$HOME/dev/worktrees/_dd-wormhole/Build/Products/Debug}"
