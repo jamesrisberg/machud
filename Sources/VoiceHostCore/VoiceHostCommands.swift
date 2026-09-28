@@ -18,8 +18,6 @@ final class VoiceHostCommands {
     private let version: String
     /// After a `quit` has been answered.
     var onQuit: () -> Void = {}
-    /// After a secret changed (the reply voice may change with it).
-    var onSecretsChanged: () -> Void = {}
 
     init(controller: VoiceHostController, store: VoiceHostSettingsStore, secrets: VoiceSecretStoring,
          version: String) {
@@ -97,7 +95,9 @@ final class VoiceHostCommands {
         switch name {
         case "click": action = .orbClicked
         case "ask": action = .start(.agent)
+            if let refusal = controller.refusal(for: .agent) { return ["ok": false, "error": refusal] }
         case "dictate": action = .start(.dictation)
+            if let refusal = controller.refusal(for: .dictation) { return ["ok": false, "error": refusal] }
         case "stop": action = .stop
         case "cancel": action = .cancel
         case "dismiss": action = .dismissCard
@@ -132,7 +132,7 @@ final class VoiceHostCommands {
         } catch {
             return ["ok": false, "error": error.localizedDescription]
         }
-        onSecretsChanged()
+        // The reply voice reads the key when each reply starts, so the next one uses it.
         return ["ok": true]
     }
 

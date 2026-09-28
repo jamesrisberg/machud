@@ -71,6 +71,9 @@ final class SimulatedDictation: DictationDriving {
         onUpdate?(id, .failed(.cancelled))
     }
 
+    /// Nothing is typed: the simulated host never touches the frontmost app.
+    func insert(_ text: String) {}
+
     private func endCapture() {
         isCapturing = false
         generation += 1

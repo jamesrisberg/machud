@@ -6,9 +6,11 @@ import SpeakFreeLib
 ///
 /// Retention is off and nothing lands in SpeakFree's own folders: SpeakFreeLib's config
 /// directory is pointed at `directory` for this process, so a take's WAV is written there and
-/// deleted when the take ends (the config written there keeps `saveRecordings` off). The
-/// process also sets `SPEAKFREE_DEV_MODE=0` before this runs, because SpeakFree's developer
-/// marker (`~/.speakfree-dev`) would otherwise keep every recording.
+/// deleted when the take ends. The config there is rewritten at start with `saveRecordings` off
+/// (a take's retention follows that file), and whatever an earlier process left behind (a
+/// recording, the in-progress marker) is deleted first. The process also sets
+/// `SPEAKFREE_DEV_MODE=0` before this runs, because SpeakFree's developer marker
+/// (`~/.speakfree-dev`) would otherwise keep every recording.
 @MainActor
 final class SpeakFreeDictation: DictationDriving {
     var onUpdate: ((UUID, DictationUpdate) -> Void)?
@@ -21,7 +23,11 @@ final class SpeakFreeDictation: DictationDriving {
 
     init(directory: URL) {
         Config.configDirOverride = directory
-        let config = Config.load()
+        Self.removeLeftovers(in: directory)
+        var config = Config.load()
+        config.saveRecordings = FlexBool(false)
+        config.preserveAllRecordings = nil
+        try? config.save()
         session = DictationSession(recorder: AudioRecorder(), inserter: TextInserter())
         session.configuration = DictationConfiguration(config: config)
         session.configuration.saveRecordings = false
@@ -37,6 +43,13 @@ final class SpeakFreeDictation: DictationDriving {
         session.addObserver { [weak self] id, event in self?.forward(event, take: id) }
     }
 
+    /// Recordings and the in-progress marker a crashed or killed host left behind.
+    static func removeLeftovers(in directory: URL) {
+        let fileManager = FileManager.default
+        try? fileManager.removeItem(at: directory.appendingPathComponent("recordings"))
+        try? fileManager.removeItem(at: directory.appendingPathComponent(".recording-in-progress.json"))
+    }
+
     func start(_ destination: DictationDestination) -> DictationStartOutcome {
         guard session.transcriber != nil else { return .refused(.modelMissing(recordingKept: false)) }
         return session.start(destination: destination)
@@ -45,6 +58,7 @@ final class SpeakFreeDictation: DictationDriving {
     func retarget(_ destination: DictationDestination) { session.retarget(to: destination) }
     func stop() { session.stopRecording() }
     func cancel() { session.cancel() }
+    func insert(_ text: String) { _ = session.inserter.insert(text: text) }
 
     private func forward(_ event: DictationEvent, take id: UUID) {
         let update: DictationUpdate
