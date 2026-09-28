@@ -39,7 +39,9 @@ final class VoiceHost {
     private let server: HUDSocketServer
     private let commands: VoiceHostCommands
     private let brain: BrainConnection?
+    private let dictation: DictationDriving
     private let fullscreen = HUDFullscreenObserver()
+    private var terminationSource: DispatchSourceSignal?
 
     init(environment: VoiceHostEnvironment) {
         self.environment = environment
@@ -47,10 +49,10 @@ final class VoiceHost {
             .appendingPathComponent("Library/Application Support/MacHUD")
         let voiceRoot = support.appendingPathComponent("Voice")
         let modelsRoot = voiceRoot.appendingPathComponent("Models")
-        let secrets = KeychainVoiceSecretStore(service: VoiceHostMain.secretsService)
+        let secrets = KeychainVoiceSecretStore(service: environment.keychainService)
         let store = VoiceHostSettingsStore(directory: environment.configDirectory)
 
-        let dictation: DictationDriving = environment.noMicrophone
+        dictation = environment.noMicrophone
             ? SimulatedDictation()
             : SpeakFreeDictation(directory: voiceRoot.appendingPathComponent("Dictation"))
         brain = environment.noBrain ? nil : BrainConnection()
@@ -80,13 +82,24 @@ final class VoiceHost {
         fullscreen.start()
         updateFullScreen()
         if environment.parentPipe { watchParentPipe() }
+        handleTermination()
     }
 
-    /// Stops the socket and the brain, then exits.
+    /// Throws away a take being recorded, stops the socket and the brain, then exits.
     func shutDown() -> Never {
+        dictation.cancel()
         server.stop()
         brain?.configure(nil)
         exit(0)
+    }
+
+    /// SIGTERM (MacHUD stopping the host) shuts down the same way as `quit`.
+    private func handleTermination() {
+        signal(SIGTERM, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        source.setEventHandler { [weak self] in MainActor.assumeIsolated { self?.shutDown() } }
+        source.resume()
+        terminationSource = source
     }
 
     /// The orb sits on the screen with the notch, else the menu-bar screen.

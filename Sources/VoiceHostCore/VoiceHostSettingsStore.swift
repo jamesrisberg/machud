@@ -44,6 +44,9 @@ public struct VoiceHostEnvironment: Equatable {
     public var noBrain: Bool
     /// `MACHUD_VOICE_PARENT_PIPE=1`: exit when stdin reaches end-of-file.
     public var parentPipe: Bool
+    /// `$MACHUD_VOICE_KEYCHAIN_SERVICE`, else `com.jrisberg.machud.voice`: the Keychain service
+    /// every secret is read from and written to (an isolated instance never sees the real key).
+    public var keychainService: String
 
     public init(environment: [String: String] = ProcessInfo.processInfo.environment) {
         func flag(_ name: String) -> Bool { environment[name] == "1" }
@@ -63,5 +66,10 @@ public struct VoiceHostEnvironment: Equatable {
         noHotkeys = environment["MACHUD_NO_HOTKEYS"] != nil
         noBrain = flag("MACHUD_VOICE_NO_BRAIN")
         parentPipe = flag("MACHUD_VOICE_PARENT_PIPE")
+        if let service = environment["MACHUD_VOICE_KEYCHAIN_SERVICE"], !service.isEmpty {
+            keychainService = service
+        } else {
+            keychainService = VoiceHostMain.secretsService
+        }
     }
 }

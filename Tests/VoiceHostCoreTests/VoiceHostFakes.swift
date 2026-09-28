@@ -13,6 +13,7 @@ final class FakeDictation: DictationDriving {
     var retargets: [DictationDestination] = []
     var stops = 0
     var cancels = 0
+    var inserted: [String] = []
     private(set) var takeID = UUID()
     var currentDestination: DictationDestination?
 
@@ -44,6 +45,8 @@ final class FakeDictation: DictationDriving {
         isCapturing = false
         onUpdate?(takeID, .failed(.cancelled))
     }
+
+    func insert(_ text: String) { inserted.append(text) }
 
     /// Completes the current take with `text`.
     func finish(_ text: String) {
@@ -86,6 +89,8 @@ final class FakeKeys: VoiceKeySource {
 final class FakeBrain: BrainDriving {
     var onAvailabilityChanged: ((Bool) -> Void)?
     var onSnapshot: ((AgentSessionSnapshot) -> Void)?
+    var onStopped: (() -> Void)?
+    var cancelError: Error?
     var configurations: [BrainServiceConfiguration?] = []
     var submitted: [(text: String, requestId: String)] = []
     var approvals: [(id: String, allow: Bool)] = []
@@ -100,7 +105,10 @@ final class FakeBrain: BrainDriving {
     }
 
     func approve(id: String, allow: Bool) async throws { approvals.append((id, allow)) }
-    func cancel() async throws { cancels += 1 }
+    func cancel() async throws {
+        cancels += 1
+        if let cancelError { throw cancelError }
+    }
 
     /// Pushes a snapshot for the last submitted request.
     func push(status: String, output: String = "", progress: String = "", approvals: [AgentApproval] = [],
