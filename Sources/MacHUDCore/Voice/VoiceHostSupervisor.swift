@@ -42,6 +42,10 @@ final class VoiceHostSupervisor {
         }
     }
 
+    /// The Keychain service an isolated instance's host keeps secrets under, so a test never
+    /// reads or overwrites the user's Grok key.
+    static let isolatedKeychainService = "com.jrisberg.machud.voice.isolated"
+
     /// A run at least this long counts as healthy and resets the backoff.
     static let stableRun: TimeInterval = 20
     /// Quick exits in a row before giving up.
@@ -58,6 +62,7 @@ final class VoiceHostSupervisor {
     private let helper: () -> URL?
     private let isEnabled: () -> Bool
     private let environment: [String: String]
+    private let isolated: Bool
     private let schedule: (TimeInterval, @escaping @MainActor () -> Void) -> Void
     private var child: VoiceHostChild?
     private var launchedAt: Date?
@@ -70,14 +75,16 @@ final class VoiceHostSupervisor {
     ///   - isEnabled: voice.json's `enabled`, read at each start.
     ///   - environment: MacHUD's environment, passed through (`MACHUD_CONFIG`, `MACHUD_NO_HOTKEYS`
     ///     and the `MACHUD_VOICE_*` switches included).
+    ///   - isolated: MacHUD is a test instance (`Env.isIsolated`); see `childEnvironment()`.
     init(launcher: VoiceHostLaunching, helper: @escaping () -> URL?, isEnabled: @escaping () -> Bool,
-         socketPath: String, environment: [String: String],
+         socketPath: String, environment: [String: String], isolated: Bool,
          schedule: ((TimeInterval, @escaping @MainActor () -> Void) -> Void)? = nil) {
         self.launcher = launcher
         self.helper = helper
         self.isEnabled = isEnabled
         self.socketPath = socketPath
         self.environment = environment
+        self.isolated = isolated
         self.schedule = schedule ?? { delay, work in
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated { work() } }
         }
@@ -85,6 +92,13 @@ final class VoiceHostSupervisor {
 
     var pid: Int32? { if case .running(let pid) = status { return pid }; return nil }
     var isRunning: Bool { pid != nil }
+    /// Stopped or given up: `start()` brings it back (the menu's Restart, the tabs' Retry).
+    var canRestart: Bool {
+        switch status {
+        case .stopped, .failed: return true
+        default: return false
+        }
+    }
 
     /// Starts the host unless it is running, voice is off (`force` starts it anyway, to turn
     /// voice on through its own socket) or there is no helper. Clears a previous give-up.
@@ -103,11 +117,22 @@ final class VoiceHostSupervisor {
         if enabled { start(force: true) } else { halt(as: .disabled) }
     }
 
-    /// The environment the helper runs with.
+    /// The environment the helper runs with. A host started by an isolated MacHUD never touches
+    /// what the real one owns: it runs with no microphone, no brain and no orb on screen unless
+    /// `MACHUD_VOICE_LIVE=1`, and keeps secrets under its own Keychain service unless
+    /// `MACHUD_VOICE_KEYCHAIN_SERVICE` names one.
     func childEnvironment() -> [String: String] {
         var env = environment
         env["MACHUD_VOICE_PARENT_PIPE"] = "1"
         env["MACHUD_VOICE_SOCKET"] = socketPath
+        if isolated {
+            if env["MACHUD_VOICE_LIVE"] != "1" {
+                for key in ["MACHUD_VOICE_NO_MIC", "MACHUD_VOICE_NO_BRAIN", "MACHUD_VOICE_HEADLESS"] { env[key] = "1" }
+            }
+            if (env["MACHUD_VOICE_KEYCHAIN_SERVICE"] ?? "").isEmpty {
+                env["MACHUD_VOICE_KEYCHAIN_SERVICE"] = Self.isolatedKeychainService
+            }
+        }
         return env
     }
 

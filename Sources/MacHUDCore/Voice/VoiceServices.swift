@@ -11,8 +11,6 @@ final class VoiceServices: NSObject {
     let settingsModel: VoiceSettingsModel
     /// Opens the settings window on a tab ("voice" or "brain").
     var openSettings: ((String) -> Void)?
-    /// The menu or the settings may look different now.
-    var onChange: (() -> Void)?
 
     init(supervisor: VoiceHostSupervisor, socketPath: String) {
         self.supervisor = supervisor
@@ -25,11 +23,9 @@ final class VoiceServices: NSObject {
             previous?(status)
             self?.statusChanged(status)
         }
-        connection.onChange = { [weak self] in
-            guard let self else { return }
-            self.settingsModel.hostAvailabilityChanged()
-            self.onChange?()
-        }
+        // Only connecting and disconnecting matter to the tabs; the menu reads the latest
+        // state when it opens.
+        connection.onConnectionChange = { [weak self] in self?.settingsModel.hostAvailabilityChanged() }
         statusChanged(supervisor.status)
     }
 
@@ -41,7 +37,7 @@ final class VoiceServices: NSObject {
             launcher: ChildProcessLauncher(),
             helper: { VoiceHostPaths.helperURL(executable: Bundle.main.executableURL) },
             isEnabled: { VoiceHostPaths.isEnabled(settingsURL: settingsURL) },
-            socketPath: socket, environment: ProcessInfo.processInfo.environment)
+            socketPath: socket, environment: ProcessInfo.processInfo.environment, isolated: Env.isIsolated)
         return VoiceServices(supervisor: supervisor, socketPath: socket)
     }
 
@@ -79,7 +75,6 @@ final class VoiceServices: NSObject {
     private func statusChanged(_ status: VoiceHostSupervisor.Status) {
         if status.name == "running" { connection.connect() } else { connection.disconnect() }
         settingsModel.hostAvailabilityChanged()
-        onChange?()
     }
 
     // MARK: - Control
@@ -184,6 +179,9 @@ final class VoiceServices: NSObject {
         } else if supervisor.status == .disabled {
             entries.append(("Voice is off", nil))
             entries.append(("Turn On Voice", #selector(turnOnFromMenu)))
+        } else if supervisor.canRestart {
+            entries.append((supervisor.status.text, nil))
+            entries.append(("Restart Voice Host", #selector(restart)))
         } else {
             entries.append((supervisor.status.text, nil))
         }
@@ -194,6 +192,7 @@ final class VoiceServices: NSObject {
     @objc private func mute() { perform(.forward("action", ["name": "mute"])) { Self.report($0, "Mute") } }
     @objc private func unmute() { perform(.forward("action", ["name": "unmute"])) { Self.report($0, "Unmute") } }
     @objc private func showSettings() { openSettings?("voice") }
+    @objc private func restart() { supervisor.start() }
     @objc private func turnOnFromMenu() {
         turnOn { error in if let error { Toast.show("Could not turn voice on", detail: error) } }
     }

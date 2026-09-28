@@ -366,9 +366,17 @@ MACHUD_SOCKET=/tmp/machud-try.sock scripts/machud quit
 | `MACHUD_FIRST_RUN` | `1`: an isolated copy opens the first-run Apps tab too |
 | `MACHUD_INSTALL_SKIP_GATEKEEPER` | `1`: installs skip the `spctl` check so a dev-signed zip installs. Test-only |
 | `MACHUD_VOICE_SOCKET` | The voice host's socket. An isolated copy without it uses `<MACHUD_SOCKET>-voice.sock` (else `machud-voice.sock` beside `MACHUD_CONFIG`) |
+| `MACHUD_VOICE_NO_MIC` | `1`: the voice host simulates capture and never opens the microphone |
+| `MACHUD_VOICE_NO_BRAIN` | `1`: the voice host never starts the brain |
+| `MACHUD_VOICE_HEADLESS` | `1`: the voice host puts no orb on screen |
+| `MACHUD_VOICE_KEYCHAIN_SERVICE` | The Keychain service the voice host keeps the Grok key under |
+| `MACHUD_VOICE_LIVE` | `1`: an isolated copy runs its voice host with the microphone, brain and orb |
+| `MACHUD_VOICE_PARENT_PIPE` | Set by MacHUD for the voice host: it exits when MacHUD's end of its stdin closes |
 
 The voice host inherits MacHUD's environment, so `MACHUD_CONFIG`, `MACHUD_NO_HOTKEYS` and the
-voice host's own `MACHUD_VOICE_*` switches reach it.
+`MACHUD_VOICE_*` switches reach it. An isolated copy sets `MACHUD_VOICE_NO_MIC`, `NO_BRAIN` and
+`HEADLESS` to `1` for it (unless `MACHUD_VOICE_LIVE=1`) and a Keychain service of its own
+(`com.jrisberg.machud.voice.isolated`, unless `MACHUD_VOICE_KEYCHAIN_SERVICE` is set).
 
 Setting `MACHUD_SOCKET` or `MACHUD_CONFIG` marks the instance isolated: it does not serve
 the contract socket or show permission prompts. Never `pkill MacHUD`: that
