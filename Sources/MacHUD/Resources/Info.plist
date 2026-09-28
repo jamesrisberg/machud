@@ -16,6 +16,7 @@
     <key>LSUIElement</key><true/>
     <key>NSAppleEventsUsageDescription</key><string>MacHUD asks apps to open a window when a loadout needs one.</string>
     <key>NSHighResolutionCapable</key><true/>
+    <key>NSMicrophoneUsageDescription</key><string>MacHUD listens while you hold the fn key to dictate or talk to your assistant, and for the wake word when you turn it on.</string>
     <key>NSHumanReadableCopyright</key><string></string>
 </dict>
 </plist>
