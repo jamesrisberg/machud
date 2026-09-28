@@ -37,7 +37,7 @@ final class VoiceHostSettingsStoreTests: XCTestCase {
 
     func testEnvironmentReadsIsolationVariables() {
         let env = VoiceHostEnvironment(environment: [
-            "MACHUD_CONFIG": "/tmp/cfg", "MACHUD_VOICE_SOCKET": "/tmp/v.sock",
+            "MACHUD_CONFIG": "/tmp/cfg/layouts.json", "MACHUD_VOICE_SOCKET": "/tmp/v.sock",
             "MACHUD_VOICE_NO_MIC": "1", "MACHUD_NO_HOTKEYS": "1", "MACHUD_VOICE_NO_BRAIN": "1",
             "MACHUD_VOICE_PARENT_PIPE": "1",
         ])
@@ -47,6 +47,10 @@ final class VoiceHostSettingsStoreTests: XCTestCase {
         XCTAssertTrue(env.noHotkeys)
         XCTAssertTrue(env.noBrain)
         XCTAssertTrue(env.parentPipe)
+    }
+
+    func testAnyNoHotkeysValueDisablesTheTap() {
+        XCTAssertTrue(VoiceHostEnvironment(environment: ["MACHUD_NO_HOTKEYS": ""]).noHotkeys)
     }
 
     func testEnvironmentDefaults() {

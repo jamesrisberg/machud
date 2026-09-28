@@ -57,6 +57,14 @@ final class VoiceHostCommandsTests: XCTestCase {
         XCTAssertEqual((get["settings"] as? [String: Any])?["keyMode"] as? String, "toggle")
     }
 
+    func testTurningVoiceOnThroughTheSocketTakesEffect() {
+        _ = commands.handle("settings", ["action": "set", "settings": #"{"enabled":false}"#])
+        XCTAssertNil(brain.configurations.last ?? nil)
+        let reply = commands.handle("settings", ["action": "set", "settings": #"{"enabled":true}"#])
+        XCTAssertEqual((reply["settings"] as? [String: Any])?["enabled"] as? Bool, true)
+        XCTAssertNotNil(brain.configurations.last ?? nil)
+    }
+
     func testSettingsSetRejectsNonObjects() {
         for bad in ["[]", "nope", "\"x\""] {
             XCTAssertEqual(commands.handle("settings", ["_": "set", "settings": bad])["ok"] as? Bool, false)
