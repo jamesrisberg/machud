@@ -450,10 +450,12 @@ Park/Reveal, Launch/Quit and a Settings… item per app, plus Settings… for th
 
 MacHUD runs its voice host, `Contents/Helpers/MacHUDVoice` (beside the `MacHUD` binary in a
 `swift build`), as a child process: it is started at launch unless `enabled` is off in
-`voice.json` (beside `layouts.json`, owned by the voice host), restarted with backoff (1 s
-doubling to 30 s; after 5 quick exits in a row it stays down until voice is turned on again)
-and stopped when MacHUD quits. Its stdin is a pipe MacHUD holds (`MACHUD_VOICE_PARENT_PIPE=1`),
-so it also exits when MacHUD dies. Its socket is `$MACHUD_VOICE_SOCKET`, else
+`voice.json` (beside `layouts.json`, owned by the voice host), restarted after it exits (1, 2,
+4, 8 and 16 s after quick exits in a row; a run of 20 s or more starts the count again; on the
+6th quick exit it stays down, `failed`, until the menu's Restart Voice Host, the tabs' Retry or
+Turn On Voice) and stopped when MacHUD quits. Its stdin is a pipe MacHUD holds
+(`MACHUD_VOICE_PARENT_PIPE=1`), so it exits when MacHUD dies; to stop it MacHUD closes the pipe
+and sends SIGTERM only if it is still running 2 s later. Its socket is `$MACHUD_VOICE_SOCKET`, else
 `~/Library/Application Support/MacHUD/sockets/machud-voice.sock` (an isolated MacHUD uses its own,
 see Running several instances).
 
@@ -462,18 +464,48 @@ see Running several instances).
 | Command | Args | Effect |
 | --- | --- | --- |
 | `voice state` | | `state {phase, inputLevel, partialTranscript, card?, hiddenForFullScreen, brainAvailable, wakeListening, muted}` |
-| `voice status` | | MacHUD's view of the process: `status` (`running`, `restarting`, `disabled`, `stopped`, `failed`, `notInstalled`), `pid`, `socket`, `connected`, `muted` |
+| `voice hello` | | the voice host's `name` (`MacHUDVoice`), `version`, `pid` |
+| `voice status` | | MacHUD's view of the process: `status` (`running`, `restarting`, `disabled`, `stopped`, `failed`, `notInstalled`), `pid` while running, `socket`, `connected`, `muted` once connected, `error` (why it gave up) when `failed` |
 | `voice action` | `name=` `click`, `ask`, `dictate`, `stop`, `cancel`, `approve`, `deny`, `dismiss`, `mute`, `unmute`; `id=` for `approve`/`deny` | performs it (`machud voice action mute` works too) |
 | `voice settings get` | | `settings`: the voice host's settings object |
 | `voice settings set` | `settings=<JSON object>`, or dotted `key=value` pairs | `settings=` replaces the whole object. `key=value` pairs (`enabled=false`, `voice.speakReplies=true`, `brain.runtime=claude`) are applied to the current settings, each converted to the type already stored, and the whole object is sent back; an unknown key is an error. Turning `enabled` off stops the voice host; on starts it |
-| `voice secret` | `set name=grok value=…` / `clear name=grok` | stores or removes the Grok API key in the Keychain; the key is never returned |
+| `voice secret` | `set name=grok [value=…]` / `clear name=grok` | stores or removes the Grok API key in the Keychain; the key is never returned. Without `value=`, `machud voice secret set name=grok` reads the key from stdin (without echo at a terminal): prefer that, so the key stays out of the shell history and the process list |
 
 When the voice host is not answering, `voice` replies `ok: false` with why (`status` as above).
 The settings window's Voice tab (on/off, fn key mode, the agent gesture, wake word, phrase and
 sensitivity, reply voice, spoken replies, Grok key) and Brain tab (on/off, runtime, workspace,
 assistant name, port, per-runtime paths) edit the same settings through the same socket, and
-say why while the voice host is down. The status menu's Voice submenu has Mute/Unmute and
-Voice Settings…, or Turn On Voice while voice is off.
+say why while the voice host is down (Retry restarts a stopped or failed host; Turn On Voice
+while voice is off). The status menu's Voice submenu has Mute/Unmute and Voice Settings…, with
+Turn On Voice while voice is off and Restart Voice Host while it is stopped or failed.
+
+### The voice host's socket (`machud-voice`)
+
+HUDKit's JSON-lines socket, one request per connection, served by `MacHUDVoice` itself:
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `hello` | | `name`, `version` (the enclosing MacHUD's), `pid` |
+| `state` | | `state`: the host's state (below) |
+| `subscribe` | `events=state` (optional) | keeps the connection open and pushes `{"event": "state", "state": {…}}` on every change (many times a second while listening) |
+| `settings` | `action=get` | `settings`: the whole settings object |
+| `settings` | `action=set settings=<JSON object>` | replaces the whole object (decoded leniently: missing or invalid keys take their defaults), saves `voice.json`, applies it and returns the stored `settings` |
+| `action` | `name=<click\|ask\|dictate\|stop\|cancel\|approve\|deny\|dismiss\|mute\|unmute>`, `id=` for `approve`/`deny` | performs it; returns `state` |
+| `secret` | `action=set name=grok value=…` / `action=clear name=grok` | writes the Keychain; never returns a value |
+| `quit` | | exits after replying |
+
+`state` is `{phase, inputLevel, partialTranscript, card?, hiddenForFullScreen, brainAvailable,
+wakeListening, muted}`. `phase` is `{"name": …}`, one of `idle`, `listening`, `transcribing`,
+`working`, `awaitingApproval`, `speaking`, `failed`, plus `"mode": "dictation"|"agent"` for
+`listening` and `transcribing` and `"message"` for `failed`. `card` is `{prompt, reply,
+progress[], approval?: {id, summary, detail}}`.
+
+The host reads its environment: `MACHUD_VOICE_SOCKET` (its socket), `MACHUD_CONFIG` (the folder
+of that path holds `voice.json`), `MACHUD_VOICE_PARENT_PIPE=1` (exit when stdin reaches end of
+file), `MACHUD_NO_HOTKEYS` (no fn key tap), `MACHUD_VOICE_NO_MIC=1` (simulated capture, the
+microphone is never opened), `MACHUD_VOICE_NO_BRAIN=1` (the brain never starts),
+`MACHUD_VOICE_HEADLESS=1` (no orb on screen) and `MACHUD_VOICE_KEYCHAIN_SERVICE` (the Keychain
+service for secrets).
 
 ## Lifecycle
 
@@ -525,8 +557,10 @@ drag snapping back on. Its tool dock publishes to
 the real siblings' icons.
 Its voice host listens on `$MACHUD_VOICE_SOCKET`, else `<MACHUD_SOCKET>-voice.sock` (else
 `machud-voice.sock` beside `MACHUD_CONFIG`), never the real one's, and inherits the isolation
-variables; set `MACHUD_VOICE_NO_MIC=1` and `MACHUD_VOICE_NO_BRAIN=1` as well to keep it off the
-microphone and the brain.
+variables. MacHUD also starts it with `MACHUD_VOICE_NO_MIC=1`, `MACHUD_VOICE_NO_BRAIN=1` and
+`MACHUD_VOICE_HEADLESS=1` (no microphone, no brain, no orb) unless `MACHUD_VOICE_LIVE=1`, and
+with `MACHUD_VOICE_KEYCHAIN_SERVICE=com.jrisberg.machud.voice.isolated` unless that variable is
+already set, so a test instance never touches the real Grok key.
 
 An isolated copy skips the first-run Apps tab unless `MACHUD_FIRST_RUN=1`. To try installs,
 give it a `catalog` with a `file://` `url` and a temporary `installDir`.

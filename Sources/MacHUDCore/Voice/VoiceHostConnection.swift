@@ -10,11 +10,18 @@ final class VoiceHostConnection {
     /// The host's last `state` (a `VoiceHostState` object), nil until it is connected.
     private(set) var state: [String: Any]?
     private(set) var isConnected = false
-    /// Connected, disconnected or a new state.
-    var onChange: (() -> Void)?
+    /// Connected or disconnected. State events do not fire it: they arrive many times a second
+    /// during a take.
+    var onConnectionChange: (() -> Void)?
+    /// A new state arrived.
+    var onStateChange: (() -> Void)?
 
     private var subscription: HUDSubscription?
     private var wanted = false
+    /// An attempt to subscribe is on its way; `connect()` waits for it rather than starting another.
+    private var attempting = false
+    /// Bumped by `disconnect()`, so an attempt or a stream from before it is dropped.
+    private var generation = 0
     private var retry = 0
     private let schedule: (TimeInterval, @escaping @MainActor () -> Void) -> Void
 
@@ -48,40 +55,51 @@ final class VoiceHostConnection {
         }
     }
 
-    /// Keeps a `subscribe` stream open while the host runs, retrying until it listens.
+    /// Keeps one `subscribe` stream open while the host runs, retrying until it listens.
     func connect() {
         wanted = true
-        guard subscription == nil else { return }
         attempt()
     }
 
     func disconnect() {
         wanted = false
+        generation += 1
+        attempting = false
         subscription?.cancel()
         subscription = nil
         setDisconnected()
     }
 
     private func attempt() {
-        guard wanted, subscription == nil else { return }
+        guard wanted, subscription == nil, !attempting else { return }
+        attempting = true
         let path = self.path
+        let current = generation
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let client = HUDSocketClient(path: path, timeout: 3)
             let initial = try? client.request("state")
             let result = Result {
                 try client.subscribe(events: ["state"], onEvent: { event in
                     let box = UncheckedBox(event)
-                    DispatchQueue.main.async { MainActor.assumeIsolated { self?.received(box.value) } }
+                    DispatchQueue.main.async { MainActor.assumeIsolated { self?.received(box.value, generation: current) } }
                 }, onClose: {
-                    DispatchQueue.main.async { MainActor.assumeIsolated { self?.closed() } }
+                    DispatchQueue.main.async { MainActor.assumeIsolated { self?.closed(generation: current) } }
                 })
             }
             let box = UncheckedBox((initial, result))
-            DispatchQueue.main.async { MainActor.assumeIsolated { self?.attempted(box.value.0, box.value.1) } }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self?.attempted(box.value.0, box.value.1, generation: current) }
+            }
         }
     }
 
-    private func attempted(_ initial: [String: Any]?, _ result: Result<HUDSubscription, Error>) {
+    private func attempted(_ initial: [String: Any]?, _ result: Result<HUDSubscription, Error>, generation current: Int) {
+        guard current == generation else {
+            // Disconnected meanwhile: this stream belongs to nobody.
+            if case .success(let sub) = result { sub.cancel() }
+            return
+        }
+        attempting = false
         switch result {
         case .success(let sub):
             guard wanted else { sub.cancel(); return }
@@ -89,7 +107,7 @@ final class VoiceHostConnection {
             retry = 0
             isConnected = true
             if let state = initial?["state"] as? [String: Any] { self.state = state }
-            onChange?()
+            onConnectionChange?()
         case .failure:
             retry += 1
             // The host needs a moment to listen after launch; then back off.
@@ -97,13 +115,15 @@ final class VoiceHostConnection {
         }
     }
 
-    private func received(_ event: [String: Any]) {
-        guard event["event"] as? String == "state", let state = event["state"] as? [String: Any] else { return }
+    private func received(_ event: [String: Any], generation current: Int) {
+        guard current == generation, event["event"] as? String == "state",
+              let state = event["state"] as? [String: Any] else { return }
         self.state = state
-        onChange?()
+        onStateChange?()
     }
 
-    private func closed() {
+    private func closed(generation current: Int) {
+        guard current == generation, subscription != nil else { return }
         subscription = nil
         setDisconnected()
         if wanted { schedule(0.5) { [weak self] in self?.attempt() } }
@@ -113,6 +133,6 @@ final class VoiceHostConnection {
         guard isConnected || state != nil else { return }
         isConnected = false
         state = nil
-        onChange?()
+        onConnectionChange?()
     }
 }

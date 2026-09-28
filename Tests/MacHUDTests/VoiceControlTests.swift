@@ -27,7 +27,9 @@ final class FakeVoiceHost {
         server.register("state") { [unowned self] _, done in done(["ok": true, "state": self.state]) }
         server.register("settings") { [unowned self] args, done in
             switch args["action"] {
-            case "get": done(["ok": true, "settings": self.settings])
+            case "get":
+                self.settingsGets += 1
+                done(["ok": true, "settings": self.settings])
             case "set":
                 guard let raw = args["settings"], let data = raw.data(using: .utf8),
                       let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -53,7 +55,8 @@ final class FakeVoiceHost {
         }
     }
 
-    var state: [String: Any] { ["phase": ["idle": [:] as [String: Any]], "muted": muted, "brainAvailable": false] }
+    var settingsGets = 0
+    var state: [String: Any] { ["phase": ["name": "idle"], "muted": muted, "brainAvailable": false] }
 }
 
 @MainActor
@@ -77,7 +80,7 @@ final class VoiceControlTests: XCTestCase {
         enabled = true
         supervisor = VoiceHostSupervisor(launcher: launcher, helper: { URL(fileURLWithPath: "/x/MacHUDVoice") },
                                          isEnabled: { [unowned self] in self.enabled },
-                                         socketPath: path, environment: [:], schedule: { _, _ in })
+                                         socketPath: path, environment: [:], isolated: false, schedule: { _, _ in })
         voice = VoiceServices(supervisor: supervisor, socketPath: path)
     }
 
@@ -206,6 +209,17 @@ final class VoiceControlTests: XCTestCase {
         XCTAssertEqual(reply["status"] as? String, "running")
         XCTAssertEqual(reply["pid"] as? Int, 1000)
         XCTAssertEqual(reply["socket"] as? String, path)
+        XCTAssertEqual(run(["hello"])["name"] as? String, "MacHUDVoice")
+    }
+
+    func testSecretValueCanComeFromStdin() {
+        XCTAssertEqual(ControlClient.readingSecret(["voice", "secret", "set", "name=grok"]) { "xai-7\n" },
+                       ["voice", "secret", "set", "name=grok", "value=xai-7"])
+        XCTAssertEqual(ControlClient.readingSecret(["voice", "secret", "set", "name=grok", "value=v"]) { XCTFail(); return nil },
+                       ["voice", "secret", "set", "name=grok", "value=v"], "value= given")
+        XCTAssertEqual(ControlClient.readingSecret(["voice", "secret", "clear", "name=grok"]) { XCTFail(); return nil },
+                       ["voice", "secret", "clear", "name=grok"])
+        XCTAssertEqual(ControlClient.readingSecret(["apply", "loadout=x"]) { XCTFail(); return nil }, ["apply", "loadout=x"])
     }
 
     // MARK: - Subscription, menu and the settings tabs
@@ -218,6 +232,45 @@ final class VoiceControlTests: XCTestCase {
         _ = run(["action", "mute"])
         XCTAssertTrue(spin(until: { self.voice.connection.muted == true }))
         XCTAssertEqual(voice.menuTitles(), ["Unmute Voice", "Voice Settings…"])
+    }
+
+    func testStateEventsDoNotReloadTheSettings() {
+        supervisor.start()
+        XCTAssertTrue(spin(until: { self.voice.connection.isConnected }))
+        XCTAssertTrue(spin(until: { self.voice.settingsModel.status == .ready }))
+        let gets = host.settingsGets
+        for i in 0..<25 {
+            host.muted = i % 2 == 0
+            host.server.publish("state", payload: ["state": host.state])
+        }
+        XCTAssertTrue(spin(until: { self.voice.connection.muted == true }))
+        _ = spin(until: { false }, timeout: 0.2)
+        XCTAssertEqual(host.settingsGets, gets, "a state event is not a reason to fetch settings")
+    }
+
+    func testRepeatedConnectsKeepOneSubscription() {
+        for _ in 0..<5 { voice.connection.connect() }
+        supervisor.start()
+        voice.connection.connect()
+        XCTAssertTrue(spin(until: { self.voice.connection.isConnected }))
+        _ = spin(until: { false }, timeout: 0.3)
+        XCTAssertEqual(host.server.subscriberCount, 1)
+        voice.connection.disconnect()
+        voice.connection.connect()
+        XCTAssertTrue(spin(until: { self.voice.connection.isConnected }))
+        _ = spin(until: { false }, timeout: 0.3)
+        XCTAssertTrue(spin(until: { self.host.server.subscriberCount == 1 }), "the cancelled stream is gone")
+    }
+
+    func testRetryRestartsAFailedOrStoppedHost() {
+        supervisor.start()
+        supervisor.stop()
+        XCTAssertEqual(voice.menuTitles(), ["The voice host is stopped.", "Restart Voice Host", "Voice Settings…"])
+        var loaded = false
+        voice.settingsModel.retry { loaded = true }
+        XCTAssertTrue(spin(until: { loaded }))
+        XCTAssertEqual(launcher.launches.count, 2)
+        XCTAssertTrue(supervisor.isRunning)
     }
 
     func testMenuWhileDisabledOffersToTurnOn() {

@@ -12,9 +12,11 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - Voice and Brain tabs in the settings window: voice on/off, fn key mode, the agent gesture,
   the wake word and its sensitivity, the reply voice, spoken replies and a Grok key kept in the
   Keychain; the brain's runtime, workspace, assistant name, port and tool paths.
-- A Voice submenu in the menu bar menu: Mute/Unmute and Voice Settings….
+- A Voice submenu in the menu bar menu: Mute/Unmute and Voice Settings…, and Restart Voice
+  Host when it has stopped.
 - `machud voice state|status|action|settings|secret` drives the voice host from the command
-  line; `machud voice settings set voice.speakReplies=true` changes one setting.
+  line; `machud voice settings set voice.speakReplies=true` changes one setting, and
+  `machud voice secret set name=grok` asks for the key without showing it.
 - MacHUD asks for the microphone, which the voice host uses under MacHUD's permission.
 
 ## [0.1.0] — 2026-09-27
