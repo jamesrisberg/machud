@@ -142,6 +142,14 @@ final class SettingsWindowModel: ObservableObject {
     @Published var selection: String = ""
     /// The "Apps" tab (catalog installs), when the catalog is wired up.
     @Published var apps: AppsTabModel?
+    /// The "Voice" and "Brain" tabs, when the voice host is wired up.
+    @Published var voice: VoiceSettingsModel?
+
+    /// Tab ids MacHUD adds beside the per-app tabs.
+    var builtInTabIDs: [String] {
+        (voice == nil ? [] : [VoiceSettingsModel.voiceTabID, VoiceSettingsModel.brainTabID])
+            + (apps == nil ? [] : [AppsTabModel.tabID])
+    }
 }
 
 /// The shared settings window (PLAN 3.5): a tab per discovered MacHUD app plus MacHUD's own,
@@ -164,10 +172,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     func show(select: String? = nil, activate: Bool = true, completion: (() -> Void)? = nil) {
         refreshTabs()
         onShow?()
-        if let select, model.apps != nil, select.lowercased() == AppsTabModel.tabID { model.selection = AppsTabModel.tabID }
+        if let select, model.builtInTabIDs.contains(select.lowercased()) { model.selection = select.lowercased() }
         else if let select, let tab = tab(matching: select) { model.selection = tab.id }
         if model.selection.isEmpty || !(model.tabs.contains(where: { $0.id == model.selection })
-                                         || (model.apps != nil && model.selection == AppsTabModel.tabID)) {
+                                         || model.builtInTabIDs.contains(model.selection)) {
             model.selection = model.tabs.first?.id ?? ""
         }
         let window = self.window ?? makeWindow()
@@ -178,6 +186,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         for tab in model.tabs {
             group.enter()
             tab.load { group.leave() }
+        }
+        if let voice = model.voice {
+            group.enter()
+            voice.load { group.leave() }
         }
         group.notify(queue: .main) { completion?() }
     }
@@ -192,6 +204,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     var json: [String: Any] {
         var d: [String: Any] = ["visible": isVisible, "selected": model.selection, "tabs": model.tabs.map(\.json)]
         if let apps = model.apps { d["apps"] = apps.json }
+        if let voice = model.voice { d["voice"] = voice.json }
         return d
     }
 
@@ -245,11 +258,17 @@ struct SettingsWindowView: View {
 
     var body: some View {
         TabView(selection: $model.selection) {
-            ForEach(model.tabs) { tab in
-                SettingsTabView(model: tab)
-                    .tabItem { Label(tab.source.title, systemImage: tab.source.symbol) }
-                    .tag(tab.id)
+            // MacHUD, then its built-in voice host, then the sibling apps.
+            ForEach(model.tabs.prefix(1)) { appTab($0) }
+            if let voice = model.voice {
+                VoiceTabView(model: voice)
+                    .tabItem { Label("Voice", systemImage: "mic") }
+                    .tag(VoiceSettingsModel.voiceTabID)
+                BrainTabView(model: voice)
+                    .tabItem { Label("Brain", systemImage: "brain") }
+                    .tag(VoiceSettingsModel.brainTabID)
             }
+            ForEach(model.tabs.dropFirst()) { appTab($0) }
             if let apps = model.apps {
                 AppsTabView(model: apps)
                     .tabItem { Label("Apps", systemImage: "square.and.arrow.down") }
@@ -258,6 +277,12 @@ struct SettingsWindowView: View {
         }
         .padding(.top, 28)
         .padding([.horizontal, .bottom], 12)
+    }
+
+    private func appTab(_ tab: SettingsTabModel) -> some View {
+        SettingsTabView(model: tab)
+            .tabItem { Label(tab.source.title, systemImage: tab.source.symbol) }
+            .tag(tab.id)
     }
 }
 

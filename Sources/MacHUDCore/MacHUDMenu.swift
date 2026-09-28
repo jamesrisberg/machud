@@ -39,7 +39,7 @@ final class MacHUDServices: NSObject {
 
     // MARK: - Control
 
-    /// `settings-window show|hide|toggle|state [tab=<id, name or apps>] [activate=0]`. `show`
+    /// `settings-window show|hide|toggle|state [tab=<id, name, voice, brain or apps>] [activate=0]`. `show`
     /// answers once every tab has loaded, with what each tab shows.
     func registerControl(_ control: HUDSocketServer) {
         control.register("settings-window") { [weak self] args, done in
