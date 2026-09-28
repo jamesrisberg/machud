@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import SpeakFreeLib
 
@@ -39,6 +40,27 @@ final class SpeakFreeDictation: DictationDriving {
         }
         session.isEnabled = true
         session.addObserver { [weak self] id, event in self?.forward(event, take: id) }
+        // SpeakFree's recorder captures nothing until its engine is started; start it as soon
+        // as the microphone is allowed (asking once if macOS hasn't decided yet), honouring the
+        // pre-buffer setting that keeps the first word from being clipped.
+        session.recorder.preBufferEnabled = config.preBuffer?.value ?? true
+        Self.whenMicrophoneAllowed { [recorder = session.recorder] in recorder.warmUp() }
+    }
+
+    /// Runs `start` on the main thread once microphone access is granted: at once when it
+    /// already is, after the system prompt when undetermined, never when denied.
+    private static func whenMicrophoneAllowed(_ start: @escaping @MainActor () -> Void) {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            MainActor.assumeIsolated { start() }
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .audio) { granted in
+                guard granted else { return }
+                DispatchQueue.main.async { MainActor.assumeIsolated { start() } }
+            }
+        default:
+            break
+        }
     }
 
     /// What every finished take's retention follows: SpeakFree's defaults with recordings off.

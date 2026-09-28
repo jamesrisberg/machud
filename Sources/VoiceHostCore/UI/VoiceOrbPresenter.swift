@@ -258,7 +258,7 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
     }
 
     private static func orbScreen() -> NSScreen? {
-        NSScreen.screens.first { HUDNotchGeometry(screen: $0).hasNotch } ?? NSScreen.screens.first
+        VoiceOrbScreen.current()
     }
 
     private static func makePanel(size: CGSize) -> HUDPanelWindow {
@@ -284,4 +284,12 @@ private final class OrbMenuItem: NSMenuItem {
     required init(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
     @objc private func run() { handler() }
+}
+
+/// The screen the orb lives on: the primary screen (the one with the menu bar, where MacHUD's
+/// tool dock sits), under its notch when it has one and hanging from the menu bar otherwise.
+/// The full-screen check uses the same screen.
+public enum VoiceOrbScreen {
+    @MainActor
+    public static func current() -> NSScreen? { NSScreen.screens.first }
 }
