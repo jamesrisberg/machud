@@ -54,12 +54,9 @@ final class VoiceHost {
             ? SimulatedDictation()
             : SpeakFreeDictation(directory: voiceRoot.appendingPathComponent("Dictation"))
         brain = environment.noBrain ? nil : BrainConnection()
-        if !environment.noHotkeys {
-            // SpeakFreeLib keeps `HotkeyManager` internal, so there is no fn event tap to drive.
-            NSLog("MacHUDVoice: fn gestures unavailable: SpeakFreeLib does not export HotkeyManager")
-        }
         controller = VoiceHostController(
-            settings: store.load(), dictation: dictation, keys: nil, brain: brain,
+            settings: store.load(), dictation: dictation,
+            keys: environment.noHotkeys ? nil : FnKeySource(), brain: brain,
             speaker: ReplySpeaker(kokoroDirectory: KokoroModels.directory(in: modelsRoot), secrets: secrets),
             wake: environment.noMicrophone ? nil : WakeWordListener(modelsRoot: modelsRoot),
             brainStateRoot: support.appendingPathComponent("Brain"))
