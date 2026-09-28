@@ -36,6 +36,8 @@ protocol DictationDriving: AnyObject {
     func stop()
     /// Throw the capturing take away.
     func cancel()
+    /// Types `text` at the cursor (a take the agent could not take).
+    func insert(_ text: String)
 }
 
 /// The fn key's gestures (`KeyGestureRecognizer` intents).
@@ -53,6 +55,8 @@ protocol BrainDriving: AnyObject {
     /// True once a client is connected to a running companion.
     var onAvailabilityChanged: ((Bool) -> Void)? { get set }
     var onSnapshot: ((AgentSessionSnapshot) -> Void)? { get set }
+    /// The companion stopped or is restarting: any turn it was running is gone.
+    var onStopped: (() -> Void)? { get set }
     /// Run the companion as configured; nil stops it.
     func configure(_ configuration: BrainServiceConfiguration?)
     func submit(_ text: String, requestId: String) async throws
