@@ -42,4 +42,11 @@ final class CLIShimTests: XCTestCase {
         XCTAssertEqual(r.out, "stub ctl apply loadout=Work\n")
         XCTAssertEqual(r.err, "")
     }
+
+    func testMachudForwardsVoiceSubVerbs() throws {
+        let r = try run(scripts.appendingPathComponent("machud"), ["voice", "settings", "set", "voice.speakReplies=true"],
+                        env: ["MACHUD_APP": stub.path])
+        XCTAssertEqual(r.status, 0)
+        XCTAssertEqual(r.out, "stub ctl voice settings set voice.speakReplies=true\n")
+    }
 }
