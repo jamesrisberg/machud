@@ -198,7 +198,8 @@ public final class VoiceHostController: VoiceHostActing {
 
     // MARK: - Takes
 
-    private var brainEnabled: Bool { settings.brainEnabled && brain != nil }
+    /// The brain runs only while voice is on; `enabled` off leaves the host idle.
+    private var brainEnabled: Bool { settings.enabled && settings.brainEnabled && brain != nil }
 
     private func startTake(_ mode: VoiceMode, handsFree: Bool) {
         stopSpeech()

@@ -31,13 +31,14 @@ public struct VoiceHostSettingsStore {
 /// The process environment the voice host reads: paths and the isolation switches a test
 /// instance (or MacHUD's own test runs) sets.
 public struct VoiceHostEnvironment: Equatable {
-    /// `$MACHUD_CONFIG`, else `~/.config/machud`.
+    /// The folder of `$MACHUD_CONFIG` (the path of MacHUD's `layouts.json`), else
+    /// `~/.config/machud`: `voice.json` sits beside MacHUD's own config.
     public var configDirectory: URL
     /// `$MACHUD_VOICE_SOCKET`, else `machud-voice.sock` in HUDKit's socket directory.
     public var socketPath: String
     /// `MACHUD_VOICE_NO_MIC=1`: a simulated capture path; the microphone is never opened.
     public var noMicrophone: Bool
-    /// `MACHUD_NO_HOTKEYS=1`: no fn event tap.
+    /// `MACHUD_NO_HOTKEYS` set to anything (MacHUD's own rule): no fn event tap.
     public var noHotkeys: Bool
     /// `MACHUD_VOICE_NO_BRAIN=1`: the brain never starts, whatever the settings say.
     public var noBrain: Bool
@@ -47,7 +48,8 @@ public struct VoiceHostEnvironment: Equatable {
     public init(environment: [String: String] = ProcessInfo.processInfo.environment) {
         func flag(_ name: String) -> Bool { environment[name] == "1" }
         if let config = environment["MACHUD_CONFIG"], !config.isEmpty {
-            configDirectory = URL(fileURLWithPath: config)
+            configDirectory = URL(fileURLWithPath: (config as NSString).expandingTildeInPath)
+                .deletingLastPathComponent()
         } else {
             configDirectory = FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent(".config/machud")
@@ -58,7 +60,7 @@ public struct VoiceHostEnvironment: Equatable {
             socketPath = HUDSocket.directory.appendingPathComponent("machud-voice.sock").path
         }
         noMicrophone = flag("MACHUD_VOICE_NO_MIC")
-        noHotkeys = flag("MACHUD_NO_HOTKEYS")
+        noHotkeys = environment["MACHUD_NO_HOTKEYS"] != nil
         noBrain = flag("MACHUD_VOICE_NO_BRAIN")
         parentPipe = flag("MACHUD_VOICE_PARENT_PIPE")
     }
