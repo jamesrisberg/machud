@@ -26,7 +26,7 @@ development Mac; an item marked n/a does not apply to this project.
 
 | Item | Verified value |
 |---|---|
-| Local integration branch | `main` in each repo; the SpeakFree fork uses `integration/machud` (its `main` tracks upstream) |
+| Local integration branch | `main` in each repo; the SpeakFree fork uses `integration/machud`, checked out in `../speakfree` (its `main` tracks upstream) |
 | Worktree parent directory and branch prefix | `../worktrees/<repo>-<lane>`, branch `wave/<wave>/<lane>`. A `../worktrees/hudkit` symlink makes `../hudkit` path dependencies resolve from a worktree |
 | Dependency/worktree preparation command | None beyond `git worktree add`; SwiftPM resolves on first build |
 | Local services start and health check | n/a for most lanes. MacHUD test instance: `MACHUD_SOCKET=<tmp>.sock MACHUD_CONFIG=<tmp dir> MACHUD_NO_HOTKEYS=1 build/MacHUD.app/Contents/MacOS/MacHUD`, health `MACHUD_SOCKET=<tmp>.sock scripts/machud hello` |
