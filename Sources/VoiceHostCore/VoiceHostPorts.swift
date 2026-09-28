@@ -1,0 +1,92 @@
+import BrainKit
+import Foundation
+import SpeakFreeLib
+import VoiceKit
+
+// The controller's collaborators. Each has a live implementation in `Live/` and a fake in the
+// tests, so the controller's behavior is tested without a microphone, an event tap, a brain
+// process or a speaker.
+
+/// A take's progress, as the controller needs it.
+enum DictationUpdate: Equatable {
+    /// Capture is running for this destination.
+    case recording(DictationDestination)
+    case retargeted(DictationDestination)
+    /// Microphone level, 0...1.
+    case level(Double)
+    /// Live-preview text; empty clears it.
+    case partial(String)
+    /// Capture ended; the take is being transcribed.
+    case transcribing
+    /// The take's text: typed at the cursor already, or returned for the caller.
+    case finished(text: String, destination: DictationDestination)
+    case failed(DictationFailure)
+}
+
+/// One dictation take at a time: capture, transcription and (for `.cursor`) delivery.
+@MainActor
+protocol DictationDriving: AnyObject {
+    /// Updates for the take with this id, on the main actor.
+    var onUpdate: ((UUID, DictationUpdate) -> Void)? { get set }
+    /// True from start until the take's transcription begins.
+    var isCapturing: Bool { get }
+    func start(_ destination: DictationDestination) -> DictationStartOutcome
+    func retarget(_ destination: DictationDestination)
+    /// End the take and send it on.
+    func stop()
+    /// Throw the capturing take away.
+    func cancel()
+}
+
+/// The fn key's gestures (`KeyGestureRecognizer` intents).
+@MainActor
+protocol VoiceKeySource: AnyObject {
+    func start(mode: KeyGestureRecognizer.Mode, alternateEnabled: Bool,
+               isSessionActive: @escaping () -> Bool,
+               onIntent: @escaping (KeyGestureRecognizer.Intent) -> Void)
+    func stop()
+}
+
+/// The brain process and the client for it.
+@MainActor
+protocol BrainDriving: AnyObject {
+    /// True once a client is connected to a running companion.
+    var onAvailabilityChanged: ((Bool) -> Void)? { get set }
+    var onSnapshot: ((AgentSessionSnapshot) -> Void)? { get set }
+    /// Run the companion as configured; nil stops it.
+    func configure(_ configuration: BrainServiceConfiguration?)
+    func submit(_ text: String, requestId: String) async throws
+    func approve(id: String, allow: Bool) async throws
+    func cancel() async throws
+}
+
+/// Speaks a reply that arrives in pieces.
+@MainActor
+protocol ReplySpeaking: AnyObject {
+    /// True while a sentence is speaking or queued.
+    var isSpeaking: Bool { get }
+    /// Everything appended and finished has been said (or speech failed).
+    var onFinished: (() -> Void)? { get set }
+    /// The voice for the next reply.
+    func configure(_ voice: VoiceSettings)
+    func append(_ text: String)
+    func finish()
+    func stop()
+}
+
+/// The wake word listener.
+@MainActor
+protocol WakeDriving: AnyObject {
+    var onWake: (() -> Void)? { get set }
+    var onListeningChanged: ((Bool) -> Void)? { get set }
+    /// Start (or restart) listening for `settings.wakePhrase`.
+    func start(_ settings: VoiceSettings)
+    func stop()
+}
+
+/// Runs work on the main actor after a delay (a manual clock in tests).
+typealias VoiceScheduler = (TimeInterval, @escaping @Sendable @MainActor () -> Void) -> Void
+
+let mainQueueScheduler: VoiceScheduler = { delay, work in
+    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated { work() } }
+}
