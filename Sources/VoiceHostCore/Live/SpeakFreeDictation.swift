@@ -5,10 +5,10 @@ import SpeakFreeLib
 /// downloaded into FluidAudio's cache (SpeakFree's download; the voice host downloads none).
 ///
 /// Retention is off and nothing lands in SpeakFree's own folders: SpeakFreeLib's config
-/// directory is pointed at `directory` for this process, so a take's WAV is written there and
-/// deleted when the take ends. The config there is rewritten at start with `saveRecordings` off
-/// (a take's retention follows that file), and whatever an earlier process left behind (a
-/// recording, the in-progress marker) is deleted first. The process also sets
+/// directory is pointed at `directory` for this process, so a take's WAV is written there, and
+/// every finished take follows `retentionConfig` (never keep), so the WAV is deleted when the
+/// take ends. Whatever an earlier process left behind (a recording, the in-progress marker) is
+/// deleted at start. The process also sets
 /// `SPEAKFREE_DEV_MODE=0` before this runs, because SpeakFree's developer marker
 /// (`~/.speakfree-dev`) would otherwise keep every recording.
 @MainActor
@@ -24,11 +24,9 @@ final class SpeakFreeDictation: DictationDriving {
     init(directory: URL) {
         Config.configDirOverride = directory
         Self.removeLeftovers(in: directory)
-        var config = Config.load()
-        config.saveRecordings = FlexBool(false)
-        config.preserveAllRecordings = nil
-        try? config.save()
-        session = DictationSession(recorder: AudioRecorder(), inserter: TextInserter())
+        let config = Config.load()
+        session = DictationSession(recorder: AudioRecorder(), inserter: TextInserter(),
+                                   retentionConfig: Self.retentionConfig)
         session.configuration = DictationConfiguration(config: config)
         session.configuration.saveRecordings = false
         session.levelEventInterval = 0.05
@@ -41,6 +39,13 @@ final class SpeakFreeDictation: DictationDriving {
         }
         session.isEnabled = true
         session.addObserver { [weak self] id, event in self?.forward(event, take: id) }
+    }
+
+    /// What every finished take's retention follows: SpeakFree's defaults with recordings off.
+    @Sendable nonisolated static func retentionConfig() -> Config {
+        var config = Config.defaultConfig
+        config.saveRecordings = FlexBool(false)
+        return config
     }
 
     /// Recordings and the in-progress marker a crashed or killed host left behind.
