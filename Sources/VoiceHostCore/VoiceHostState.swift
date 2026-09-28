@@ -56,6 +56,48 @@ public enum VoicePhase: Codable, Equatable, Sendable {
     case speaking
     /// Something failed; the message is short and user-facing.
     case failed(String)
+
+    /// On the wire a phase is `{"name": …}`, plus `"mode"` for listening and transcribing and
+    /// `"message"` for failed, so socket clients read it without Swift's enum encoding.
+    private enum CodingKeys: String, CodingKey { case name, mode, message }
+
+    public var name: String {
+        switch self {
+        case .idle: "idle"
+        case .listening: "listening"
+        case .transcribing: "transcribing"
+        case .working: "working"
+        case .awaitingApproval: "awaitingApproval"
+        case .speaking: "speaking"
+        case .failed: "failed"
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(name, forKey: .name)
+        switch self {
+        case .listening(let mode), .transcribing(let mode): try c.encode(mode, forKey: .mode)
+        case .failed(let message): try c.encode(message, forKey: .message)
+        default: break
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let name = try c.decode(String.self, forKey: .name)
+        switch name {
+        case "idle": self = .idle
+        case "listening": self = .listening(try c.decode(VoiceMode.self, forKey: .mode))
+        case "transcribing": self = .transcribing(try c.decode(VoiceMode.self, forKey: .mode))
+        case "working": self = .working
+        case "awaitingApproval": self = .awaitingApproval
+        case "speaking": self = .speaking
+        case "failed": self = .failed((try? c.decode(String.self, forKey: .message)) ?? "")
+        default:
+            throw DecodingError.dataCorruptedError(forKey: .name, in: c, debugDescription: "Unknown phase \(name)")
+        }
+    }
 }
 
 /// The reply card under the orb.

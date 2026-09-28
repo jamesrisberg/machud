@@ -16,6 +16,14 @@ final class VoiceHostSettingsTests: XCTestCase {
         XCTAssertTrue(settings.enabled)
     }
 
+    func testPhaseEncodesWithPlainNames() throws {
+        let data = try JSONEncoder().encode(VoicePhase.listening(.agent))
+        let object = try JSONSerialization.jsonObject(with: data) as? [String: String]
+        XCTAssertEqual(object, ["name": "listening", "mode": "agent"])
+        let failed = try JSONSerialization.jsonObject(with: JSONEncoder().encode(VoicePhase.failed("No mic"))) as? [String: String]
+        XCTAssertEqual(failed, ["name": "failed", "message": "No mic"])
+    }
+
     func testStateRoundTrips() throws {
         let state = VoiceHostState(phase: .failed("No mic"), card: VoiceCard(prompt: "hi", approval: VoiceApproval(id: "a", summary: "Run ls")))
         let data = try JSONEncoder().encode(state)
