@@ -89,7 +89,7 @@ final class VoiceHostSupervisorTests: XCTestCase {
         makeSupervisor().start()
         let env = launcher.launches[0].environment
         for key in ["MACHUD_VOICE_NO_MIC", "MACHUD_VOICE_NO_BRAIN", "MACHUD_VOICE_HEADLESS", "MACHUD_VOICE_NO_SPEECH",
-                    "MACHUD_VOICE_MODELS_DIR", "MACHUD_VOICE_KEYCHAIN_SERVICE"] {
+                    "MACHUD_VOICE_MODELS_DIR", "MACHUD_VOICE_HISTORY_DIR", "MACHUD_VOICE_KEYCHAIN_SERVICE"] {
             XCTAssertNil(env[key], key)
         }
     }
@@ -102,6 +102,7 @@ final class VoiceHostSupervisorTests: XCTestCase {
         XCTAssertEqual(env["MACHUD_VOICE_HEADLESS"], "1")
         XCTAssertEqual(env["MACHUD_VOICE_NO_SPEECH"], "1")
         XCTAssertEqual(env["MACHUD_VOICE_MODELS_DIR"], VoiceHostSupervisor.isolatedModelsDirectory(socketPath: env["MACHUD_VOICE_SOCKET"]!))
+        XCTAssertEqual(env["MACHUD_VOICE_HISTORY_DIR"], VoiceHostSupervisor.isolatedHistoryDirectory(socketPath: env["MACHUD_VOICE_SOCKET"]!))
         XCTAssertEqual(env["MACHUD_VOICE_KEYCHAIN_SERVICE"], VoiceHostSupervisor.isolatedKeychainService)
     }
 
@@ -113,6 +114,7 @@ final class VoiceHostSupervisorTests: XCTestCase {
         XCTAssertNil(env["MACHUD_VOICE_HEADLESS"])
         XCTAssertNil(env["MACHUD_VOICE_NO_SPEECH"])
         XCTAssertNil(env["MACHUD_VOICE_MODELS_DIR"])
+        XCTAssertNil(env["MACHUD_VOICE_HISTORY_DIR"])
         XCTAssertEqual(env["MACHUD_VOICE_KEYCHAIN_SERVICE"], "my.test", "an explicit service wins; never the real one by default")
     }
 

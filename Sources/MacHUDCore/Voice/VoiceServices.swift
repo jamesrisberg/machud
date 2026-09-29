@@ -112,11 +112,20 @@ final class VoiceServices: NSObject {
                 guard reply["ok"] as? Bool == true, let current = reply["settings"] as? [String: Any] else {
                     done(reply); return
                 }
-                do {
-                    let merged = try VoiceSettingsJSON.merging(current, pairs)
-                    self.sendSettings(merged, done: done)
-                } catch {
-                    done(["ok": false, "error": "\(error)"])
+                let merge = { (base: [String: Any]) in
+                    do {
+                        self.sendSettings(try VoiceSettingsJSON.merging(base, pairs), done: done)
+                    } catch {
+                        done(["ok": false, "error": "\(error)"])
+                    }
+                }
+                // No history setting is saved (it follows the default rule): start from what
+                // the rule resolves to, so `history.mode=…` has a value to change.
+                guard current["history"] == nil, pairs.keys.contains(where: { $0.hasPrefix("history.") }) else {
+                    return merge(current)
+                }
+                self.send("history", ["action": "status"]) { status in
+                    merge(VoiceSettingsJSON.seedingHistory(current, from: status))
                 }
             }
         }
