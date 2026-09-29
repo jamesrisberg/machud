@@ -247,12 +247,13 @@ final class ExternalPanels {
     /// `apps`, `apps rescan`, `apps launch id=`, `apps place id=`, `apps quit id=`,
     /// `apps menu id=` (the app's status menu, fetched now),
     /// `apps menu-invoke id= item= [title=]` (perform one of its items),
+    /// `apps perform app= verb= [key=value ...]` (one of the app's own `action` verbs),
     /// `apps announce path=`, `apps forget path=`, and
     /// `apps install|update|uninstall id=` (the catalog installer, see `installActions`).
     func registerControl(_ control: HUDSocketServer) {
         control.register("apps") { [weak self] args, done in
             guard let self else { done(["ok": false, "error": "apps gone"]); return }
-            let actions = ["rescan", "launch", "place", "quit", "menu", "menu-invoke", "announce", "forget",
+            let actions = ["rescan", "launch", "place", "quit", "menu", "menu-invoke", "perform", "announce", "forget",
                            "install", "update", "uninstall", "list"]
             let action = args["action"] ?? actions.first { args[$0] != nil } ?? "list"
             switch action {
@@ -297,6 +298,8 @@ final class ExternalPanels {
                         }
                     }
                 }
+            case "perform":
+                self.perform(args, done: done)
             case "launch", "place", "quit":
                 guard let key = args["id"] ?? args["name"], let app = self.app(matching: key) else {
                     done(["ok": false, "error": "id=<bundle id or name> of a discovered app required"]); return
@@ -323,7 +326,34 @@ final class ExternalPanels {
                 guard let installActions = self.installActions else { done(["ok": false, "error": "the installer is not available"]); return }
                 installActions(action, args, done)
             default:
-                done(["ok": false, "error": "apps action must be list, rescan, launch, place, quit, menu, menu-invoke, announce, forget, install, update or uninstall"])
+                done(["ok": false, "error": "apps action must be list, rescan, launch, place, quit, menu, menu-invoke, perform, announce, forget, install, update or uninstall"])
+            }
+        }
+    }
+
+    /// Keys of `apps perform` that address MacHUD, not the app; every other key goes to the app.
+    static let performKeys: Set<String> = ["action", "_", "perform", "app", "verb"]
+
+    /// `apps perform app=<bundle id or name> verb=<verb> [key=value ...]`: sends the app
+    /// `action name=<verb>` with the other keys (launching it first if it is not running, as
+    /// `panel show` does). The target is `app=`, not `id=`, so an action's own `id=` passes
+    /// through. Replies with the app's reply plus `app` (its bundle id).
+    func perform(_ args: [String: String], done: @escaping ([String: Any]) -> Void) {
+        guard let key = args["app"], let app = app(matching: key) else {
+            done(["ok": false, "error": "app=<bundle id or name> of a discovered app required"]); return
+        }
+        guard let verb = args["verb"], !verb.isEmpty else {
+            done(["ok": false, "error": "apps perform needs verb=<action verb>"]); return
+        }
+        var forwarded = args.filter { !Self.performKeys.contains($0.key) }
+        forwarded["name"] = verb
+        supervisor.send(app.id, command: "action", args: forwarded) { result in
+            switch result {
+            case .success(var reply):
+                reply["app"] = app.id
+                done(reply)
+            case .failure(let error):
+                done(["ok": false, "app": app.id, "error": "\(error)"])
             }
         }
     }

@@ -12,9 +12,11 @@ development Mac; an item marked n/a does not apply to this project.
   apply are loud (toasts, errors), never silent; sibling apps stay separate, forkable
   apps on the HUDKit contract.
 - Source: `Sources/MacHUDCore` (all logic, testable), `Sources/MacHUD` (thin app entry
-  and resources), `Tests/MacHUDTests`, `scripts/` (`machud` CLI, `hud-workspace.sh`,
+  and resources), `Sources/MacHUDMCPCore` + `Sources/MacHUDMCP` (the `machud-mcp` MCP tool
+  server helper), `Tests/MacHUDTests`, `Tests/MacHUDMCPTests`, `scripts/` (`machud` CLI, `hud-workspace.sh`,
   `integration-smoke.sh`), `site/` (catalog and GitHub Pages).
-- Current-system docs: `docs/API.md` (socket verbs), `docs/INTEGRATION.md` (sibling apps),
+- Current-system docs: `docs/API.md` (socket verbs), `docs/MCP.md` (the MCP tool server),
+  `docs/INTEGRATION.md` (sibling apps),
   `docs/PLACEMENT.md` (placement plans), `README.md`. The family contract lives in
   `../hudkit/docs/` (`CONVENTIONS.md`, `CONTRACT.md`, `AGENT-GUIDE.md`, `CLI.md`).
 - Shared UI primitives: HUDKit (`HUDPanelWindow`, `HUDGlassView`, `HUDPanelHost`,

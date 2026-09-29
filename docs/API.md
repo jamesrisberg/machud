@@ -33,7 +33,7 @@ display). Region geometry in `layouts` is fractions of the screen's visible area
 | `screens` | | `screens[] {index, name, persistentID, main, builtin, x, y, w, h, spaces, currentSpace}`; `persistentID` (`<vendor>-<model>-<serial>`, hex) is what loadouts pin displays to |
 | `spaces` | `screen=<ref>` (optional) | desktop count, current desktop, which Mission Control shortcuts are enabled, `privateAPI` |
 | `panels` | | `panels[] {id, title, visible}` — MacHUD's own windows (`web:<url>`), `menubar` and `tooldock`, then sibling apps' panels with `app`, `panel` (the app's own id), `health`, `cooperative`, `mode`, `badge`/`status` when the app reports them, and `frames[] {x, y, w, h}` (its on-screen windows on any layer, largest first, parked ones included). External ids are `<app bundle id>/<panel id>` |
-| `apps` | | MacHUD-aware apps found by manifest: `apps[] {id, name, bundle, socket, health, running, reachable, autoLaunch, launchAttempts, panels[], lastError?, duplicates?}`, plus `known[]` (announced bundles), `failures[]` for unreadable manifests and `duplicates {id: [bundle]}` for ids declared by several bundles. `health` is `running` (subscribed), `socketUnreachable`, `launching`, `notRunning` or `notInstalled` |
+| `apps` | | MacHUD-aware apps found by manifest: `apps[] {id, name, bundle, socket, health, running, reachable, autoLaunch, launchAttempts, panels[], manifest, lastError?, duplicates?}` (`panels` are the full panel ids, `manifest` the app's `machud.json` as MacHUD read it, each panel's `verbs` and `capabilities` included), plus `known[]` (announced bundles), `failures[]` for unreadable manifests and `duplicates {id: [bundle]}` for ids declared by several bundles. `health` is `running` (subscribed), `socketUnreachable`, `launching`, `notRunning` or `notInstalled` |
 | `menu` | | radial wheel description: `wedges[] {index, title, digit, angleStart/Center/End, kind, rings[]}` (the ring labels inside out), `rings` (radii), `visible`, current `selection`. A loadout wedge's rings are Preview / Apply / Clear this screen + Apply (P over a loadout wedge previews it too); the capture wedge's are Capture this screen / Capture all screens / Draw a new layout; the park wedge has two: Park front window / Restore parked |
 
 ## Layouts and loadouts
@@ -280,6 +280,7 @@ its `Info.plist` and `machud.json`), else the first found. `apps` reports every 
 | `apps place` | `id=<bundle id or name>` | apply the app's configured placement now |
 | `apps quit` | `id=<bundle id or name>` | `quit` over the app's socket, else a terminate event; returns `wasRunning`. An app quit this way is not relaunched |
 | `apps menu` / `apps menu-invoke` | `id=`, `item=` | the app's own status menu and performing one of its items (see Menu bar consolidation) |
+| `apps perform` | `app=<bundle id or name>`, `verb=<action verb>`, any other `key=value` | sends the app `action name=<verb>` with the other keys (launching it first if it is not running; commands wait for its socket as for `panel show`); returns the app's reply plus `app` (its bundle id), or the app's own `ok: false`. The target is `app=`, not `id=`, so an action's own `id=` passes through; `name`, `app`, `verb` and `action` cannot be passed to the app this way |
 
 Supervision: launches are on demand (`panel show`, a loadout slot) or at startup
 for `apps.autoLaunch`. An `autoLaunch` app that exits unexpectedly is relaunched
@@ -654,6 +655,12 @@ no sound), `MACHUD_VOICE_MODELS_DIR` (where downloaded models are kept),
 config folder, for its `saveRecordings` and a shared history),
 `MACHUD_VOICE_KEYCHAIN_SERVICE` (the Keychain service for secrets) and `MACHUD_SOCKET` (MacHUD's
 control socket, for `open-session` and `feed add`).
+
+## MCP tool server
+
+`Contents/Helpers/machud-mcp` serves MacHUD to agents as an MCP tool server over stdio, using the
+commands above on this socket (`MACHUD_SOCKET`, else the contract socket). Its tools and protocol
+are in [MCP.md](MCP.md).
 
 ## Lifecycle
 
