@@ -6,6 +6,17 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 
 ## [Unreleased]
 
+### The brain can drive MacHUD
+- MacHUD ships an MCP tool server, `Contents/Helpers/machud-mcp`, so an agent (Codex, Claude
+  Code, mclaude or any MCP client) can read and drive MacHUD directly: see the displays, loadouts,
+  tool dock, installed HUD apps and parked windows; apply or capture a loadout; show, hide or
+  toggle an app's panel; run an app's own actions (validated against what the app declares); move
+  the tool dock; park and unpark windows; open an agent session; add text to Stash; and speak
+  through the voice host. The tool list follows the apps MacHUD discovers. See `docs/MCP.md`.
+- `machud apps` now lists each app's manifest (its panels' verbs and capabilities), and `machud
+  apps perform app=<app> verb=<verb> [key=value ...]` runs one of an app's own actions, launching
+  it if needed.
+
 ### Voice: the wake word works
 - The wake word never triggered: its default phrase, "Hey Computer", has no model yet, nothing
   downloaded one, and the wake word stayed off without saying so. The phrase is now chosen from

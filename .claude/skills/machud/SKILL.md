@@ -96,6 +96,7 @@ machud apps quit id=Sift
 machud panel show id=xyz.machud.sift/browser    # launches the app if needed; short id if unambiguous
 machud summon id=Stash                   # show a sibling's panel where it was last dismissed
 machud dismiss id=Stash                  # hide it, remembering the frame (never launches)
+machud apps perform app=Scratch verb=append text=hi   # one of the app's own actions (its manifest's verbs)
 ```
 
 `health`: `running`, `socketUnreachable`, `launching`, `notRunning`, `notInstalled`.

@@ -43,6 +43,23 @@ let package = Package(
             dependencies: ["VoiceHostCore"],
             path: "Sources/MacHUDVoice"
         ),
+        // MacHUD as an MCP tool server (stdio) for the brain or any MCP client; built into
+        // Contents/Helpers/machud-mcp. Talks to MacHUD only through its control socket.
+        .target(
+            name: "MacHUDMCPCore",
+            dependencies: [.product(name: "HUDKit", package: "hudkit")],
+            path: "Sources/MacHUDMCPCore"
+        ),
+        .executableTarget(
+            name: "machud-mcp",
+            dependencies: ["MacHUDMCPCore"],
+            path: "Sources/MacHUDMCP"
+        ),
+        .testTarget(
+            name: "MacHUDMCPTests",
+            dependencies: ["MacHUDMCPCore", .product(name: "HUDKit", package: "hudkit")],
+            path: "Tests/MacHUDMCPTests"
+        ),
         .testTarget(
             name: "VoiceHostCoreTests",
             dependencies: ["VoiceHostCore"],
