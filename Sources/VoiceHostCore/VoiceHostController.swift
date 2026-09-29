@@ -77,6 +77,10 @@ public final class VoiceHostController: VoiceHostActing {
     private let brainStateRoot: URL
     private let sessions: SessionOpening?
     private let feed: TextFeeding?
+    /// MacHUD's tool server; nil when `machud-mcp` is not beside the voice host.
+    let machudTools: MacHUDToolServer?
+    /// MacHUD's apps and loadouts, for the host context; nil reads nothing.
+    private let machudStatus: MacHUDStatusReading?
     private let detectRuntimes: (BrainSettings) -> [BrainRuntimeDetection]
     private let sessionKeyOf: (AgentSessionSnapshot) -> String?
     /// The brain's workspace while the settings name none.
@@ -134,6 +138,10 @@ public final class VoiceHostController: VoiceHostActing {
     private var runningWake: VoiceSettings?
     /// The brain configuration last applied; `.none` until the first apply.
     private var appliedBrain: BrainServiceConfiguration??
+    /// The host context for MacHUD's tools, from MacHUD's apps and loadouts; nil until read.
+    private var hostContext: String?
+    /// Reading MacHUD for the host context (tests await it).
+    private(set) var hostContextLoad: Task<Void, Never>?
     private var appliedVoice: VoiceSettings?
     private var failureToken = UUID()
     /// The notice of the take being transcribed.
@@ -153,12 +161,15 @@ public final class VoiceHostController: VoiceHostActing {
     ///   - brainStateRoot: the folder per-workspace brain state directories go under.
     ///   - sessions: MacHUD's session broker; nil leaves `openSession` unavailable.
     ///   - feed: MacHUD's text-feed broker; nil sends nothing.
+    ///   - machudTools: MacHUD's tool server, given to the brain while `machudTools` is on.
+    ///   - machudStatus: MacHUD's apps and loadouts, described to the brain with the tools.
     ///   - detectRuntimes: which runtimes are installed, for the settings given.
     ///   - sessionKeyOf: a snapshot's session key.
     ///   - homeDirectory: the brain's workspace while `brain.workspacePath` is empty.
     init(settings: VoiceHostSettings, dictation: DictationDriving, keys: VoiceKeySource?,
          brain: BrainDriving?, speaker: ReplySpeaking?, wake: WakeDriving?, wakeModels: [WakePhraseModel] = [],
          brainStateRoot: URL, sessions: SessionOpening? = nil, feed: TextFeeding? = nil,
+         machudTools: MacHUDToolServer? = nil, machudStatus: MacHUDStatusReading? = nil,
          detectRuntimes: @escaping (BrainSettings) -> [BrainRuntimeDetection] = { BrainRuntimes.detect($0) },
          sessionKeyOf: @escaping (AgentSessionSnapshot) -> String? = { $0.sessionKey },
          homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
@@ -174,6 +185,8 @@ public final class VoiceHostController: VoiceHostActing {
         self.brainStateRoot = brainStateRoot
         self.sessions = sessions
         self.feed = feed
+        self.machudTools = machudTools
+        self.machudStatus = machudStatus
         self.detectRuntimes = detectRuntimes
         self.sessionKeyOf = sessionKeyOf
         self.homeDirectory = homeDirectory
@@ -192,7 +205,11 @@ public final class VoiceHostController: VoiceHostActing {
             refreshBrainProblem()
         }
         brain?.onSnapshot = { [weak self] in self?.handle($0) }
-        brain?.onStopped = { [weak self] in self?.brainLost() }
+        brain?.onStopped = { [weak self] in
+            self?.brainLost()
+            // Each (re)start describes MacHUD as it is now; a changed description restarts it once more.
+            self?.loadHostContext()
+        }
         speaker?.onFinished = { [weak self] in
             guard let self, state.phase == .speaking else { return }
             state.phase = .idle
@@ -345,6 +362,7 @@ public final class VoiceHostController: VoiceHostActing {
     /// turn, so it ends here.
     private func brainLost() {
         lastSnapshot = nil
+        if state.activeRuntime != nil { state.activeRuntime = nil }
         submitting = nil
         setSessionKey(nil)
         guard turn != nil else { return }
@@ -598,6 +616,8 @@ public final class VoiceHostController: VoiceHostActing {
 
     private func handle(_ snapshot: AgentSessionSnapshot) {
         lastSnapshot = snapshot
+        let runtime = snapshot.runtime ?? AgentRuntime.codex.rawValue
+        if state.activeRuntime != runtime { state.activeRuntime = runtime }
         setSessionKey(sessionKeyOf(snapshot))
         guard var turn, snapshot.requestId == turn.requestId else { return }
         var next = state
@@ -765,18 +785,29 @@ public final class VoiceHostController: VoiceHostActing {
         return brain
     }
 
+    /// MacHUD's tools go to the brain: the setting is on and `machud-mcp` was found.
+    private var givesMacHUDTools: Bool { settings.machudTools && machudTools != nil }
+
     private func refreshBrain() {
         let resolved = resolvedBrain
-        let wanted: BrainServiceConfiguration? = brainEnabled
-            ? resolved.serviceConfiguration(
-                stateDirectory: BrainServiceConfiguration.stateDirectory(
-                    forWorkspace: resolved.workspacePath, under: brainStateRoot).path,
-                port: settings.brainPort)
-            : nil
         runtimeProblem = brainEnabled
             ? BrainRuntimes.problem(runtime: resolved.runtime.rawValue, brain: resolved,
                                     detections: detectRuntimes(resolved))
             : nil
+        var wanted: BrainServiceConfiguration?
+        if brainEnabled {
+            var configuration = resolved.serviceConfiguration(
+                stateDirectory: BrainServiceConfiguration.stateDirectory(
+                    forWorkspace: resolved.workspacePath, under: brainStateRoot).path,
+                port: settings.brainPort)
+            if givesMacHUDTools, let machudTools {
+                // The first start waits for MacHUD's description, so it does not start twice.
+                guard let hostContext else { return loadHostContext() }
+                configuration.toolServers = [machudTools.toolServer(requireApproval: settings.machudToolsRequireApproval)]
+                configuration.hostContext = hostContext
+            }
+            wanted = configuration
+        }
         guard let brain, appliedBrain != .some(wanted) else { return }
         appliedBrain = .some(wanted)
         brain.configure(wanted)
@@ -784,6 +815,27 @@ public final class VoiceHostController: VoiceHostActing {
         // `onStopped`.)
         if wanted == nil { brainLost() }
     }
+
+    /// Reads MacHUD's apps and loadouts and rebuilds the host context; the brain follows if it
+    /// changed. Nothing is read while MacHUD's tools are not given; a read already running is
+    /// left to finish.
+    private func loadHostContext() {
+        guard brainEnabled, givesMacHUDTools, hostContextLoad == nil else { return }
+        let status = machudStatus
+        hostContextLoad = Task { [weak self] in
+            let snapshot = await status?.snapshot()
+            guard let self else { return }
+            hostContextLoad = nil
+            let context = MacHUDHostContext.build(snapshot: snapshot)
+            guard context != hostContext else { return }
+            hostContext = context
+            refreshBrain()
+        }
+    }
+
+    /// The tool servers the connected companion reports (whether its runtime gives them to the
+    /// agent, or why not); nil while none is connected.
+    var brainToolServers: AgentToolServerStatus? { lastSnapshot?.toolServers }
 
     // MARK: - Brain problem
 

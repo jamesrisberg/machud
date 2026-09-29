@@ -87,7 +87,11 @@ final class VoiceHost {
             wakeModels: wakeModels,
             brainStateRoot: support.appendingPathComponent("Brain"),
             sessions: MacHUDSessions(socketPath: environment.machudSocketPath),
-            feed: MacHUDFeed(socketPath: environment.machudSocketPath))
+            feed: MacHUDFeed(socketPath: environment.machudSocketPath),
+            machudTools: MacHUDToolServer.locate(
+                beside: Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0]),
+                machudSocket: environment.machudSocketPath),
+            machudStatus: MacHUDStatus(socketPath: environment.machudSocketPath))
         server = HUDSocketServer(path: environment.socketPath, label: "machud-voice")
         commands = VoiceHostCommands(controller: controller, store: store, secrets: secrets,
                                      version: Self.version(), models: models, history: history)
