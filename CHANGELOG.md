@@ -12,6 +12,12 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   dashboard is one), and `machud sessions open id=<session key>` opens and focuses one, launching
   the app if it is not running.
 
+### Text feed
+- MacHUD can send finished text (a dictation transcript, an agent reply, ...) to whichever app
+  keeps a text feed, without naming the app or writing it to the clipboard: `machud feed add
+  text= source= [title=]` forwards it to every discovered app that already shows one (Stash's
+  history is one) and is already running; it never launches an app just to feed it.
+
 ### Setup guide
 - The first launch opens a setup guide over your desktop: a blurred, see-through overlay rather
   than a cover. It opens on a checklist of every section, each marked to do, done or skipped,

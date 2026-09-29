@@ -10,45 +10,26 @@ final class SessionsBroker {
     static let capability = HUDAgentSessions.capability
 
     let externals: ExternalPanels
+    private let router: CapabilityRouter
 
     init(externals: ExternalPanels) {
         self.externals = externals
+        router = CapabilityRouter(capability: Self.capability, externals: externals)
     }
 
     /// Discovered apps with a panel declaring the capability, in discovery order.
-    var providers: [ExternalApp] {
-        externals.apps.filter { app in app.manifest.panels.contains { $0.capabilities.contains(Self.capability) } }
-    }
+    var providers: [ExternalApp] { router.providers }
 
     /// `{app, socket, running}` per provider. `running` is true once the app's process is up
     /// (subscribed or not, like `apps`' own `running` field), not only once MacHUD is subscribed.
-    var providersJSON: [[String: Any]] {
-        providers.map { app in
-            let health = externals.supervisor.record(app.id)?.health ?? .notRunning
-            return ["app": app.id, "socket": app.socketPath,
-                    "running": health == .running || health == .socketUnreachable || health == .launching]
-        }
-    }
-
-    /// The provider `open` sends to: one already subscribed, else one whose process is up
-    /// (queued until it answers), else the first discovered one (launched on demand). nil when
-    /// no app declares the capability at all.
-    private func target() -> ExternalApp? {
-        let supervisor = externals.supervisor
-        if let running = providers.first(where: { supervisor.record($0.id)?.health == .running }) { return running }
-        if let starting = providers.first(where: {
-            let health = supervisor.record($0.id)?.health
-            return health == .socketUnreachable || health == .launching
-        }) { return starting }
-        return providers.first
-    }
+    var providersJSON: [[String: Any]] { router.providersJSON }
 
     /// `sessions open id=<sessionKey>`: forwards `action name=open-session id=` to the target
     /// provider (launching an installed one if none runs). `{"ok": true, "app": "<bundle id>"}`
     /// on success; the provider's own reply is passed through unchanged when it says `ok: false`;
     /// `{"ok": false, "error": "No app shows agent sessions"}` when none is discovered.
     func open(id sessionKey: String, done: @escaping ([String: Any]) -> Void) {
-        guard let app = target() else { done(["ok": false, "error": "No app shows agent sessions"]); return }
+        guard let app = router.target() else { done(["ok": false, "error": "No app shows agent sessions"]); return }
         externals.supervisor.send(app.id, command: "action", args: HUDAgentSessions.openSessionArgs(id: sessionKey)) { result in
             switch result {
             case .success(let reply):

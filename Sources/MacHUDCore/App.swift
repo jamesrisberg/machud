@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuHost: MenuHostPublisher!
     private var toolDock: ToolDock!
     private var sessions: SessionsBroker!
+    private var feed: FeedBroker!
     private var voice: VoiceServices!
     private var onboarding: OnboardingServices!
     private var startup: StartupLoadout?
@@ -64,6 +65,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         externals.startWatching()
         sessions = SessionsBroker(externals: externals)
         sessions.registerControl(control)
+        feed = FeedBroker(externals: externals)
+        feed.registerControl(control)
         machud = MacHUDServices(externals: externals, host: hudHost)
         machud.registerControl(control)
         installCatalog()
