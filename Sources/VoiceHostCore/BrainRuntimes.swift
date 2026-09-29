@@ -11,6 +11,7 @@ public struct BrainRuntimeDetection: Equatable, Sendable {
     /// Hermes only: `~/.hermes/.env` turns on the API server the companion talks to.
     public var apiServerEnabled: Bool?
 
+    public init(id: String, name: String, installed: Bool, path: String? = nil,
                 apiServerEnabled: Bool? = nil) {
         self.id = id
         self.name = name
@@ -47,7 +48,7 @@ public enum BrainRuntimes {
                               readFile: (String) -> String? = { try? String(contentsOfFile: $0, encoding: .utf8) })
         -> [BrainRuntimeDetection] {
         ids.map { id in
-                return BrainRuntimeDetection(id: id, name: name(for: id), installed: path != nil, path: path,
+                return BrainRuntimeDetection(id: id, name: name(for: id), installed: path != nil, path: path)
             }
             guard let runtime = AgentRuntime(rawValue: id) else {
                 return BrainRuntimeDetection(id: id, name: name(for: id), installed: false)
@@ -77,29 +78,5 @@ public enum BrainRuntimes {
             return nil
         }
         return detection.installed ? nil : "\(detection.name) is not installed."
-    }
-}
-
-/// Reads fields of BrainKit values by their encoded names, for fields this build's BrainKit may
-/// empty or nil, so the host works with either BrainKit.
-enum BrainSettingsFields {
-    /// The string at a dotted path of `brain`'s JSON form, else "".
-    static func string(_ brain: BrainSettings, _ path: String) -> String {
-        guard let data = try? JSONEncoder().encode(brain),
-              var node = try? JSONSerialization.jsonObject(with: data) else { return "" }
-        for key in path.split(separator: ".") {
-            guard let object = node as? [String: Any], let next = object[String(key)] else { return "" }
-            node = next
-        }
-        return node as? String ?? ""
-    }
-
-    /// A snapshot's `sessionKey`: the external session the runtime drives, when it has one.
-    static func sessionKey(_ snapshot: Any) -> String? {
-        for child in Mirror(reflecting: snapshot).children where child.label == "sessionKey" {
-            guard let key = child.value as? String, !key.isEmpty else { return nil }
-            return key
-        }
-        return nil
     }
 }
