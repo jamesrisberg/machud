@@ -36,7 +36,8 @@ final class StdioEndToEndTests: XCTestCase {
         send(["jsonrpc": "2.0", "method": "notifications/initialized"])
         send(["jsonrpc": "2.0", "id": 2, "method": "tools/list"])
         send(["jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": ["name": "say", "arguments": ["text": "hi"]]])
-        XCTAssertTrue(spin(until: { lines.response(id: 3) != nil }, timeout: 10))
+        // The server answers requests concurrently: wait for every response, not the last sent.
+        XCTAssertTrue(spin(until: { [1, 2, 3].allSatisfy { lines.response(id: $0) != nil } }, timeout: 10))
 
         XCTAssertEqual((lines.response(id: 1)?["result"] as? [String: Any])?["protocolVersion"] as? String, "2025-11-25")
         let tools = (lines.response(id: 2)?["result"] as? [String: Any])?["tools"] as? [[String: Any]] ?? []
