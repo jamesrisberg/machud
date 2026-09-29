@@ -49,10 +49,16 @@ public struct VoiceHostEnvironment: Equatable {
     /// `$MACHUD_VOICE_MODELS_DIR`, else nil for `~/Library/Application Support/MacHUD/Voice/Models`:
     /// where downloaded models (Kokoro) are kept.
     public var modelsDirectory: URL?
+    /// `$MACHUD_VOICE_HISTORY_DIR`, else nil for `~/Library/Application Support/MacHUD/Voice/History`:
+    /// MacHUD's own dictation history folder.
+    public var historyDirectory: URL?
+    /// `$SPEAKFREE_CONFIG_DIR` (SpeakFree's own override), else `~/.config/speakfree`: where
+    /// SpeakFree keeps its config and its recordings, which a shared history writes into.
+    public var speakFreeConfigDirectory: URL
     /// `$MACHUD_VOICE_KEYCHAIN_SERVICE`, else `com.jrisberg.machud.voice`: the Keychain service
     /// every secret is read from and written to (an isolated instance never sees the real key).
     public var keychainService: String
-    /// MacHUD's control socket, where `sessions open` goes: `$MACHUD_SOCKET`, else
+    /// MacHUD's control socket, where `sessions open` and `feed add` go: `$MACHUD_SOCKET`, else
     /// `/tmp/machud-<uid>.sock`.
     public var machudSocketPath: String
 
@@ -79,6 +85,15 @@ public struct VoiceHostEnvironment: Equatable {
             modelsDirectory = URL(fileURLWithPath: (models as NSString).expandingTildeInPath, isDirectory: true)
         } else {
             modelsDirectory = nil
+        }
+        historyDirectory = environment["MACHUD_VOICE_HISTORY_DIR"].flatMap { path in
+            path.isEmpty ? nil : URL(fileURLWithPath: (path as NSString).expandingTildeInPath, isDirectory: true)
+        }
+        if let speakFree = environment["SPEAKFREE_CONFIG_DIR"], !speakFree.isEmpty {
+            speakFreeConfigDirectory = URL(fileURLWithPath: (speakFree as NSString).expandingTildeInPath, isDirectory: true)
+        } else {
+            speakFreeConfigDirectory = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".config/speakfree", isDirectory: true)
         }
         if let service = environment["MACHUD_VOICE_KEYCHAIN_SERVICE"], !service.isEmpty {
             keychainService = service

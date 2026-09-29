@@ -61,7 +61,7 @@ final class SimulatedDictation: DictationDriving {
         let destination = destination
         let text = transcript
         schedule(transcriptionDelay) { [weak self] in
-            self?.onUpdate?(id, .finished(text: text, destination: destination))
+            self?.onUpdate?(id, .finished(text: text, destination: destination, transcript: text))
         }
     }
 

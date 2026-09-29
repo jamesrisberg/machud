@@ -518,6 +518,7 @@ struct VoiceStep: View {
                                 .toggleStyle(.switch).font(.system(size: 13)).disabled(!model.voiceOn)
                         }
                     }
+                    SpeechModelPanel(model: model, settings: settings)
                     OnboardingPanel {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("Gestures").font(.system(size: 12, weight: .semibold)).foregroundStyle(OnboardingStyle.secondary)
@@ -547,6 +548,70 @@ struct VoiceStep: View {
         }
         rows.append((["click orb"], "A hands-free turn with the agent; it listens until you stop."))
         return rows
+    }
+}
+
+/// The speech model dictation needs (installed, downloading, or Download) and whether
+/// finished dictations are kept, shared with SpeakFree when it is installed.
+struct SpeechModelPanel: View {
+    @ObservedObject var model: OnboardingModel
+    @ObservedObject var settings: VoiceSettingsModel
+
+    var body: some View {
+        OnboardingPanel {
+            VStack(alignment: .leading, spacing: 10) {
+                speechModelRow
+                Picker("History", selection: Binding(get: { model.history?.mode ?? "off" },
+                                                     set: { model.setHistoryMode($0) })) {
+                    ForEach(VoiceSettingsModel.historyModes, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                .pickerStyle(.segmented)
+                .font(.system(size: 12))
+                .disabled(!model.voiceHostUp)
+                if model.history?.speakFreeInstalled == true {
+                    Toggle("Share history with SpeakFree", isOn: Binding(
+                        get: { model.history?.shareWithSpeakFree ?? false }, set: { model.setShareHistory($0) }))
+                        .toggleStyle(.switch).font(.system(size: 12)).disabled(!model.voiceHostUp)
+                }
+                Text(historyNote).font(.system(size: 11)).foregroundStyle(OnboardingStyle.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    @ViewBuilder private var speechModelRow: some View {
+        HStack(spacing: 8) {
+            Text("Speech model").font(.system(size: 13, weight: .semibold)).fixedSize()
+            if let parakeet = model.parakeet {
+                if parakeet.installed {
+                    StatusPill(text: "Installed", ok: true)
+                } else if parakeet.downloading {
+                    Text("Downloading…").font(.system(size: 11))
+                    ProgressView(value: parakeet.progress).frame(width: 150)
+                    Text("\(Int(parakeet.progress * 100))%").font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(OnboardingStyle.secondary)
+                } else {
+                    Spacer()
+                    Button(parakeet.bytes.map { "Download (\(ByteCountFormatter.string(fromByteCount: $0, countStyle: .file)))" }
+                           ?? "Download") { model.downloadParakeet() }
+                        .buttonStyle(HUDButtonStyle(kind: .primary)).fixedSize()
+                }
+            } else {
+                Text(model.parakeetNote ?? "The speech model's state shows here once voice is on.")
+                    .font(.system(size: 11)).foregroundStyle(OnboardingStyle.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var historyNote: String {
+        if model.parakeet?.installed == false, model.parakeet?.downloading == false {
+            return "Dictation turns speech into text on this Mac with Parakeet; download it once (SpeakFree shares it)."
+        }
+        guard let history = model.history else { return "Keep a history of what you dictate, or not." }
+        if history.mode == "off" { return "Dictations are not kept." }
+        let folder = (history.folder as NSString).abbreviatingWithTildeInPath
+        return history.shareWithSpeakFree ? "Kept with SpeakFree's history in \(folder)." : "Kept in \(folder)."
     }
 }
 

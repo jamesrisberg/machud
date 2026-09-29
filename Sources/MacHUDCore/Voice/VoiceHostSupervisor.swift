@@ -52,6 +52,12 @@ final class VoiceHostSupervisor {
         (socketPath as NSString).deletingPathExtension + "-models"
     }
 
+    /// Where an isolated instance's host keeps dictation history: beside its own socket, never
+    /// MacHUD's real history folder.
+    static func isolatedHistoryDirectory(socketPath: String) -> String {
+        (socketPath as NSString).deletingPathExtension + "-history"
+    }
+
     /// A run at least this long counts as healthy and resets the backoff.
     static let stableRun: TimeInterval = 20
     /// Quick exits in a row before giving up.
@@ -125,7 +131,7 @@ final class VoiceHostSupervisor {
 
     /// The environment the helper runs with. A host started by an isolated MacHUD never touches
     /// what the real one owns: it runs with no microphone, no brain, no orb on screen, no sound
-    /// and its own models folder unless `MACHUD_VOICE_LIVE=1`, and keeps secrets under its own
+    /// and its own models and history folders unless `MACHUD_VOICE_LIVE=1`, and keeps secrets under its own
     /// Keychain service unless `MACHUD_VOICE_KEYCHAIN_SERVICE` names one.
     func childEnvironment() -> [String: String] {
         var env = environment
@@ -138,6 +144,9 @@ final class VoiceHostSupervisor {
                 }
                 if (env["MACHUD_VOICE_MODELS_DIR"] ?? "").isEmpty {
                     env["MACHUD_VOICE_MODELS_DIR"] = Self.isolatedModelsDirectory(socketPath: socketPath)
+                }
+                if (env["MACHUD_VOICE_HISTORY_DIR"] ?? "").isEmpty {
+                    env["MACHUD_VOICE_HISTORY_DIR"] = Self.isolatedHistoryDirectory(socketPath: socketPath)
                 }
             }
             if (env["MACHUD_VOICE_KEYCHAIN_SERVICE"] ?? "").isEmpty {
