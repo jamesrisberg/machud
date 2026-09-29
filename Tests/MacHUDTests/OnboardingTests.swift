@@ -422,6 +422,47 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual((model.json["toolDock"] as? [String: Any])?["position"] as? String, "right")
     }
 
+    /// Every click on the miniature moves the dock, not just the first: regression for a bug
+    /// where the picker's overlapping hit regions (fixed alongside this) made later clicks look
+    /// like they did nothing.
+    func testToolDockMovesOnEveryConsecutiveClick() {
+        let model = makeModel()
+        let sequence: [HUDDockPosition] = [.topLeft, .top, .topRight, .right, .bottomRight, .bottom, .bottomLeft, .left, .bottom]
+        for position in sequence {
+            model.moveDock(to: position)
+            XCTAssertEqual(dock.dockPosition, position, "the dock itself moved")
+            XCTAssertEqual(model.dockPosition, position, "the model picked up the move")
+        }
+    }
+
+    /// The miniature's eight hit regions never overlap: an overlap lets the topmost one (drawn
+    /// last) swallow taps meant for its neighbor, which is what made the picker feel dead after
+    /// the first click.
+    func testDockPositionPickerRegionsNeverOverlap() {
+        for size in [CGSize(width: 430, height: 230), CGSize(width: 300, height: 230), CGSize(width: 600, height: 180)] {
+            let screen = CGRect(origin: .zero, size: size).insetBy(dx: 6, dy: 6)
+            var byPosition: [HUDDockPosition: [CGRect]] = [:]
+            for position in ToolDock.menuPositions {
+                let rects = DockPositionPicker.segments(position, in: screen)
+                XCTAssertFalse(rects.isEmpty)
+                for rect in rects {
+                    XCTAssertGreaterThan(rect.width, 0, "\(position) at \(size)")
+                    XCTAssertGreaterThan(rect.height, 0, "\(position) at \(size)")
+                }
+                byPosition[position] = rects
+            }
+            for (i, a) in ToolDock.menuPositions.enumerated() {
+                for b in ToolDock.menuPositions[(i + 1)...] {
+                    for rectA in byPosition[a] ?? [] {
+                        for rectB in byPosition[b] ?? [] {
+                            XCTAssertFalse(rectA.intersects(rectB), "\(a) \(rectA) overlaps \(b) \(rectB) at \(size)")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: - First loadout and the radial menu
 
     func testFirstLoadoutCapturesAndShowsItsRegions() {

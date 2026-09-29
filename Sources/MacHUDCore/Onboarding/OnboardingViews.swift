@@ -389,8 +389,7 @@ struct WelcomeStep: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 14) {
                 Image(systemName: "rectangle.3.group.fill").font(.system(size: 38)).foregroundStyle(OnboardingStyle.accent)
-                StepTitle(title: "Welcome to MacHUD",
-                          subtitle: "Your screen as a grid you design, a dock of HUD tools, and a voice you can dictate with or hand work to. Here is everything to set up; tick through it in order or jump to any item.")
+                StepTitle(title: "Welcome to MacHUD", subtitle: "Let's get you set up:")
             }
             VStack(spacing: 6) {
                 ForEach(OnboardingStep.sections, id: \.self) { section in
@@ -414,7 +413,7 @@ struct WelcomeStep: View {
                 }
             }
             Spacer(minLength: 12)
-            Text("Setup takes a few minutes. Esc leaves it for later; it opens again where you left it, and the menu bar's Setup Guide… or `machud onboarding show` bring it back any time.")
+            Text("Setup takes a few minutes. Press Esc or ✕ to dismiss; open it again from the menu bar anytime.")
                 .font(.system(size: 12)).foregroundStyle(OnboardingStyle.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -426,8 +425,7 @@ struct PermissionsStep: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            StepTitle(title: "Permissions",
-                      subtitle: "macOS asks you, not MacHUD. Grant these once; the status below updates by itself.")
+            StepTitle(title: "Permissions", subtitle: "Grant these permissions so MacHUD can work at full power.")
             permission(symbol: "macwindow.on.rectangle", title: "Accessibility",
                        why: "To see and move other apps' windows: snapping, loadouts and parking.",
                        granted: model.accessibility, status: model.accessibility ? "Granted" : "Needed") {
@@ -491,7 +489,7 @@ struct VoiceStep: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            StepTitle(title: "Voice", subtitle: "Dictate into any app with the fn key, or hand a request to your agent.")
+            StepTitle(title: "Voice", subtitle: "Dictate into any app and talk to your MacHUD agent.")
             HStack(alignment: .top, spacing: 20) {
                 VStack(alignment: .leading, spacing: 14) {
                     OnboardingPanel {
