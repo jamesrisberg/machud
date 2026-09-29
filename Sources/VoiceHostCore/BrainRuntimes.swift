@@ -1,0 +1,105 @@
+import BrainKit
+import Foundation
+
+/// One brain runtime as this Mac has it: whether its tool is installed and where.
+public struct BrainRuntimeDetection: Equatable, Sendable {
+    public var id: String
+    public var name: String
+    public var installed: Bool
+    /// The executable found (or the override given), nil when none is.
+    public var path: String?
+    /// Hermes only: `~/.hermes/.env` turns on the API server the companion talks to.
+    public var apiServerEnabled: Bool?
+
+                apiServerEnabled: Bool? = nil) {
+        self.id = id
+        self.name = name
+        self.installed = installed
+        self.path = path
+        self.apiServerEnabled = apiServerEnabled
+    }
+
+    /// The `brain status` entry.
+    var json: [String: Any] {
+        var entry: [String: Any] = ["id": id, "name": name, "installed": installed]
+        if let path { entry["path"] = path }
+        if let apiServerEnabled { entry["apiServer"] = apiServerEnabled }
+        return entry
+    }
+}
+
+/// The runtimes the Brain settings offer, detected the way BrainKit looks tools up
+/// (`ExecutableLocator`: PATH, then the usual install folders; a path override wins).
+public enum BrainRuntimes {
+    /// In the order the Brain tab lists them.
+
+    public static func name(for id: String) -> String {
+        switch id {
+        case "codex": return "Codex"
+        case "claude": return "Claude"
+        case "hermes": return "Hermes"
+        default: return id
+        }
+    }
+
+    /// Every runtime in `ids`, with the path overrides in `brain`.
+    public static func detect(_ brain: BrainSettings, locator: ExecutableLocator = .live,
+                              readFile: (String) -> String? = { try? String(contentsOfFile: $0, encoding: .utf8) })
+        -> [BrainRuntimeDetection] {
+        ids.map { id in
+                return BrainRuntimeDetection(id: id, name: name(for: id), installed: path != nil, path: path,
+            }
+            guard let runtime = AgentRuntime(rawValue: id) else {
+                return BrainRuntimeDetection(id: id, name: name(for: id), installed: false)
+            }
+            let override: String
+            switch id {
+            case "codex": override = brain.codex.executablePath
+            case "claude": override = brain.claude.executablePath
+            default: override = ""
+            }
+            let found = BrainCatalog.detect(runtime, locator: locator, override: override, readFile: readFile)
+            return BrainRuntimeDetection(id: id, name: name(for: id), installed: found.isInstalled,
+                                         path: found.executable, apiServerEnabled: found.apiServerEnabled)
+        }
+    }
+
+    /// Why the chosen runtime cannot take a turn on this Mac, or nil.
+    static func problem(runtime id: String, brain: BrainSettings, detections: [BrainRuntimeDetection]) -> String? {
+        guard let detection = detections.first(where: { $0.id == id }) else { return nil }
+        if id == "hermes" {
+            // The companion reaches Hermes over HTTP: a URL given in the settings needs nothing local.
+            guard brain.hermes.url.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+            if !detection.installed { return "Hermes is not installed." }
+            if detection.apiServerEnabled == false {
+                return "Hermes' API server is off: set API_SERVER_ENABLED=true in ~/.hermes/.env."
+            }
+            return nil
+        }
+        return detection.installed ? nil : "\(detection.name) is not installed."
+    }
+}
+
+/// Reads fields of BrainKit values by their encoded names, for fields this build's BrainKit may
+/// empty or nil, so the host works with either BrainKit.
+enum BrainSettingsFields {
+    /// The string at a dotted path of `brain`'s JSON form, else "".
+    static func string(_ brain: BrainSettings, _ path: String) -> String {
+        guard let data = try? JSONEncoder().encode(brain),
+              var node = try? JSONSerialization.jsonObject(with: data) else { return "" }
+        for key in path.split(separator: ".") {
+            guard let object = node as? [String: Any], let next = object[String(key)] else { return "" }
+            node = next
+        }
+        return node as? String ?? ""
+    }
+
+    /// A snapshot's `sessionKey`: the external session the runtime drives, when it has one.
+    static func sessionKey(_ snapshot: Any) -> String? {
+        for child in Mirror(reflecting: snapshot).children where child.label == "sessionKey" {
+            guard let key = child.value as? String, !key.isEmpty else { return nil }
+            return key
+        }
+        return nil
+    }
+}

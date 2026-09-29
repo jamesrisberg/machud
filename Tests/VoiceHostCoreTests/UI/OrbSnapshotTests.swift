@@ -45,5 +45,20 @@ final class OrbSnapshotTests: XCTestCase {
             try OrbSnapshot.write(rep, to: url)
             print("orb snapshot: \(url.path)")
         }
+        // The resting float at its rest position and at the bottom of its drift.
+        for (name, phase) in [("15-idle-float-top", 0.0), ("16-idle-float-bottom", OrbLayout.bobPeriod / 2)] {
+            let rep = try XCTUnwrap(OrbSnapshot.render(VoiceHostState(), phaseTime: phase), name)
+            let url = out.appendingPathComponent("\(name).png")
+            try OrbSnapshot.write(rep, to: url)
+            print("orb snapshot: \(url.path)")
+        }
+        // The card growing out of the orb, with "Open in …" for the brain's session.
+        for progress in [0.0, 0.35, 0.7, 1.0] {
+            let name = String(format: "17-card-grow-%03d", Int(progress * 100))
+            let rep = try XCTUnwrap(OrbSnapshot.render(working, cardProgress: progress), name)
+            let url = out.appendingPathComponent("\(name).png")
+            try OrbSnapshot.write(rep, to: url)
+            print("orb snapshot: \(url.path)")
+        }
     }
 }

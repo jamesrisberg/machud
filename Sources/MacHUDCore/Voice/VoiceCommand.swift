@@ -12,8 +12,9 @@ enum VoiceCommand: Equatable {
     case mergeSettings([String: String])
 
     /// The actions `action name=` takes (the host's `VoiceHostAction`s).
-    static let actions = ["click", "ask", "dictate", "stop", "cancel", "approve", "deny", "dismiss", "mute", "unmute"]
-    static let subVerbs = ["state", "status", "hello", "action", "settings", "secret"]
+    static let actions = ["click", "ask", "dictate", "stop", "cancel", "approve", "deny", "dismiss", "mute", "unmute",
+                          "open-session"]
+    static let subVerbs = ["state", "status", "hello", "action", "settings", "brain", "secret"]
 
     struct Invalid: Error, CustomStringConvertible {
         let description: String
@@ -35,10 +36,12 @@ enum VoiceCommand: Equatable {
             return try action(args)
         case "settings":
             return try settings(args)
+        case "brain":
+            return try brain(args)
         case "secret":
             return try secret(args)
         default:
-            throw Invalid("voice takes state, status, action, settings or secret, not \(sub)")
+            throw Invalid("voice takes state, status, action, settings, brain or secret, not \(sub)")
         }
     }
 
@@ -75,6 +78,14 @@ enum VoiceCommand: Equatable {
             throw Invalid("voice settings set needs settings={…} or key=value (dotted, e.g. voice.speakReplies=true)")
         }
         return .mergeSettings(pairs)
+    }
+
+    /// `brain status` (the only one): the host's `brain action=status`.
+    private static func brain(_ args: [String: String]) throws -> VoiceCommand {
+        let inline = args["action"].flatMap { $0 == "1" ? nil : $0 }
+        let op = inline ?? (args["status"] != nil ? "status" : nil) ?? "status"
+        guard op == "status" else { throw Invalid("voice brain takes status, not \(op)") }
+        return .forward("brain", ["action": "status"])
     }
 
     private static func secret(_ args: [String: String]) throws -> VoiceCommand {

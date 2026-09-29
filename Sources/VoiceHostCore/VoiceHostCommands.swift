@@ -3,12 +3,13 @@ import HUDKit
 import VoiceKit
 
 /// The `machud-voice` socket's verbs: `hello`, `state`, `settings get|set settings=<json>`,
-/// `action name=<click|ask|dictate|stop|cancel|approve|deny|dismiss|mute|unmute> [id=]`,
-/// `secret set|clear name=grok [value=]` (values are written, never read back) and `quit`.
+/// `action name=<click|ask|dictate|stop|cancel|approve|deny|dismiss|mute|unmute|open-session> [id=]`,
+/// `brain status`, `secret set|clear name=grok [value=]` (values are written, never read back)
+/// and `quit`.
 /// `subscribe` is `HUDSocketServer`'s own; `publish(_:on:)` feeds it `state` events.
 @MainActor
 final class VoiceHostCommands {
-    static let verbs = ["hello", "state", "settings", "action", "secret", "quit"]
+    static let verbs = ["hello", "state", "settings", "action", "brain", "secret", "quit"]
     /// Secret names the socket accepts, and the `VoiceSecretStoring` key each is stored under.
     static let secretKeys = ["grok": VoiceSecrets.grokAPIKey]
 
@@ -31,6 +32,11 @@ final class VoiceHostCommands {
         for verb in Self.verbs {
             server.register(verb) { [weak self] args, done in
                 guard let self else { return done(["ok": false, "error": "voice host stopping"]) }
+                if verb == "action", Self.actionName(args) == "open-session" {
+                    // Answers once MacHUD has opened the session (or said why not).
+                    Task { @MainActor in done(await self.openSession()) }
+                    return
+                }
                 done(handle(verb, args))
                 if verb == "quit" {
                     // Let the reply reach the client first.
@@ -56,6 +62,8 @@ final class VoiceHostCommands {
             return settings(args)
         case "action":
             return action(args)
+        case "brain":
+            return brain(args)
         case "secret":
             return secret(args)
         case "quit":
@@ -87,8 +95,10 @@ final class VoiceHostCommands {
         }
     }
 
+    static func actionName(_ args: [String: String]) -> String? { args["name"] ?? args["_"] }
+
     private func action(_ args: [String: String]) -> [String: Any] {
-        guard let name = args["name"] ?? args["_"] else {
+        guard let name = Self.actionName(args) else {
             return ["ok": false, "error": "action needs name=<verb>"]
         }
         let action: VoiceHostAction
@@ -103,6 +113,7 @@ final class VoiceHostCommands {
         case "dismiss": action = .dismissCard
         case "mute": action = .setMuted(true)
         case "unmute": action = .setMuted(false)
+        case "open-session": action = .openSession
         case "approve", "deny":
             guard let id = args["id"], !id.isEmpty else { return ["ok": false, "error": "\(name) needs id="] }
             action = name == "approve" ? .approve(id: id) : .deny(id: id)
@@ -111,6 +122,32 @@ final class VoiceHostCommands {
         }
         controller.perform(action)
         return ["ok": true, "state": Self.jsonObject(controller.state)]
+    }
+
+    /// `action name=open-session`: `{ok, app}` once MacHUD shows the session, else `{ok: false, error}`.
+    func openSession() async -> [String: Any] {
+        switch await controller.openSessionNow() {
+        case .success(let app): return ["ok": true, "app": app, "state": Self.jsonObject(controller.state)]
+        case .failure(let error): return ["ok": false, "error": error.message]
+        }
+    }
+
+    /// `brain status`: whether the brain can take a turn, why not, the workspace and the
+    /// runtimes found on this Mac. Detection runs again each time, so an install shows up.
+    private func brain(_ args: [String: String]) -> [String: Any] {
+        let sub = args["action"] ?? args["_"] ?? "status"
+        guard sub == "status" else { return ["ok": false, "error": "brain takes status, not \(sub)"] }
+        controller.refreshRuntimeDetection()
+        let state = controller.state
+        var reply: [String: Any] = [
+            "ok": true, "available": state.brainAvailable,
+            "workspace": controller.settings.brain.workspacePath,
+            "runtime": controller.settings.brain.runtime.rawValue,
+            "runtimes": controller.runtimeDetections().map(\.json),
+        ]
+        if let problem = state.brainProblem { reply["problem"] = problem }
+        if let key = state.sessionKey { reply["sessionKey"] = key }
+        return reply
     }
 
     private func secret(_ args: [String: String]) -> [String: Any] {

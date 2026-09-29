@@ -14,16 +14,19 @@ enum OrbSnapshot {
                          safeAreaInsetTop: 32, notchWidth: 185)
     }
 
-    /// Renders `state` with the morph at `stretch` (nil: settled for the state) and the input
-    /// level history `levels`, at 2x.
+    /// Renders `state` with the morph at `stretch` (nil: settled for the state), the input
+    /// level history `levels`, the running motion `phaseTime` seconds in (the resting float
+    /// already eased in), and the card grown out of the orb to `cardProgress` (nil: open), at 2x.
     static func render(_ state: VoiceHostState, stretch: CGFloat? = nil, levels: [Double] = [],
-                       hovering: Bool = false, phaseTime: Double = 0.35) -> NSBitmapImageRep? {
+                       hovering: Bool = false, phaseTime: Double = 0.35,
+                       cardProgress: CGFloat? = nil) -> NSBitmapImageRep? {
         var tracker = OrbSceneTracker()
         let now = Date()
         tracker.ingest(state, now: now)
         tracker.setHovering(hovering, now: now)
         let scene = tracker.scene(now: now)
-        var animator = OrbAnimator(stretch: stretch ?? OrbAnimator.target(for: scene))
+        var animator = OrbAnimator(stretch: stretch ?? OrbAnimator.target(for: scene),
+                                   float: OrbAnimator.floatTarget(for: scene, reduceMotion: false))
         // Settle the level and advance the free-running phase to a representative frame.
         for _ in 0..<Int(phaseTime * 60) {
             animator.advance(dt: 1.0 / 60, scene: scene, level: state.inputLevel, reduceMotion: false)
@@ -47,9 +50,12 @@ enum OrbSnapshot {
 
             if scene.card != nil || scene.errorMessage != nil {
                 let card = OrbCardView(frame: .zero)
-                card.update(card: scene.card, errorMessage: scene.errorMessage)
-                card.frame = OrbLayout.cardFrame(size: card.fittingCardSize, geometry: geometry)
-                root.addSubview(card)
+                card.update(card: scene.card, errorMessage: scene.errorMessage, sessionLink: scene.sessionLink)
+                let cardFrame = OrbLayout.cardFrame(size: card.fittingCardSize, geometry: geometry)
+                card.frame = card.layoutGrow(progress: cardProgress ?? 1, card: cardFrame,
+                                             orb: OrbLayout.orbFrame(geometry: geometry, bob: animator.bobOffset))
+                // The card window sits under the orb's.
+                root.addSubview(card, positioned: .below, relativeTo: orb)
                 card.layoutSubtreeIfNeeded()
             }
         }

@@ -2,15 +2,16 @@ import BrainKit
 import Combine
 import Foundation
 
-/// BrainKit's supervised companion plus a client for it. Available once the companion is
-/// running and the client has connected; a restart of the companion reconnects.
+/// BrainKit's supervised companion plus a client for it. Ready once the companion is running
+/// and the client has connected; a restart of the companion reconnects. Its health carries the
+/// supervisor's reason whenever it is not running.
 @MainActor
 final class BrainConnection: BrainDriving {
     struct Unavailable: LocalizedError {
         var errorDescription: String? { "The brain is not running yet" }
     }
 
-    var onAvailabilityChanged: ((Bool) -> Void)?
+    var onHealthChanged: ((BrainHealth) -> Void)?
     var onSnapshot: ((AgentSessionSnapshot) -> Void)?
     var onStopped: (() -> Void)?
 
@@ -18,6 +19,9 @@ final class BrainConnection: BrainDriving {
     private var client: AgentSessionClient?
     private var clientObservers = Set<AnyCancellable>()
     private var serviceObserver: AnyCancellable?
+    private var serviceState: ManagedService.State = .stopped
+    private var clientConnected = false
+    private var reported: BrainHealth?
 
     convenience init() {
         self.init(service: BrainService())
@@ -28,10 +32,14 @@ final class BrainConnection: BrainDriving {
         service.service.onReady = { [weak self] in self?.connect() }
         serviceObserver = service.service.$state.sink { [weak self] state in
             // `$state` publishes before the change lands; act on the new value.
-            guard state != .running else { return }
             MainActor.assumeIsolated {
-                self?.dropClient()
-                self?.onStopped?()
+                guard let self else { return }
+                self.serviceState = state
+                if state != .running {
+                    self.dropClient()
+                    self.onStopped?()
+                }
+                self.report()
             }
         }
     }
@@ -63,7 +71,12 @@ final class BrainConnection: BrainDriving {
             .sink { [weak self] snapshot in MainActor.assumeIsolated { self?.onSnapshot?(snapshot) } }
             .store(in: &clientObservers)
         client.$isConnected.removeDuplicates()
-            .sink { [weak self] connected in MainActor.assumeIsolated { self?.onAvailabilityChanged?(connected) } }
+            .sink { [weak self] connected in
+                MainActor.assumeIsolated {
+                    self?.clientConnected = connected
+                    self?.report()
+                }
+            }
             .store(in: &clientObservers)
         Task { [weak self] in
             // The companion is listening once ready; retry briefly in case it is still settling.
@@ -80,6 +93,25 @@ final class BrainConnection: BrainDriving {
         clientObservers.removeAll()
         client.disconnect()
         self.client = nil
-        onAvailabilityChanged?(false)
+        clientConnected = false
+        report()
+    }
+
+    private func report() {
+        let health = Self.health(serviceState, clientConnected: clientConnected)
+        guard health != reported else { return }
+        reported = health
+        onHealthChanged?(health)
+    }
+
+    static func health(_ state: ManagedService.State, clientConnected: Bool) -> BrainHealth {
+        switch state {
+        case .stopped: return .stopped
+        case .starting: return .starting
+        case .running: return clientConnected ? .ready : .connecting
+        case .unavailable(let reason): return .unavailable(reason)
+        case .backingOff(_, _, let reason): return .restarting(reason)
+        case .failed(let reason): return .failed(reason)
+        }
     }
 }
