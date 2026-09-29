@@ -21,6 +21,8 @@ enum OrbLayout {
     static let orbTopGap: CGFloat = 5
     /// Agent listening grows the orb by up to this fraction of its diameter at full level.
     static let pulseMax: CGFloat = 0.3
+    /// The armed orb (fn gesture undecided) is this fraction larger than the resting one.
+    static let armedSwell: CGFloat = 0.06
 
     static let waveformHeight: CGFloat = 32
     static let waveformMinWidth: CGFloat = 150

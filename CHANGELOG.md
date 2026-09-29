@@ -51,6 +51,11 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   folder it uses and picks another with a folder picker. The runtime list marks runtimes that
   aren't installed and offers mclaude once it is, noting that its session also appears in
   MechaHUD.
+- Pressing fn no longer starts the orb toward the waveform before it knows what you meant: while
+  a second press could still turn the take into an agent request, the orb swells slightly,
+  brightens and shows a soft ring that follows your voice, then turns into the waveform
+  (dictation) or the agent's pulse once the gesture is decided. Under Reduce Motion it only
+  brightens.
 - The Voice tab has Test Voice, which says a sample with the reply voice you picked, and a
   Download button for the Kokoro voice with its progress; replies use Kokoro as soon as it is
   installed. `machud voice action say text=…` speaks any text, and `machud voice models` shows or

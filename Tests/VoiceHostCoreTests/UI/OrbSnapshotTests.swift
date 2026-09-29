@@ -53,6 +53,24 @@ final class OrbSnapshotTests: XCTestCase {
             try OrbSnapshot.write(rep, to: url)
             print("orb snapshot: \(url.path)")
         }
+        // The armed look while the fn gesture is undecided, then its two commits: into the
+        // dictation waveform and into the agent pulse, each midway and settled.
+        let armedCases: [(String, VoiceHostState, CGFloat?, CGFloat?, Bool)] = [
+            ("18-armed-quiet", VoiceHostState(phase: .listening(.dictation), inputLevel: 0.05, gesturePending: true), nil, nil, false),
+            ("19-armed-speaking", VoiceHostState(phase: .listening(.dictation), inputLevel: 0.7, gesturePending: true), nil, nil, false),
+            ("20-armed-reduce-motion", VoiceHostState(phase: .listening(.dictation), inputLevel: 0.7, gesturePending: true), nil, nil, true),
+            ("21-commit-dictation-midway", VoiceHostState(phase: .listening(.dictation), inputLevel: 0.5), 0.35, 0.55, false),
+            ("22-commit-dictation-settled", VoiceHostState(phase: .listening(.dictation), inputLevel: 0.5), nil, nil, false),
+            ("23-commit-agent-midway", VoiceHostState(phase: .listening(.agent), inputLevel: 0.5), nil, 0.5, false),
+            ("24-commit-agent-settled", VoiceHostState(phase: .listening(.agent), inputLevel: 0.5), nil, nil, false),
+        ]
+        for (name, state, stretch, armed, reduceMotion) in armedCases {
+            let rep = try XCTUnwrap(OrbSnapshot.render(state, stretch: stretch, levels: speech, armed: armed,
+                                                       reduceMotion: reduceMotion), name)
+            let url = out.appendingPathComponent("\(name).png")
+            try OrbSnapshot.write(rep, to: url)
+            print("orb snapshot: \(url.path)")
+        }
         // The card growing out of the orb, with "Open in …" for the brain's session.
         for progress in [0.0, 0.35, 0.7, 1.0] {
             let name = String(format: "17-card-grow-%03d", Int(progress * 100))

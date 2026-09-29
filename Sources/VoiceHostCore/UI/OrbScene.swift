@@ -8,7 +8,7 @@ enum OrbForm: Equatable {
 }
 
 enum OrbTint: Equatable, CaseIterable {
-    case resting, muted, dictation, agent, working, approval, speaking, failed
+    case resting, muted, armed, dictation, agent, working, approval, speaking, failed
 }
 
 enum OrbMotion: Equatable {
@@ -25,6 +25,8 @@ enum OrbMotion: Equatable {
     case breathe
     /// Resting: a soft halo breathing slowly and a gentle float below the rest position.
     case idle
+    /// The fn gesture is undecided: the orb swells a little and a soft ring follows the level.
+    case armed
 }
 
 /// What the orb and card show for one moment: the state mapped through the presenter's
@@ -106,7 +108,7 @@ struct OrbSceneTracker {
                 phase = .idle
             }
         }
-        var scene = Self.map(phase, muted: state.muted)
+        var scene = Self.map(phase, muted: state.muted, gesturePending: state.gesturePending)
         scene.errorMessage = errorMessage
         scene.muted = state.muted
         if state.hiddenForFullScreen {
@@ -160,9 +162,14 @@ struct OrbSceneTracker {
         }
     }
 
-    static func map(_ phase: VoicePhase, muted: Bool) -> OrbScene {
+    /// - Parameter gesturePending: an fn take whose gesture is undecided shows the armed orb
+    ///   until it commits to the waveform (dictation) or the agent's pulse.
+    static func map(_ phase: VoicePhase, muted: Bool, gesturePending: Bool = false) -> OrbScene {
         func s(_ form: OrbForm, _ tint: OrbTint, _ motion: OrbMotion, _ status: String) -> OrbScene {
             OrbScene(hidden: false, form: form, tint: tint, motion: motion, accessibilityStatus: status)
+        }
+        if gesturePending, phase == .idle || phase == .listening(.dictation) {
+            return s(.orb, .armed, .armed, "Listening")
         }
         switch phase {
         case .idle: return muted ? s(.orb, .muted, .none, "Muted") : s(.orb, .resting, .idle, "Ready")

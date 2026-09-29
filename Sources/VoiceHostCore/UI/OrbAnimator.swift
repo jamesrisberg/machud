@@ -14,11 +14,17 @@ struct OrbAnimator: Equatable {
     private(set) var float: CGFloat
     /// Seconds of running motion; frozen under Reduce Motion.
     private(set) var phase: Double = 0
+    /// How much of the armed look applies, 0...1: it eases in while the fn gesture is
+    /// undecided and out as the orb commits, so the swell, ring and neutral tint hand over to
+    /// the waveform or the agent's pulse without a jump.
+    private(set) var armed: CGFloat = 0
 
     /// Rate of the morph's exponential ease, per second.
     static let stretchRate: Double = 11
     /// Rate of the float's ease in and out, per second.
     static let floatRate: Double = 4
+    /// Rate of the armed look's ease in and out, per second.
+    static let armedRate: Double = 14
     static let settleEpsilon: CGFloat = 0.004
 
     init(stretch: CGFloat = 0, float: CGFloat = 0) {
@@ -34,11 +40,15 @@ struct OrbAnimator: Equatable {
         scene.motion == .idle && scene.card == nil && scene.errorMessage == nil && !reduceMotion ? 1 : 0
     }
 
-    /// `other` with the morph pinned at `stretch` (snapshots of the in-between frames).
-    init(stretch: CGFloat, copying other: OrbAnimator) {
+    /// `other` with the morph pinned at `stretch` and the armed look at `armed` (snapshots of
+    /// the in-between frames).
+    init(stretch: CGFloat? = nil, armed: CGFloat? = nil, copying other: OrbAnimator) {
         self = other
-        self.stretch = stretch
+        if let stretch { self.stretch = stretch }
+        if let armed { self.armed = armed }
     }
+
+    static func armedTarget(for scene: OrbScene) -> CGFloat { scene.motion == .armed ? 1 : 0 }
 
     static func target(for scene: OrbScene) -> CGFloat { scene.form == .waveform ? 1 : 0 }
 
@@ -61,17 +71,26 @@ struct OrbAnimator: Equatable {
             float += (floatGoal - float) * CGFloat(1 - exp(-dt * Self.floatRate))
             if abs(floatGoal - float) < Self.settleEpsilon { float = floatGoal }
         }
+        let armedGoal = Self.armedTarget(for: scene)
+        if reduceMotion {
+            armed = armedGoal
+        } else {
+            armed += (armedGoal - armed) * CGFloat(1 - exp(-dt * Self.armedRate))
+            if abs(armedGoal - armed) < Self.settleEpsilon { armed = armedGoal }
+        }
         if !reduceMotion { phase += dt }
     }
 
     /// Nothing will change until the next state: the driver timer can stop.
     func isSettled(for scene: OrbScene, reduceMotion: Bool = false) -> Bool {
-        guard stretch == Self.target(for: scene), float == Self.floatTarget(for: scene, reduceMotion: reduceMotion)
+        guard stretch == Self.target(for: scene), float == Self.floatTarget(for: scene, reduceMotion: reduceMotion),
+              armed == Self.armedTarget(for: scene)
         else { return false }
         switch scene.motion {
         case .none: return true
         case .pulse, .bars: return false
-        case .spin, .breathe, .spinner, .idle: return reduceMotion
+        // The armed ring follows the level; under Reduce Motion the look is a still brightening.
+        case .spin, .breathe, .spinner, .idle, .armed: return reduceMotion
         }
     }
 }

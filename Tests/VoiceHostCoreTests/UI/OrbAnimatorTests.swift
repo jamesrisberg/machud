@@ -41,6 +41,30 @@ final class OrbAnimatorTests: XCTestCase {
         XCTAssertFalse(animator.isSettled(for: scene(.orb, .idle)))
     }
 
+    // MARK: Armed
+
+    func testArmedEasesInAndOutWithoutStretching() {
+        var animator = OrbAnimator()
+        for _ in 0..<30 { animator.advance(dt: 1.0 / 60, scene: scene(.orb, .armed), level: 0.5, reduceMotion: false) }
+        XCTAssertEqual(animator.stretch, 0)
+        XCTAssertGreaterThan(animator.armed, 0.9)
+        XCTAssertFalse(animator.isSettled(for: scene(.orb, .armed)), "the ring follows the level")
+        // Committing to the waveform: the armed look fades while the orb stretches.
+        animator.advance(dt: 1.0 / 60, scene: scene(.waveform, .bars), level: 0.5, reduceMotion: false)
+        XCTAssertGreaterThan(animator.armed, 0)
+        XCTAssertGreaterThan(animator.stretch, 0)
+        for _ in 0..<60 { animator.advance(dt: 1.0 / 60, scene: scene(.waveform, .bars), level: 0.5, reduceMotion: false) }
+        XCTAssertEqual(animator.armed, 0)
+    }
+
+    func testArmedUnderReduceMotionJumps() {
+        var animator = OrbAnimator()
+        animator.advance(dt: 1.0 / 60, scene: scene(.orb, .armed), level: 0, reduceMotion: true)
+        XCTAssertEqual(animator.armed, 1)
+        animator.advance(dt: 1.0 / 60, scene: scene(.orb, .pulse), level: 0, reduceMotion: true)
+        XCTAssertEqual(animator.armed, 0)
+    }
+
     // MARK: Resting float
 
     func testTheFloatEasesInWhileResting() {
