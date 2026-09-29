@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-09-29T11:25:52Z",
+  "updatedAt": "2026-09-29T11:26:51Z",
   "hudkit": "0.2.0",
   "apps": [
     {
@@ -41,12 +41,12 @@
       "name": "magickHUD",
       "kind": "hover",
       "summary": "Drop images, pick a preset, run ImageMagick",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "minOS": "14.0",
-      "download": "https://github.com/jamesrisberg/magickhud/releases/download/v0.1.0/magickHUD-0.1.0.zip",
-      "sha256": "d123ea3faf44638ac0fed39929952eeb5092b557de16f3c18dab5aab10625c6b",
-      "size": 1906975,
-      "publishedAt": "2026-09-27T15:48:22Z",
+      "download": "https://github.com/jamesrisberg/magickhud/releases/download/v0.2.0/magickHUD-0.2.0.zip",
+      "sha256": "cd80e96853443f7e742f90f0720be02c7064300ed7465a46db8adabafe802d1e",
+      "size": 1950196,
+      "publishedAt": "2026-09-29T11:26:51Z",
       "icon": "https://jamesrisberg.github.io/machud/icons/magickhud.png",
       "homepage": "https://github.com/jamesrisberg/magickhud",
       "bundled": true
