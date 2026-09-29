@@ -318,6 +318,21 @@ brokers the capability so a client can ask "who shows agent sessions" instead of
 
 `sessionKey` is opaque to MacHUD; the provider defines it (mechaclaude's is `claude:<sessionId>`).
 
+## Text feed
+
+A discovered app may declare HUDKit's `text-feed` capability on a panel (Stash's history panel
+does): it keeps a history of finished text and answers a `feed action=add text= source= [title=]
+[date=]` command on its own socket, without treating the item as a clipboard write
+(`../hudkit/docs/CONTRACT.md` § Text feed). MacHUD brokers the capability so a client (the voice
+host) can send fed text without naming an app.
+
+| Command | Args | Effect |
+| --- | --- | --- |
+| `feed` / `feed add` | `text=` `source=` `title=` (optional) `date=` (optional) | forwards `feed action=add ...` to every discovered app with a panel declaring `text-feed` whose process is already up, never launching one just to feed it; `{delivered[]}` lists the bundle ids that accepted it (in discovery order), `[]` when none run or none accepted it |
+
+`source` is a short label the item is tagged with (e.g. `"Dictation"`, `"Agent"`); it is opaque to
+MacHUD.
+
 ## App catalog and installs
 
 MacHUD reads the app catalog (`catalog.json`, published at
