@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-09-29T11:25:00Z",
+  "updatedAt": "2026-09-29T11:25:52Z",
   "hudkit": "0.2.0",
   "apps": [
     {
@@ -25,12 +25,12 @@
       "name": "ffmpegHUD",
       "kind": "hover",
       "summary": "Drop a video, pick a preset, run ffmpeg",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "minOS": "14.0",
-      "download": "https://github.com/jamesrisberg/ffmpeghud/releases/download/v0.1.0/ffmpegHUD-0.1.0.zip",
-      "sha256": "84802e3532f009c44c3e21f27e16fa249fb8f05871d340d95db7abc6fceaca17",
-      "size": 1880628,
-      "publishedAt": "2026-09-27T15:47:33Z",
+      "download": "https://github.com/jamesrisberg/ffmpeghud/releases/download/v0.2.0/ffmpegHUD-0.2.0.zip",
+      "sha256": "2e4b64f440a3b6b5e8bd610b07d04a30b3b80d821d20910de0e739d2fcbd54ad",
+      "size": 1926081,
+      "publishedAt": "2026-09-29T11:25:52Z",
       "icon": "https://jamesrisberg.github.io/machud/icons/ffmpeghud.png",
       "homepage": "https://github.com/jamesrisberg/ffmpeghud",
       "bundled": true
