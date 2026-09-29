@@ -68,10 +68,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         machud.registerControl(control)
         installCatalog()
         installVoice()
-        installOnboarding()
         installMenuBar()
         installToolDock()
         installMenuHost()
+        installOnboarding()
         // Every visibility change (socket, hotkey, menu, close button, sibling push)
         // reaches `subscribe`rs, not only the ones made through the socket.
         panels.onStateChange = { [weak router, weak toolDock] in
@@ -320,11 +320,14 @@ extension AppDelegate {
     }
 
     /// First-run onboarding: the full-screen overlay at launch until it is finished or skipped,
-    /// Setup Guide… in the menu, and the `onboarding` verb.
+    /// Setup Guide… in the menu, and the `onboarding` verb. After the tool dock, which its
+    /// Tool dock section drives.
     fileprivate func installOnboarding() {
         let model = OnboardingModel(voice: voice, apps: catalog.tab, permissions: LiveOnboardingPermissions())
-        model.tour = OnboardingTour(radialWheel: store.hotkeys.loadoutMenu?.display ?? "the wheel hotkey",
-                                    toolDock: store.hotkeys.dock?.display ?? "the dock hotkey")
+        model.hotkeys = OnboardingHotkeys(radialWheel: store.hotkeys.loadoutMenu?.display ?? "the wheel hotkey",
+                                          toolDock: store.hotkeys.dock?.display ?? "the dock hotkey")
+        model.toolDock = LiveOnboardingToolDock(dock: toolDock)
+        model.loadouts = LiveOnboardingLoadouts(engine: engine, store: store)
         let services = OnboardingServices(model: model, presenter: OnboardingWindowController())
         services.prepareApps = { [weak catalog] in
             catalog?.preselectBundled()
