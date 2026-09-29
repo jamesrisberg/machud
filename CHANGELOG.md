@@ -6,6 +6,12 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 
 ## [Unreleased]
 
+### Agent sessions
+- MacHUD can find and open an agent session in whichever app shows it, without naming the app:
+  `machud sessions providers` lists the discovered apps that show agent sessions (MechaHUD's
+  dashboard is one), and `machud sessions open id=<session key>` opens and focuses one, launching
+  the app if it is not running.
+
 ### Voice
 - MacHUD runs its voice host as a helper inside the app and keeps it running: it starts with
   MacHUD, comes back after a crash, and stops when you turn voice off or quit MacHUD.

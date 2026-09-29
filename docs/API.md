@@ -304,6 +304,20 @@ frame, then `panel mode parked edge= peek=`; the orb (and `park reveal`) sends
 `panel mode full`. A stopped sibling is launched and placed first, then parked. Parkings of
 an app that quits are dropped with their orb.
 
+## Agent sessions
+
+A discovered app may declare HUDKit's `agent-sessions` capability on a panel (mechaclaude's
+MechaHUD dashboard does): it shows agent sessions and answers `action open-session id=` and a
+`sessions` command on its own socket (`../hudkit/docs/CONTRACT.md` § Agent sessions). MacHUD
+brokers the capability so a client can ask "who shows agent sessions" instead of naming an app.
+
+| Command | Args | Effect |
+| --- | --- | --- |
+| `sessions` / `sessions providers` | | every discovered app with a panel declaring `agent-sessions`: `providers[] {app, socket, running}` |
+| `sessions open` | `id=<sessionKey>` | forwards `action open-session id=` to the first provider already running, else one whose process is starting, else the first discovered (launching it, as `apps launch` does); returns `{app}` (the bundle id it reached), or the provider's own `ok: false` reply, or `{"error": "No app shows agent sessions"}` when none is discovered |
+
+`sessionKey` is opaque to MacHUD; the provider defines it (mechaclaude's is `claude:<sessionId>`).
+
 ## App catalog and installs
 
 MacHUD reads the app catalog (`catalog.json`, published at
