@@ -407,6 +407,19 @@ final class VoiceControlTests: XCTestCase {
     }
     // MARK: - Previews and models
 
+    func testSayAndModelsReachTheHostInTheContractsShape() throws {
+        supervisor.start()
+        XCTAssertEqual(run(["action", "name=say", "text=Hello there"])["ok"] as? Bool, true)
+        XCTAssertEqual(host.actions.last, ["name": "say", "text": "Hello there"])
+        XCTAssertEqual(host.said, ["Hello there"])
+        let status = run(["models", "status"])
+        XCTAssertEqual((status["kokoro"] as? [String: Any])?["installed"] as? Bool, false)
+        XCTAssertEqual(host.modelRequests.last, ["action": "status"])
+        let download = run(["models", "download", "id=kokoro"])
+        XCTAssertEqual((download["kokoro"] as? [String: Any])?["downloading"] as? Bool, true)
+        XCTAssertEqual(host.modelRequests.last, ["action": "download", "id": "kokoro"])
+    }
+
     func testTestVoiceSaysASampleWithTheReplyVoice() {
         supervisor.start()
         let model = voice.settingsModel
