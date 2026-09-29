@@ -11,8 +11,7 @@ struct BrainStep: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            StepTitle(title: "Brain",
-                      subtitle: "The agent you talk to with the agent gesture or by clicking the orb, the folder it works in, and how it answers.")
+            StepTitle(title: "Brain", subtitle: "Choose your agent to strap into the MacHUD mech suit.")
             let choices = BrainRuntimeChoice.all
             Grid(horizontalSpacing: 10, verticalSpacing: 10) {
                 ForEach(Array(stride(from: 0, to: choices.count, by: 2)), id: \.self) { i in
@@ -285,23 +284,40 @@ struct DockPositionPicker: View {
     }
 
     /// The strip's pieces for `position` on the miniature `screen` (SwiftUI coordinates, y down).
+    /// The usable area (below the menu-bar strip) is a three-by-three grid of cells with a
+    /// `gap` between them; every position's region stays inside its own cell (an edge in the
+    /// middle cell of its side, a corner's L in the corner cell), so no two positions' regions
+    /// ever overlap and a tap always reaches the one the user meant, even after the strip has
+    /// already moved to a neighboring spot. (An earlier version sized edges and corner arms by
+    /// fractions of the whole screen with no gap between them, so an edge and the neighboring
+    /// corner's arm overlapped; the corner, drawn on top, then swallowed taps meant for the edge.)
     static func segments(_ position: HUDDockPosition, in screen: CGRect) -> [CGRect] {
-        let t: CGFloat = 12, inset: CGFloat = 8
-        let rowW = screen.width * 0.42, colH = screen.height * 0.46
-        let armW = screen.width * 0.2, armH = screen.height * 0.26
-        let top = screen.minY + 12 + inset, bottom = screen.maxY - inset - t
-        let left = screen.minX + inset, right = screen.maxX - inset - t
+        let t: CGFloat = 10, inset: CGFloat = 6, gap: CGFloat = 6
+        let usable = CGRect(x: screen.minX, y: screen.minY + 14, width: screen.width, height: screen.height - 14)
+        let colW = usable.width / 3, rowH = usable.height / 3
+        let leftColMax = usable.minX + colW, rightColMin = usable.maxX - colW
+        let topRowMax = usable.minY + rowH, bottomRowMin = usable.maxY - rowH
+        let top = usable.minY + inset, bottom = usable.maxY - inset - t
+        let left = usable.minX + inset, right = usable.maxX - inset - t
+        let midXStart = leftColMax + gap, midXEnd = rightColMin - gap
+        let midYStart = topRowMax + gap, midYEnd = bottomRowMin - gap
         switch position {
-        case .bottom: return [CGRect(x: screen.midX - rowW / 2, y: bottom, width: rowW, height: t)]
-        case .top: return [CGRect(x: screen.midX - rowW / 2, y: top, width: rowW, height: t)]
-        case .left: return [CGRect(x: left, y: screen.midY - colH / 2, width: t, height: colH)]
-        case .right: return [CGRect(x: right, y: screen.midY - colH / 2, width: t, height: colH)]
-        case .bottomLeft: return [CGRect(x: left, y: bottom, width: armW, height: t), CGRect(x: left, y: bottom - armH, width: t, height: armH)]
-        case .bottomRight: return [CGRect(x: right + t - armW, y: bottom, width: armW, height: t),
-                                   CGRect(x: right, y: bottom - armH, width: t, height: armH)]
-        case .topLeft: return [CGRect(x: left, y: top, width: armW, height: t), CGRect(x: left, y: top + t, width: t, height: armH)]
-        case .topRight: return [CGRect(x: right + t - armW, y: top, width: armW, height: t),
-                                CGRect(x: right, y: top + t, width: t, height: armH)]
+        case .top: return [CGRect(x: midXStart, y: top, width: midXEnd - midXStart, height: t)]
+        case .bottom: return [CGRect(x: midXStart, y: bottom, width: midXEnd - midXStart, height: t)]
+        case .left: return [CGRect(x: left, y: midYStart, width: t, height: midYEnd - midYStart)]
+        case .right: return [CGRect(x: right, y: midYStart, width: t, height: midYEnd - midYStart)]
+        case .topLeft:
+            return [CGRect(x: left, y: top, width: leftColMax - gap - left, height: t),
+                    CGRect(x: left, y: top, width: t, height: topRowMax - gap - top)]
+        case .topRight:
+            return [CGRect(x: rightColMin + gap, y: top, width: right + t - (rightColMin + gap), height: t),
+                    CGRect(x: right, y: top, width: t, height: topRowMax - gap - top)]
+        case .bottomLeft:
+            return [CGRect(x: left, y: bottom, width: leftColMax - gap - left, height: t),
+                    CGRect(x: left, y: bottomRowMin + gap, width: t, height: bottom - (bottomRowMin + gap))]
+        case .bottomRight:
+            return [CGRect(x: rightColMin + gap, y: bottom, width: right + t - (rightColMin + gap), height: t),
+                    CGRect(x: right, y: bottomRowMin + gap, width: t, height: bottom - (bottomRowMin + gap))]
         }
     }
 }
@@ -552,7 +568,7 @@ struct DoneStep: View {
         let open = OnboardingStep.sections.filter { model.status(of: $0) != .done }
         VStack(alignment: .leading, spacing: 14) {
             StepTitle(title: open.isEmpty ? "You're all set" : "Nearly there",
-                      subtitle: open.isEmpty ? "Everything is set up. MacHUD lives in the menu bar; the orb, the tool dock and the wheel are ready."
+                      subtitle: open.isEmpty ? "Everything is set up."
                         : "The rest can wait. Pick any of these up now, or later from Setup Guide… in the menu bar.")
             if !open.isEmpty {
                 VStack(spacing: 6) {
