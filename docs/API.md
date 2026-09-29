@@ -552,11 +552,11 @@ see Running several instances).
 
 | Command | Args | Effect |
 | --- | --- | --- |
-| `voice state` | | `state {phase, inputLevel, partialTranscript, card?, hiddenForFullScreen, brainAvailable, brainProblem?, sessionKey?, sessionProvider?, wakeListening, wakeProblem?, muted, gesturePending}` |
+| `voice state` | | `state {phase, inputLevel, partialTranscript, card?, hiddenForFullScreen, brainAvailable, brainProblem?, sessionKey?, sessionProvider?, activeRuntime?, wakeListening, wakeProblem?, muted, gesturePending}` |
 | `voice hello` | | the voice host's `name` (`MacHUDVoice`), `version`, `pid` |
 | `voice status` | | MacHUD's view of the process: `status` (`running`, `restarting`, `disabled`, `stopped`, `failed`, `notInstalled`), `pid` while running, `socket`, `connected`, `muted` once connected, `error` (why it gave up) when `failed` |
 | `voice action` | `name=` `click`, `ask`, `dictate`, `stop`, `cancel`, `approve`, `deny`, `dismiss`, `mute`, `unmute`, `open-session`, `say`; `id=` for `approve`/`deny`; `text=` for `say` | performs it (`machud voice action mute` works too) |
-| `voice brain status` | | the voice host's `brain status` (below): whether the brain can take a turn, why not, the workspace and the runtimes found |
+| `voice brain status` | | the voice host's `brain status` (below): whether the brain can take a turn, why not, the workspace, the runtime chosen and the one running, the runtimes found and MacHUD's tools |
 | `voice models` | `status` (default) / `download id=kokoro\|parakeet\|hey-jarvis` | the voice host's `models` (below): whether the Parakeet speech model, the Kokoro reply voice and the wake models are installed or downloading, or start a download |
 | `voice history` | `status` (default) | the voice host's `history status` (below): where finished dictations are kept |
 | `voice settings get` | | `settings`: the voice host's settings object |
@@ -573,7 +573,8 @@ progress and terms, and sensitivity, reply voice, spoken replies, Test Voice (`a
 Download button and progress (`models`), Grok key) and Brain tab (why the brain cannot take a
 turn, or Ready; on/off; runtime, listing mclaude once it is installed and marking runtimes not
 found; the workspace folder, chosen with a folder picker, the home folder while none is chosen;
-assistant name, port, per-runtime paths) edit the same settings through the same socket, and
+assistant name, port, per-runtime paths; while the companion still runs another runtime than the
+one chosen, a note saying so; MacHUD tools on/off and whether each MacHUD action asks first) edit the same settings through the same socket, and
 say why while the voice host is down (Retry restarts a stopped or failed host; Turn On Voice
 while voice is off). The status menu's Voice submenu has Mute/Unmute and Voice Settings…, with
 Turn On Voice while voice is off and Restart Voice Host while it is stopped or failed.
@@ -592,7 +593,7 @@ HUDKit's JSON-lines socket, one request per connection, served by `MacHUDVoice` 
 | `action` | `name=<click\|ask\|dictate\|stop\|cancel\|approve\|deny\|dismiss\|mute\|unmute>`, `id=` for `approve`/`deny` | performs it; returns `state` |
 | `action` | `name=say text=<text>` | speaks `text` with the configured reply voice, whether or not `voice.speakReplies` is on (previews in settings and onboarding), replacing anything being said; `{ok, state}`, or `{ok: false, error}` without `text`, while a take is recording, or without a voice. Silent under `MACHUD_VOICE_NO_SPEECH=1` |
 | `action` | `name=open-session` | asks MacHUD to show the brain's current session (`sessions open id=<sessionKey>` on MacHUD's control socket, `$MACHUD_SOCKET` else `/tmp/machud-<uid>.sock`); replies once MacHUD has, `{ok, app, state}`, or `{ok: false, error}` (also shown briefly under the orb) |
-| `brain` | `action=status` (or `brain status`) | `{ok, available, problem?, workspace, workspaceDefault, runtime, runtimes[]}`: `workspace` is the folder the agent works in, the home folder while `brain.workspacePath` is empty (`workspaceDefault` true; the setting itself stays empty until the user chooses one); `runtime` is the one chosen; each of `codex`, `claude`, `hermes`, `mclaude` is `{id, name, installed, path?}`, plus `apiServer` (whether `~/.hermes/.env` turns Hermes' API server on) for hermes. Tools are looked up again on each call; mclaude's readiness (tmux and mechaclaude's other prerequisites) is MechaHUD's `sessions` reply (`canStart`/`problem`/`fix`), not this one |
+| `brain` | `action=status` (or `brain status`) | `{ok, available, problem?, workspace, workspaceDefault, runtime, activeRuntime?, runtimes[], machudTools}`: `workspace` is the folder the agent works in, the home folder while `brain.workspacePath` is empty (`workspaceDefault` true; the setting itself stays empty until the user chooses one); `runtime` is the one chosen and `activeRuntime` the one the connected companion reports running (absent while none is connected; it differs from `runtime` until a switch lands, see Brain below); `machudTools` is `{enabled, requireApproval, available, path?, active?, note?}`: the two settings, whether `machud-mcp` was found beside the voice host (and its path), and, once the companion reports it, whether its runtime gives the agent MacHUD's tools and why not (Hermes cannot); each of `codex`, `claude`, `hermes`, `mclaude` is `{id, name, installed, path?}`, plus `apiServer` (whether `~/.hermes/.env` turns Hermes' API server on) for hermes. Tools are looked up again on each call; mclaude's readiness (tmux and mechaclaude's other prerequisites) is MechaHUD's `sessions` reply (`canStart`/`problem`/`fix`), not this one |
 | `models` | `action=status` (or `models status`) | `{ok, kokoro: {…}, parakeet: {…}}`, each `{installed, downloading, progress, bytes, id?, error?}`: `progress` is 0…1 (1 once installed), `bytes` the whole download's size (Parakeet's is an estimate until its download reports the real size), `error` why the last download failed. `parakeet.id` is the speech model dictation uses (`parakeet-tdt-0.6b-v2`, English, or `-v3`, multilingual), else the one a download fetches. Parakeet is installed when either model is complete in FluidAudio's cache (`~/Library/Application Support/FluidAudio/Models`), the folder SpeakFree uses, so either app's download serves both; it is read from disk on each call. `wake` lists the wake phrases there is a model for (today "Hey Jarvis"), each `{id, phrase, manifestId, licence, note, redistributable, installed, downloading, progress, bytes, error?}`: `id` is what `download` takes (`hey-jarvis`), `licence` the model's licence (Hey Jarvis: openWakeWord's CC BY-NC-SA 4.0, personal non-commercial use), `note` those terms in a few words, `redistributable` false for a model that is downloaded on request and never bundled |
 | `models` | `action=download id=kokoro` | starts downloading the Kokoro reply voice into `~/Library/Application Support/MacHUD/Voice/Models` (unless it is installed or already downloading) and returns the status; each file is checked against its pinned size and SHA-256 before it is installed. Progress arrives through `models status` and `models` events; the next reply uses Kokoro once it is installed |
 | `models` | `action=download id=parakeet` | downloads SpeakFree's default Parakeet model (English) through SpeakFreeLib's `ParakeetModelManager`, as SpeakFree does: the large files with byte progress, then FluidAudio fetches the rest and compiles it for this Mac. Returns the status; progress as above. Dictation uses it from the next take, without a restart. Without a speech model a dictation fails with "Speech model not installed" |
@@ -613,6 +614,25 @@ engine's words; `.meta.json`), so SpeakFree's tools read either folder: MacHUD's
 the host's scratch folder (`~/Library/Application Support/MacHUD/Voice/Dictation/recordings`),
 which is emptied at start and whenever no take is in flight.
 
+The brain runs on the runtime in `brain.runtime`. A change of runtime alone reaches the running
+companion without restarting it (BrainKit's `POST /v1/runtime`, sent about a second after the
+change, once BrainKit has applied it); whenever the connected companion reports another runtime
+than the one chosen (a change in settings, or a companion started on another one), the voice host
+asks it to switch. The companion refuses a switch during a turn, so it is asked again once the
+turn ends. Any other brain setting restarts the companion, which then starts on the chosen runtime.
+
+`brain.machudTools` (default true) gives the brain MacHUD's tool server, `machud-mcp` beside
+`MacHUDVoice` in `Contents/Helpers` (MCP over stdio, `MACHUD_SOCKET` set to MacHUD's control
+socket), under the name `machud`, and a host context: markdown appended to the runtime's
+instructions that says the agent is MacHUD's brain, to act on MacHUD only through those tools
+(not computer use, AppleScript or the `machud` CLI), and lists the installed HUD apps with their
+panels and the loadouts (read from MacHUD's `apps` and `loadouts`; at most 40 of each). The
+context is read before the brain first starts and again each time it (re)starts; a changed
+context restarts it once more. `brain.machudToolsRequireApproval` (default false) makes each
+MacHUD tool call ask first, shown on the reply card like any other approval; off, MacHUD's tools
+run without asking and the agent's other actions keep the runtime's own approval policy. With
+`machud-mcp` missing, or the setting off, the brain runs with neither.
+
 `feedTranscripts` (default true) sends each finished dictation's words (cursor or agent take,
 punctuation and glossary applied) to MacHUD's `feed add text=… source=Dictation` on MacHUD's
 control socket, which hands them to the apps that provide `text-feed` (Stash); `feedAgentReplies`
@@ -620,7 +640,9 @@ control socket, which hands them to the apps that provide `text-feed` (Stash); `
 Sending never waits on MacHUD or fails a take.
 
 `state` is `{phase, inputLevel, partialTranscript, card?, hiddenForFullScreen, brainAvailable,
-brainProblem?, sessionKey?, sessionProvider?, wakeListening, wakeProblem?, muted, gesturePending}`.
+brainProblem?, sessionKey?, sessionProvider?, activeRuntime?, wakeListening, wakeProblem?, muted,
+gesturePending}`. `activeRuntime` is the runtime the brain companion reports running (`codex`,
+`claude`, `hermes`, `mclaude`), absent while none is connected.
 `wakeListening` is true while the wake word is armed; it pauses while a take records and listens
 again after. While the wake word is on (and voice is on and not muted) but not listening,
 `wakeProblem` says why: its phrase's model is not downloaded (`Download the Hey Jarvis model to

@@ -541,6 +541,22 @@ final class VoiceHostControllerTests: XCTestCase {
 
     // MARK: Review fixes: one turn at a time, brain loss, mute, speech into the mic
 
+    /// A MacHUD tool call the runtime asks about (Codex's `tool` kind, when the tools require
+    /// approval) is shown and answered like a command.
+    func testToolApprovalsAreShownAndAnswered() async {
+        let controller = makeController()
+        await startTurn(controller)
+        let approval = AgentApproval(id: "t1", kind: "tool", reason: "Use a machud tool", command: "machud: apply_loadout")
+        brain.push(status: "approval", approvals: [approval])
+        XCTAssertEqual(controller.state.phase, .awaitingApproval)
+        XCTAssertEqual(controller.state.card?.approval,
+                       VoiceApproval(id: "t1", summary: "Use a machud tool", detail: "machud: apply_loadout"))
+        controller.perform(.approve(id: "t1"))
+        await settled(controller)
+        XCTAssertEqual(brain.approvals.map(\.id), ["t1"])
+        XCTAssertEqual(brain.approvals.map(\.allow), [true])
+    }
+
     func testAgentTakeWhileATurnRunsIsRefused() async {
         let controller = makeController()
         await startTurn(controller, "first")

@@ -22,6 +22,9 @@ public struct VoiceHostState: Codable, Equatable, Sendable {
     public var sessionKey: String?
     /// The app MacHUD opens agent sessions in (the `agent-sessions` provider), once known.
     public var sessionProvider: String?
+    /// The runtime the brain companion reports running (`codex`, `claude`, …); nil while none
+    /// is connected. It differs from the chosen `brain.runtime` until a switch lands.
+    public var activeRuntime: String?
     /// The wake word is armed and listening.
     public var wakeListening: Bool
     /// Why the wake word is on but not listening, in words for the user ("Download the Hey
@@ -38,6 +41,7 @@ public struct VoiceHostState: Codable, Equatable, Sendable {
     public init(phase: VoicePhase = .idle, inputLevel: Double = 0, partialTranscript: String = "",
                 card: VoiceCard? = nil, hiddenForFullScreen: Bool = false, brainAvailable: Bool = false,
                 brainProblem: String? = nil, sessionKey: String? = nil, sessionProvider: String? = nil,
+                activeRuntime: String? = nil,
                 wakeListening: Bool = false, wakeProblem: String? = nil, muted: Bool = false,
                 gesturePending: Bool = false) {
         self.phase = phase
@@ -49,6 +53,7 @@ public struct VoiceHostState: Codable, Equatable, Sendable {
         self.brainProblem = brainProblem
         self.sessionKey = sessionKey
         self.sessionProvider = sessionProvider
+        self.activeRuntime = activeRuntime
         self.wakeListening = wakeListening
         self.wakeProblem = wakeProblem
         self.muted = muted

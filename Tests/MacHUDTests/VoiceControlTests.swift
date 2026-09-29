@@ -32,6 +32,7 @@ final class FakeVoiceHost {
                                "installed": false, "downloading": false, "progress": 0.0, "bytes": 3_685_906,
                                "note": "Personal, non-commercial use only. Downloaded when you ask, never bundled with MacHUD."]
     var wakeProblem: String?
+    var activeRuntime: String?
     var historyRequests: [[String: String]] = []
     /// What `history status` resolves to while no `history` setting is saved.
     var historyDefault: [String: Any] = ["mode": "textAndAudio", "shareWithSpeakFree": true]
@@ -116,6 +117,7 @@ final class FakeVoiceHost {
         var state: [String: Any] = ["phase": ["name": "idle"], "muted": muted, "brainAvailable": brainProblem == nil]
         if let brainProblem { state["brainProblem"] = brainProblem }
         if let wakeProblem { state["wakeProblem"] = wakeProblem }
+        if let activeRuntime { state["activeRuntime"] = activeRuntime }
         return state
     }
 }
@@ -432,6 +434,24 @@ final class VoiceControlTests: XCTestCase {
         model.loadBrainStatus { loaded = true }
         XCTAssertTrue(spin(until: { loaded }))
         XCTAssertEqual(model.runtimeOptions.map(\.value), ["codex", "claude", "hermes", "mclaude"])
+    }
+
+    func testTheBrainTabSaysWhileTheRunningRuntimeIsNotTheChosenOne() {
+        supervisor.start()
+        let model = voice.settingsModel
+        XCTAssertTrue(spin(until: { model.status == .ready }))
+        host.activeRuntime = "codex"
+        host.server.publish("state", payload: ["state": host.state])
+        XCTAssertTrue(spin(until: { model.activeRuntime == "codex" }))
+        XCTAssertNil(model.runtimeSwitchNote, "codex is the one chosen")
+        var saved = false
+        model.set("brain.runtime", "claude") { saved = true }
+        XCTAssertTrue(spin(until: { saved }))
+        XCTAssertEqual(model.runtimeSwitchNote,
+                       "The brain is still running Codex; it switches to Claude when it is between turns.")
+        host.activeRuntime = "claude"
+        host.server.publish("state", payload: ["state": host.state])
+        XCTAssertTrue(spin(until: { model.runtimeSwitchNote == nil }))
     }
 
     func testStatusFollowsTheHostFromStoppedToStartingToReady() {
