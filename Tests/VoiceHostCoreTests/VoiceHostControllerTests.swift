@@ -846,10 +846,11 @@ final class VoiceHostControllerTests: XCTestCase {
         var published: [VoiceHostState] = []
         controller.onStateChange = { published.append($0) }
         let before = presenter.states.count
+        // The press arms the orb, the take starts recording, the level moves.
         keys.send(.begin(.primary))
         dictation.level(0.3)
-        XCTAssertEqual(presenter.states.count, before + 2)
-        XCTAssertEqual(published.count, 2)
+        XCTAssertEqual(presenter.states.count, before + 3)
+        XCTAssertEqual(published.count, 3)
         XCTAssertEqual(presenter.states.last, controller.state)
     }
 }

@@ -2,8 +2,8 @@ import Foundation
 import HUDKit
 
 /// MacHUD's line to the voice host's socket: one-off requests, and a `subscribe` stream that
-/// keeps the host's latest state (the menu's Mute/Unmute reads it). Socket I/O runs off the
-/// main thread; results come back on it.
+/// keeps the host's latest state (the menu's Mute/Unmute reads it) and its models' progress.
+/// Socket I/O runs off the main thread; results come back on it.
 @MainActor
 final class VoiceHostConnection {
     let path: String
@@ -15,6 +15,8 @@ final class VoiceHostConnection {
     var onConnectionChange: (() -> Void)?
     /// A new state arrived.
     var onStateChange: (() -> Void)?
+    /// A `models` event arrived (`{kokoro: {…}}`, the `models status` reply without `ok`).
+    var onModelsChange: (([String: Any]) -> Void)?
 
     private var subscription: HUDSubscription?
     private var wanted = false
@@ -79,7 +81,7 @@ final class VoiceHostConnection {
             let client = HUDSocketClient(path: path, timeout: 3)
             let initial = try? client.request("state")
             let result = Result {
-                try client.subscribe(events: ["state"], onEvent: { event in
+                try client.subscribe(events: ["state", "models"], onEvent: { event in
                     let box = UncheckedBox(event)
                     DispatchQueue.main.async { MainActor.assumeIsolated { self?.received(box.value, generation: current) } }
                 }, onClose: {
@@ -116,8 +118,12 @@ final class VoiceHostConnection {
     }
 
     private func received(_ event: [String: Any], generation current: Int) {
-        guard current == generation, event["event"] as? String == "state",
-              let state = event["state"] as? [String: Any] else { return }
+        guard current == generation else { return }
+        if event["event"] as? String == "models" {
+            onModelsChange?(event)
+            return
+        }
+        guard event["event"] as? String == "state", let state = event["state"] as? [String: Any] else { return }
         self.state = state
         onStateChange?()
     }

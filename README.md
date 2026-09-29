@@ -370,13 +370,16 @@ MACHUD_SOCKET=/tmp/machud-try.sock scripts/machud quit
 | `MACHUD_VOICE_NO_MIC` | `1`: the voice host simulates capture and never opens the microphone |
 | `MACHUD_VOICE_NO_BRAIN` | `1`: the voice host never starts the brain |
 | `MACHUD_VOICE_HEADLESS` | `1`: the voice host puts no orb on screen |
+| `MACHUD_VOICE_NO_SPEECH` | `1`: the voice host's replies and `say` make no sound |
+| `MACHUD_VOICE_MODELS_DIR` | Where the voice host keeps downloaded models (default `~/Library/Application Support/MacHUD/Voice/Models`) |
 | `MACHUD_VOICE_KEYCHAIN_SERVICE` | The Keychain service the voice host keeps the Grok key under |
-| `MACHUD_VOICE_LIVE` | `1`: an isolated copy runs its voice host with the microphone, brain and orb |
+| `MACHUD_VOICE_LIVE` | `1`: an isolated copy runs its voice host with the microphone, brain, orb, sound and the real models folder |
 | `MACHUD_VOICE_PARENT_PIPE` | Set by MacHUD for the voice host: it exits when MacHUD's end of its stdin closes |
 
 The voice host inherits MacHUD's environment, so `MACHUD_CONFIG`, `MACHUD_NO_HOTKEYS` and the
-`MACHUD_VOICE_*` switches reach it. An isolated copy sets `MACHUD_VOICE_NO_MIC`, `NO_BRAIN` and
-`HEADLESS` to `1` for it (unless `MACHUD_VOICE_LIVE=1`) and a Keychain service of its own
+`MACHUD_VOICE_*` switches reach it. An isolated copy sets `MACHUD_VOICE_NO_MIC`, `NO_BRAIN`,
+`HEADLESS` and `NO_SPEECH` to `1` for it and a models folder beside its voice socket (unless
+`MACHUD_VOICE_LIVE=1`), and a Keychain service of its own
 (`com.jrisberg.machud.voice.isolated`, unless `MACHUD_VOICE_KEYCHAIN_SERVICE` is set).
 
 Setting `MACHUD_SOCKET` or `MACHUD_CONFIG` marks the instance isolated: it does not serve

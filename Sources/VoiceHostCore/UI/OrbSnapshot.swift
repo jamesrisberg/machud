@@ -16,22 +16,24 @@ enum OrbSnapshot {
 
     /// Renders `state` with the morph at `stretch` (nil: settled for the state), the input
     /// level history `levels`, the running motion `phaseTime` seconds in (the resting float
-    /// already eased in), and the card grown out of the orb to `cardProgress` (nil: open), at 2x.
+    /// already eased in), the card grown out of the orb to `cardProgress` (nil: open) and the
+    /// armed look at `armed` (nil: settled for the state), under Reduce Motion or not, at 2x.
     static func render(_ state: VoiceHostState, stretch: CGFloat? = nil, levels: [Double] = [],
                        hovering: Bool = false, phaseTime: Double = 0.35,
-                       cardProgress: CGFloat? = nil) -> NSBitmapImageRep? {
+                       cardProgress: CGFloat? = nil, armed: CGFloat? = nil,
+                       reduceMotion: Bool = false) -> NSBitmapImageRep? {
         var tracker = OrbSceneTracker()
         let now = Date()
         tracker.ingest(state, now: now)
         tracker.setHovering(hovering, now: now)
         let scene = tracker.scene(now: now)
         var animator = OrbAnimator(stretch: stretch ?? OrbAnimator.target(for: scene),
-                                   float: OrbAnimator.floatTarget(for: scene, reduceMotion: false))
+                                   float: OrbAnimator.floatTarget(for: scene, reduceMotion: reduceMotion))
         // Settle the level and advance the free-running phase to a representative frame.
         for _ in 0..<Int(phaseTime * 60) {
-            animator.advance(dt: 1.0 / 60, scene: scene, level: state.inputLevel, reduceMotion: false)
+            animator.advance(dt: 1.0 / 60, scene: scene, level: state.inputLevel, reduceMotion: reduceMotion)
         }
-        if let stretch { animator = OrbAnimator(stretch: stretch, copying: animator) }
+        if stretch != nil || armed != nil { animator = OrbAnimator(stretch: stretch, armed: armed, copying: animator) }
         var history = LevelHistory()
         levels.forEach { history.append($0) }
 
@@ -44,6 +46,7 @@ enum OrbSnapshot {
             let orbFrame = geometry.anchorFrame(for: orbSize)
             let orb = OrbView(frame: orbFrame, geometry: geometry)
             orb.scene = scene
+            orb.reduceMotion = reduceMotion
             orb.animator = animator
             orb.history = history
             root.addSubview(orb)

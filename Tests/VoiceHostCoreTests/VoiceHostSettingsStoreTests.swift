@@ -40,7 +40,7 @@ final class VoiceHostSettingsStoreTests: XCTestCase {
         let env = VoiceHostEnvironment(environment: [
             "MACHUD_CONFIG": "/tmp/cfg/layouts.json", "MACHUD_VOICE_SOCKET": "/tmp/v.sock",
             "MACHUD_VOICE_NO_MIC": "1", "MACHUD_NO_HOTKEYS": "1", "MACHUD_VOICE_NO_BRAIN": "1",
-            "MACHUD_VOICE_PARENT_PIPE": "1",
+            "MACHUD_VOICE_PARENT_PIPE": "1", "MACHUD_VOICE_NO_SPEECH": "1", "MACHUD_VOICE_MODELS_DIR": "/tmp/models",
         ])
         XCTAssertEqual(env.configDirectory.path, "/tmp/cfg")
         XCTAssertEqual(env.socketPath, "/tmp/v.sock")
@@ -48,6 +48,8 @@ final class VoiceHostSettingsStoreTests: XCTestCase {
         XCTAssertTrue(env.noHotkeys)
         XCTAssertTrue(env.noBrain)
         XCTAssertTrue(env.parentPipe)
+        XCTAssertTrue(env.noSpeech)
+        XCTAssertEqual(env.modelsDirectory?.path, "/tmp/models")
     }
 
     func testAnyNoHotkeysValueDisablesTheTap() {
@@ -72,7 +74,8 @@ final class VoiceHostSettingsStoreTests: XCTestCase {
         let env = VoiceHostEnvironment(environment: [:])
         XCTAssertTrue(env.configDirectory.path.hasSuffix("/.config/machud"))
         XCTAssertTrue(env.socketPath.hasSuffix("/machud-voice.sock"))
-        XCTAssertFalse(env.noMicrophone || env.noHotkeys || env.noBrain || env.parentPipe)
+        XCTAssertFalse(env.noMicrophone || env.noHotkeys || env.noBrain || env.parentPipe || env.noSpeech)
+        XCTAssertNil(env.modelsDirectory)
     }
 }
 

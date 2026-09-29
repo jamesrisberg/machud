@@ -4,12 +4,15 @@ import VoiceKit
 
 /// The `machud-voice` socket's verbs: `hello`, `state`, `settings get|set settings=<json>`,
 /// `action name=<click|ask|dictate|stop|cancel|approve|deny|dismiss|mute|unmute|open-session> [id=]`,
-/// `brain status`, `secret set|clear name=grok [value=]` (values are written, never read back)
-/// and `quit`.
-/// `subscribe` is `HUDSocketServer`'s own; `publish(_:on:)` feeds it `state` events.
+/// `action name=say text=`, `brain status`, `models status|download id=kokoro`,
+/// `secret set|clear name=grok [value=]` (values are written, never read back) and `quit`.
+/// `subscribe` is `HUDSocketServer`'s own; `publish(_:on:)` feeds it `state` events and
+/// `publishModels(_:on:)` its `models` events.
 @MainActor
 final class VoiceHostCommands {
-    static let verbs = ["hello", "state", "settings", "action", "brain", "secret", "quit"]
+    static let verbs = ["hello", "state", "settings", "action", "brain", "models", "secret", "quit"]
+    /// Model ids `models download` takes.
+    static let modelIDs = ["kokoro"]
     /// Secret names the socket accepts, and the `VoiceSecretStoring` key each is stored under.
     static let secretKeys = ["grok": VoiceSecrets.grokAPIKey]
 
@@ -17,15 +20,18 @@ final class VoiceHostCommands {
     private let store: VoiceHostSettingsStore
     private let secrets: VoiceSecretStoring
     private let version: String
+    /// The Kokoro reply voice's files; nil where the host cannot fetch models.
+    private let models: VoiceModelProviding?
     /// After a `quit` has been answered.
     var onQuit: () -> Void = {}
 
     init(controller: VoiceHostController, store: VoiceHostSettingsStore, secrets: VoiceSecretStoring,
-         version: String) {
+         version: String, models: VoiceModelProviding? = nil) {
         self.controller = controller
         self.store = store
         self.secrets = secrets
         self.version = version
+        self.models = models
     }
 
     func install(on server: HUDSocketServer) {
@@ -51,6 +57,19 @@ final class VoiceHostCommands {
         server.publish("state", payload: ["state": jsonObject(state)])
     }
 
+    /// Pushes `{"event":"models","kokoro":{…}}` to subscribers.
+    static func publishModels(_ status: VoiceModelStatus, on server: HUDSocketServer) {
+        server.publish("models", payload: modelsPayload(status))
+    }
+
+    /// `{kokoro: {installed, downloading, progress, bytes, error?}}`.
+    static func modelsPayload(_ kokoro: VoiceModelStatus) -> [String: Any] {
+        var model: [String: Any] = ["installed": kokoro.installed, "downloading": kokoro.downloading,
+                                    "progress": kokoro.progress, "bytes": kokoro.bytes]
+        if let error = kokoro.error { model["error"] = error }
+        return ["kokoro": model]
+    }
+
     func handle(_ command: String, _ args: [String: String]) -> [String: Any] {
         switch command {
         case "hello":
@@ -64,6 +83,8 @@ final class VoiceHostCommands {
             return action(args)
         case "brain":
             return brain(args)
+        case "models":
+            return modelsCommand(args)
         case "secret":
             return secret(args)
         case "quit":
@@ -114,6 +135,9 @@ final class VoiceHostCommands {
         case "mute": action = .setMuted(true)
         case "unmute": action = .setMuted(false)
         case "open-session": action = .openSession
+        case "say":
+            if let refusal = controller.say(args["text"] ?? "") { return ["ok": false, "error": refusal] }
+            return ["ok": true, "state": Self.jsonObject(controller.state)]
         case "approve", "deny":
             guard let id = args["id"], !id.isEmpty else { return ["ok": false, "error": "\(name) needs id="] }
             action = name == "approve" ? .approve(id: id) : .deny(id: id)
@@ -139,15 +163,33 @@ final class VoiceHostCommands {
         guard sub == "status" else { return ["ok": false, "error": "brain takes status, not \(sub)"] }
         controller.refreshRuntimeDetection()
         let state = controller.state
+        let chosen = controller.settings.brain.workspacePath.trimmingCharacters(in: .whitespaces)
         var reply: [String: Any] = [
             "ok": true, "available": state.brainAvailable,
-            "workspace": controller.settings.brain.workspacePath,
+            "workspace": controller.resolvedBrain.workspacePath, "workspaceDefault": chosen.isEmpty,
             "runtime": controller.settings.brain.runtime.rawValue,
             "runtimes": controller.runtimeDetections().map(\.json),
         ]
         if let problem = state.brainProblem { reply["problem"] = problem }
         if let key = state.sessionKey { reply["sessionKey"] = key }
         return reply
+    }
+
+    /// `models status` and `models download id=kokoro`; both reply with the status.
+    private func modelsCommand(_ args: [String: String]) -> [String: Any] {
+        guard let models else { return ["ok": false, "error": "models are not available in this voice host"] }
+        switch args["action"] ?? args["_"] ?? "status" {
+        case "status":
+            break
+        case "download":
+            guard let id = args["id"], Self.modelIDs.contains(id) else {
+                return ["ok": false, "error": "models download needs id=, one of \(Self.modelIDs.joined(separator: ", "))"]
+            }
+            if !models.status.installed, !models.status.downloading { models.download() }
+        case let other:
+            return ["ok": false, "error": "models takes status or download, not \(other)"]
+        }
+        return ["ok": true].merging(Self.modelsPayload(models.status)) { $1 }
     }
 
     private func secret(_ args: [String: String]) -> [String: Any] {

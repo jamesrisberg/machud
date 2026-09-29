@@ -45,6 +45,25 @@ final class OrbSceneTests: XCTestCase {
         XCTAssertNotEqual(s.tint, scene(VoiceHostState(phase: .listening(.dictation))).tint)
     }
 
+    // MARK: Armed (the fn gesture is undecided)
+
+    func testAnUndecidedGestureIsArmedNotTheWaveform() {
+        for phase in [VoicePhase.idle, .listening(.dictation)] {
+            let s = scene(VoiceHostState(phase: phase, inputLevel: 0.4, gesturePending: true))
+            XCTAssertEqual(s.form, .orb, "\(phase)")
+            XCTAssertEqual(s.tint, .armed, "\(phase)")
+            XCTAssertEqual(s.motion, .armed, "\(phase)")
+            XCTAssertEqual(s.accessibilityStatus, "Listening")
+        }
+    }
+
+    func testTheDecidedGestureCommits() {
+        XCTAssertEqual(scene(VoiceHostState(phase: .listening(.dictation))).form, .waveform)
+        let agent = scene(VoiceHostState(phase: .listening(.agent), gesturePending: true))
+        XCTAssertEqual(agent.tint, .agent, "the agent is decided: no armed look")
+        XCTAssertEqual(scene(VoiceHostState(phase: .failed("x"), gesturePending: true)).tint, .failed)
+    }
+
     func testWorkingSpinsSubtly() {
         let s = scene(VoiceHostState(phase: .working))
         XCTAssertEqual(s.form, .orb)

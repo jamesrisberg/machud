@@ -506,21 +506,23 @@ see Running several instances).
 
 | Command | Args | Effect |
 | --- | --- | --- |
-| `voice state` | | `state {phase, inputLevel, partialTranscript, card?, hiddenForFullScreen, brainAvailable, brainProblem?, sessionKey?, sessionProvider?, wakeListening, muted}` |
+| `voice state` | | `state {phase, inputLevel, partialTranscript, card?, hiddenForFullScreen, brainAvailable, brainProblem?, sessionKey?, sessionProvider?, wakeListening, muted, gesturePending}` |
 | `voice hello` | | the voice host's `name` (`MacHUDVoice`), `version`, `pid` |
 | `voice status` | | MacHUD's view of the process: `status` (`running`, `restarting`, `disabled`, `stopped`, `failed`, `notInstalled`), `pid` while running, `socket`, `connected`, `muted` once connected, `error` (why it gave up) when `failed` |
-| `voice action` | `name=` `click`, `ask`, `dictate`, `stop`, `cancel`, `approve`, `deny`, `dismiss`, `mute`, `unmute`, `open-session`; `id=` for `approve`/`deny` | performs it (`machud voice action mute` works too) |
+| `voice action` | `name=` `click`, `ask`, `dictate`, `stop`, `cancel`, `approve`, `deny`, `dismiss`, `mute`, `unmute`, `open-session`, `say`; `id=` for `approve`/`deny`; `text=` for `say` | performs it (`machud voice action mute` works too) |
 | `voice brain status` | | the voice host's `brain status` (below): whether the brain can take a turn, why not, the workspace and the runtimes found |
+| `voice models` | `status` (default) / `download id=kokoro` | the voice host's `models` (below): whether the Kokoro reply voice is installed or downloading, or start its download |
 | `voice settings get` | | `settings`: the voice host's settings object |
 | `voice settings set` | `settings=<JSON object>`, or dotted `key=value` pairs | `settings=` replaces the whole object. `key=value` pairs (`enabled=false`, `voice.speakReplies=true`, `brain.runtime=claude`) are applied to the current settings, each converted to the type already stored, and the whole object is sent back; an unknown key is an error. Turning `enabled` off stops the voice host; on starts it |
 | `voice secret` | `set name=grok [value=…]` / `clear name=grok` | stores or removes the Grok API key in the Keychain; the key is never returned. Without `value=`, `machud voice secret set name=grok` reads the key from stdin (without echo at a terminal): prefer that, so the key stays out of the shell history and the process list |
 
 When the voice host is not answering, `voice` replies `ok: false` with why (`status` as above).
 The settings window's Voice tab (on/off, fn key mode, the agent gesture, wake word, phrase and
-sensitivity, reply voice, spoken replies, Grok key) and Brain tab (why the brain cannot take a
+sensitivity, reply voice, spoken replies, Test Voice (`action say`), the Kokoro voice's
+Download button and progress (`models`), Grok key) and Brain tab (why the brain cannot take a
 turn, or Ready; on/off; runtime, listing mclaude once it is installed and marking runtimes not
-found; the workspace folder, chosen with a folder picker and required; assistant name, port,
-per-runtime paths) edit the same settings through the same socket, and
+found; the workspace folder, chosen with a folder picker, the home folder while none is chosen;
+assistant name, port, per-runtime paths) edit the same settings through the same socket, and
 say why while the voice host is down (Retry restarts a stopped or failed host; Turn On Voice
 while voice is off). The status menu's Voice submenu has Mute/Unmute and Voice Settings…, with
 Turn On Voice while voice is off and Restart Voice Host while it is stopped or failed.
@@ -533,12 +535,15 @@ HUDKit's JSON-lines socket, one request per connection, served by `MacHUDVoice` 
 | --- | --- | --- |
 | `hello` | | `name`, `version` (the enclosing MacHUD's), `pid` |
 | `state` | | `state`: the host's state (below) |
-| `subscribe` | `events=state` (optional) | keeps the connection open and pushes `{"event": "state", "state": {…}}` on every change (many times a second while listening) |
+| `subscribe` | `events=state,models` (optional) | keeps the connection open and pushes `{"event": "state", "state": {…}}` on every change (many times a second while listening) and `{"event": "models", "kokoro": {…}}` as a model's status changes (its download progress) |
 | `settings` | `action=get` | `settings`: the whole settings object |
 | `settings` | `action=set settings=<JSON object>` | replaces the whole object (decoded leniently: missing or invalid keys take their defaults), saves `voice.json`, applies it and returns the stored `settings` |
 | `action` | `name=<click\|ask\|dictate\|stop\|cancel\|approve\|deny\|dismiss\|mute\|unmute>`, `id=` for `approve`/`deny` | performs it; returns `state` |
+| `action` | `name=say text=<text>` | speaks `text` with the configured reply voice, whether or not `voice.speakReplies` is on (previews in settings and onboarding), replacing anything being said; `{ok, state}`, or `{ok: false, error}` without `text`, while a take is recording, or without a voice. Silent under `MACHUD_VOICE_NO_SPEECH=1` |
 | `action` | `name=open-session` | asks MacHUD to show the brain's current session (`sessions open id=<sessionKey>` on MacHUD's control socket, `$MACHUD_SOCKET` else `/tmp/machud-<uid>.sock`); replies once MacHUD has, `{ok, app, state}`, or `{ok: false, error}` (also shown briefly under the orb) |
-| `brain` | `action=status` (or `brain status`) | `{ok, available, problem?, workspace, runtime, runtimes[]}`: `runtime` is the one chosen; each of `codex`, `claude`, `hermes`, `mclaude` is `{id, name, installed, path?}`, plus `apiServer` (whether `~/.hermes/.env` turns Hermes' API server on) for hermes. Tools are looked up again on each call; mclaude's readiness (tmux and mechaclaude's other prerequisites) is MechaHUD's `sessions` reply (`canStart`/`problem`/`fix`), not this one |
+| `brain` | `action=status` (or `brain status`) | `{ok, available, problem?, workspace, workspaceDefault, runtime, runtimes[]}`: `workspace` is the folder the agent works in, the home folder while `brain.workspacePath` is empty (`workspaceDefault` true; the setting itself stays empty until the user chooses one); `runtime` is the one chosen; each of `codex`, `claude`, `hermes`, `mclaude` is `{id, name, installed, path?}`, plus `apiServer` (whether `~/.hermes/.env` turns Hermes' API server on) for hermes. Tools are looked up again on each call; mclaude's readiness (tmux and mechaclaude's other prerequisites) is MechaHUD's `sessions` reply (`canStart`/`problem`/`fix`), not this one |
+| `models` | `action=status` (or `models status`) | `{ok, kokoro: {installed, downloading, progress, bytes, error?}}`: `progress` is 0…1 (1 once installed), `bytes` the whole download's size, `error` why the last download failed |
+| `models` | `action=download id=kokoro` | starts downloading the Kokoro reply voice into `~/Library/Application Support/MacHUD/Voice/Models` (unless it is installed or already downloading) and returns the status; each file is checked against its pinned size and SHA-256 before it is installed. Progress arrives through `models status` and `models` events; the next reply uses Kokoro once it is installed |
 | `secret` | `action=set name=grok value=…` / `action=clear name=grok` | writes the Keychain; never returns a value |
 | `quit` | | exits after replying |
 
@@ -554,14 +559,21 @@ brain's current session when its runtime drives one other apps show too (mechacl
 one (`sessions providers`); the reply card then offers "Open in <app>". `phase` is `{"name": …}`, one of `idle`, `listening`, `transcribing`,
 `working`, `awaitingApproval`, `speaking`, `failed`, plus `"mode": "dictation"|"agent"` for
 `listening` and `transcribing` and `"message"` for `failed`. `card` is `{prompt, reply,
-progress[], approval?: {id, summary, detail}}`.
+progress[], approval?: {id, summary, detail}}`. `gesturePending` is true from the fn press that
+begins a take until the gesture is decided: the press outlasts a tap (dictation), the double-tap
+window after a tap lapses (dictation, or a discarded tap in hold mode), a second press moves the
+take to the agent, or the take ends. The orb shows its armed look meanwhile and commits to the
+waveform or the agent's pulse once it is false. It is never true with the agent gesture off, or
+for a take started by the orb, the wake word or the socket.
 
 The host reads its environment: `MACHUD_VOICE_SOCKET` (its socket), `MACHUD_CONFIG` (the folder
 of that path holds `voice.json`), `MACHUD_VOICE_PARENT_PIPE=1` (exit when stdin reaches end of
 file), `MACHUD_NO_HOTKEYS` (no fn key tap), `MACHUD_VOICE_NO_MIC=1` (simulated capture, the
 microphone is never opened), `MACHUD_VOICE_NO_BRAIN=1` (the brain never starts),
-`MACHUD_VOICE_HEADLESS=1` (no orb on screen), `MACHUD_VOICE_KEYCHAIN_SERVICE` (the Keychain
-service for secrets) and `MACHUD_SOCKET` (MacHUD's control socket, for `open-session`).
+`MACHUD_VOICE_HEADLESS=1` (no orb on screen), `MACHUD_VOICE_NO_SPEECH=1` (replies and `say` make
+no sound), `MACHUD_VOICE_MODELS_DIR` (where downloaded models are kept),
+`MACHUD_VOICE_KEYCHAIN_SERVICE` (the Keychain service for secrets) and `MACHUD_SOCKET` (MacHUD's
+control socket, for `open-session`).
 
 ## Lifecycle
 
@@ -613,8 +625,10 @@ drag snapping back on. Its tool dock publishes to
 the real siblings' icons.
 Its voice host listens on `$MACHUD_VOICE_SOCKET`, else `<MACHUD_SOCKET>-voice.sock` (else
 `machud-voice.sock` beside `MACHUD_CONFIG`), never the real one's, and inherits the isolation
-variables. MacHUD also starts it with `MACHUD_VOICE_NO_MIC=1`, `MACHUD_VOICE_NO_BRAIN=1` and
-`MACHUD_VOICE_HEADLESS=1` (no microphone, no brain, no orb) unless `MACHUD_VOICE_LIVE=1`, and
+variables. MacHUD also starts it with `MACHUD_VOICE_NO_MIC=1`, `MACHUD_VOICE_NO_BRAIN=1`,
+`MACHUD_VOICE_HEADLESS=1` and `MACHUD_VOICE_NO_SPEECH=1` (no microphone, no brain, no orb, no
+sound) and `MACHUD_VOICE_MODELS_DIR=<voice socket without its extension>-models` (never the real
+models folder) unless `MACHUD_VOICE_LIVE=1`, and
 with `MACHUD_VOICE_KEYCHAIN_SERVICE=com.jrisberg.machud.voice.isolated` unless that variable is
 already set, so a test instance never touches the real Grok key.
 

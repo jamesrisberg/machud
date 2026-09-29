@@ -9,7 +9,7 @@ import VoiceKit
 /// `onStateChange`.
 ///
 /// Takes: fn dictates at the cursor (`.begin(.primary)`) and moves the take to the agent on the
-/// alternate gesture; the orb, the wake word and the socket's `ask` start an agent take that
+/// alternate gesture, with `gesturePending` set until the gesture is decided; the orb, the wake word and the socket's `ask` start an agent take that
 /// ends on a click, `stop`, or a `SilenceEndpointer`. An agent take's text becomes a brain
 /// turn whose snapshots fill the card and, with `voice.speakReplies`, are spoken as they stream.
 ///
@@ -54,6 +54,8 @@ public final class VoiceHostController: VoiceHostActing {
     static let brainStarting = "The brain is starting."
     static let brainConnecting = "Connecting to the brain…"
     static let noSession = "There is no agent session to open"
+    static let takeRecording = "A take is recording"
+    static let noSpeech = "Speech is not available"
     /// Progress lines kept on the card.
     static let progressLimit = 4
 
@@ -66,6 +68,8 @@ public final class VoiceHostController: VoiceHostActing {
     private let sessions: SessionOpening?
     private let detectRuntimes: (BrainSettings) -> [BrainRuntimeDetection]
     private let sessionKeyOf: (AgentSessionSnapshot) -> String?
+    /// The brain's workspace while the settings name none.
+    private let homeDirectory: URL
     private let now: () -> TimeInterval
     private let schedule: VoiceScheduler
 
@@ -93,11 +97,21 @@ public final class VoiceHostController: VoiceHostActing {
 
     private struct KeySetup: Equatable {
         var mode: KeyGestureRecognizer.Mode
-        var alternateEnabled: Bool
+        var configuration: KeyGestureRecognizer.Configuration
+    }
+
+    /// The fn press whose gesture is undecided (`state.gesturePending`).
+    private struct Gesture {
+        let id = UUID()
+        let pressedAt: TimeInterval
+        var keyDown = true
     }
 
     /// The capturing take.
-    private var take: Take?
+    private var take: Take? {
+        didSet { if take == nil { endGesture() } }
+    }
+    private var gesture: Gesture?
     /// The most recent take; only its outcome moves the phase.
     private var latestTakeID: UUID?
     private var turn: Turn?
@@ -126,11 +140,13 @@ public final class VoiceHostController: VoiceHostActing {
     ///   - sessions: MacHUD's session broker; nil leaves `openSession` unavailable.
     ///   - detectRuntimes: which runtimes are installed, for the settings given.
     ///   - sessionKeyOf: a snapshot's session key.
+    ///   - homeDirectory: the brain's workspace while `brain.workspacePath` is empty.
     init(settings: VoiceHostSettings, dictation: DictationDriving, keys: VoiceKeySource?,
          brain: BrainDriving?, speaker: ReplySpeaking?, wake: WakeDriving?, brainStateRoot: URL,
          sessions: SessionOpening? = nil,
          detectRuntimes: @escaping (BrainSettings) -> [BrainRuntimeDetection] = { BrainRuntimes.detect($0) },
          sessionKeyOf: @escaping (AgentSessionSnapshot) -> String? = { $0.sessionKey },
+         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
          now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
          schedule: @escaping VoiceScheduler = mainQueueScheduler) {
         self.settings = settings
@@ -143,6 +159,7 @@ public final class VoiceHostController: VoiceHostActing {
         self.sessions = sessions
         self.detectRuntimes = detectRuntimes
         self.sessionKeyOf = sessionKeyOf
+        self.homeDirectory = homeDirectory
         self.now = now
         self.schedule = schedule
     }
@@ -236,6 +253,24 @@ public final class VoiceHostController: VoiceHostActing {
         return nil
     }
 
+    /// Speaks `text` with the reply voice, whether or not replies are spoken (a preview from
+    /// settings or onboarding); replaces anything being said. Nil once it is speaking, else why not.
+    func say(_ text: String) -> String? {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return "say needs text=" }
+        guard let speaker else { return Self.noSpeech }
+        // Never into an open microphone.
+        guard take == nil, !dictation.isCapturing else { return Self.takeRecording }
+        stopSpeech()
+        speaker.append(text)
+        speaker.finish()
+        switch state.phase {
+        case .idle, .failed: state.phase = .speaking
+        default: break
+        }
+        return nil
+    }
+
     private func cancel() {
         if take != nil || dictation.isCapturing {
             cancelTake()
@@ -314,8 +349,14 @@ public final class VoiceHostController: VoiceHostActing {
     private func handle(_ intent: KeyGestureRecognizer.Intent) {
         // Any fn press interrupts a reply being spoken.
         stopSpeech()
+        // Whatever the recognizer says next decides the gesture; a new press starts another.
+        endGesture()
         switch intent {
-        case .begin(.primary): startTake(.dictation, handsFree: false, fromKeys: true)
+        case .begin(.primary):
+            // Armed before the take reports recording, so the orb never starts toward the waveform.
+            beginGesture()
+            startTake(.dictation, handsFree: false, fromKeys: true)
+            if take == nil { endGesture() }
         case .begin(.alternate): startTake(.agent, handsFree: false, fromKeys: true)
         case .retarget(.alternate):
             // The agent cannot take it: keep the words at the cursor and say why at the end.
@@ -332,6 +373,46 @@ public final class VoiceHostController: VoiceHostActing {
         case .end: if take != nil { dictation.stop() }
         case .discard: dictation.cancel()
         }
+    }
+
+    // MARK: - Gesture window
+
+    /// The recognizer's timing, shared by the key source and the gesture window here.
+    static func gestureConfiguration(alternateEnabled: Bool) -> KeyGestureRecognizer.Configuration {
+        KeyGestureRecognizer.Configuration(alternateEnabled: alternateEnabled)
+    }
+
+    /// An fn press began a take: until the gesture is decided the orb shows its armed look.
+    /// Only a press no longer than a tap opens the double-tap window; the recognizer ends the
+    /// wait itself on a second press (`retarget`, `end`) or a hold-mode lapse (`discard`), and
+    /// the timers here cover the rest (a press held past a tap, a toggle-mode lapse).
+    private func beginGesture() {
+        guard take == nil, !dictation.isCapturing, let setup = runningKeys, setup.configuration.alternateEnabled
+        else { return }
+        let gesture = Gesture(pressedAt: now())
+        self.gesture = gesture
+        state.gesturePending = true
+        schedule(setup.configuration.tapMaxDuration) { [weak self] in
+            guard let self, self.gesture?.id == gesture.id, self.gesture?.keyDown == true else { return }
+            endGesture()
+        }
+    }
+
+    private func keyReleased() {
+        guard var gesture, let setup = runningKeys else { return }
+        let configuration = setup.configuration
+        guard now() - gesture.pressedAt <= configuration.tapMaxDuration else { return endGesture() }
+        gesture.keyDown = false
+        self.gesture = gesture
+        schedule(configuration.doubleTapWindow) { [weak self] in
+            guard let self, self.gesture?.id == gesture.id else { return }
+            endGesture()
+        }
+    }
+
+    private func endGesture() {
+        gesture = nil
+        if state.gesturePending { state.gesturePending = false }
     }
 
     private func handle(_ update: DictationUpdate, take id: UUID) {
@@ -552,7 +633,8 @@ public final class VoiceHostController: VoiceHostActing {
     private func refreshKeys() {
         guard let keys else { return }
         let wanted = settings.enabled && !state.muted
-            ? KeySetup(mode: settings.keyMode == .toggle ? .toggle : .hold, alternateEnabled: settings.agentGesture)
+            ? KeySetup(mode: settings.keyMode == .toggle ? .toggle : .hold,
+                       configuration: Self.gestureConfiguration(alternateEnabled: settings.agentGesture))
             : nil
         guard wanted != runningKeys else { return }
         // The new key source cannot end a take the old one began.
@@ -560,9 +642,10 @@ public final class VoiceHostController: VoiceHostActing {
         if runningKeys != nil { keys.stop() }
         runningKeys = wanted
         guard let wanted else { return }
-        keys.start(mode: wanted.mode, alternateEnabled: wanted.alternateEnabled,
+        keys.start(mode: wanted.mode, configuration: wanted.configuration,
                    isSessionActive: { [weak self] in self?.dictation.isCapturing ?? false },
-                   onIntent: { [weak self] in self?.handle($0) })
+                   onIntent: { [weak self] in self?.handle($0) },
+                   onRelease: { [weak self] in self?.keyReleased() })
     }
 
     /// The wake word listens while voice is on, not muted and no take is recording.
@@ -582,16 +665,26 @@ public final class VoiceHostController: VoiceHostActing {
         refreshWake()
     }
 
+    /// The brain settings with the workspace resolved: the home folder while none is chosen.
+    var resolvedBrain: BrainSettings {
+        var brain = settings.brain
+        if brain.workspacePath.trimmingCharacters(in: .whitespaces).isEmpty {
+            brain.workspacePath = homeDirectory.path
+        }
+        return brain
+    }
+
     private func refreshBrain() {
+        let resolved = resolvedBrain
         let wanted: BrainServiceConfiguration? = brainEnabled
-            ? settings.brain.serviceConfiguration(
+            ? resolved.serviceConfiguration(
                 stateDirectory: BrainServiceConfiguration.stateDirectory(
-                    forWorkspace: settings.brain.workspacePath, under: brainStateRoot).path,
+                    forWorkspace: resolved.workspacePath, under: brainStateRoot).path,
                 port: settings.brainPort)
             : nil
         runtimeProblem = brainEnabled
-            ? BrainRuntimes.problem(runtime: settings.brain.runtime.rawValue, brain: settings.brain,
-                                    detections: detectRuntimes(settings.brain))
+            ? BrainRuntimes.problem(runtime: resolved.runtime.rawValue, brain: resolved,
+                                    detections: detectRuntimes(resolved))
             : nil
         guard let brain, appliedBrain != .some(wanted) else { return }
         appliedBrain = .some(wanted)
@@ -604,7 +697,7 @@ public final class VoiceHostController: VoiceHostActing {
     // MARK: - Brain problem
 
     /// What `brain status` reports about each runtime, for the current settings.
-    func runtimeDetections() -> [BrainRuntimeDetection] { detectRuntimes(settings.brain) }
+    func runtimeDetections() -> [BrainRuntimeDetection] { detectRuntimes(resolvedBrain) }
 
     /// Re-reads the chosen runtime's tool (after an install) and updates the problem.
     func refreshRuntimeDetection() {
