@@ -32,8 +32,9 @@ apps that make up the rest of the HUD:
 
 **Download** MacHUD from <https://jamesrisberg.github.io/machud/>: the zip is signed and
 notarized, so unzip it, drag MacHUD to Applications and open it. It lives in the menu bar.
-The first time it finds no HUD apps it opens **Settings → Apps** with the bundled tools
-selected; later, **Get Apps…** in the menu (or `machud apps install <name>`) installs,
+The first launch opens a setup guide: permissions, voice, the agent brain, the HUD apps
+(bundled tools preselected) and a short tour; **Setup Guide…** in the menu opens it again.
+Later, **Get Apps…** in the menu (or `machud apps install <name>`) installs,
 updates and removes the others from the same catalog. Downloads are checked against the
 catalog's size and SHA-256 and must pass Gatekeeper; see
 [docs/API.md](docs/API.md#app-catalog-and-installs).
@@ -54,8 +55,8 @@ HUDKit's shared `hud-build.sh`/`hud-install.sh`; MacHUD's extras live in
 [scripts/install-hooks.sh](scripts/install-hooks.sh). To check out every sibling at once, see
 [Build from source](#build-from-source).
 
-On first launch macOS asks for **Accessibility** access (needed to see and move
-other apps' windows). Grant it in System Settings → Privacy & Security →
+The setup guide asks macOS for **Accessibility** access (needed to see and move
+other apps' windows) and the microphone (for voice). Grant Accessibility in System Settings → Privacy & Security →
 Accessibility; the app starts watching drags as soon as it's trusted. `machud
 permissions request=1` shows every missing prompt (Accessibility and Automation).
 
@@ -363,7 +364,7 @@ MACHUD_SOCKET=/tmp/machud-try.sock scripts/machud quit
 | `MACHUD_DRAG` | With `MACHUD_NO_HOTKEYS`, watch drags anyway. Do not use while another instance runs: both react to the same drag |
 | `MACHUD_DOCKS_FILE` | Where the tool dock publishes its frames |
 | `MACHUD_APP` | The binary the `machud` CLI runs |
-| `MACHUD_FIRST_RUN` | `1`: an isolated copy opens the first-run Apps tab too |
+| `MACHUD_FIRST_RUN` | `1`: an isolated copy shows the onboarding at launch too |
 | `MACHUD_INSTALL_SKIP_GATEKEEPER` | `1`: installs skip the `spctl` check so a dev-signed zip installs. Test-only |
 | `MACHUD_VOICE_SOCKET` | The voice host's socket. An isolated copy without it uses `<MACHUD_SOCKET>-voice.sock` (else `machud-voice.sock` beside `MACHUD_CONFIG`) |
 | `MACHUD_VOICE_NO_MIC` | `1`: the voice host simulates capture and never opens the microphone |

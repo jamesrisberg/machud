@@ -2,7 +2,8 @@ import AppKit
 import HUDKit
 
 /// Wires the catalog and installer to the rest of MacHUD: the `catalog` command, the
-/// `apps install|update|uninstall` verbs, the settings window's Apps tab and first run.
+/// `apps install|update|uninstall` verbs, the settings window's Apps tab and the onboarding's
+/// Apps step.
 @MainActor
 final class CatalogServices {
     let catalog: AppCatalog
@@ -13,8 +14,6 @@ final class CatalogServices {
     var ownVersion: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
     /// Shows the settings window on the Apps tab.
     var showTab: (() -> Void)?
-    /// Where the first-run marker lives.
-    var stateDirectory: URL = LayoutStore.configDirectory.appendingPathComponent("state", isDirectory: true)
 
     init(externals: ExternalPanels, catalog: AppCatalog, installer: AppInstaller? = nil) {
         self.externals = externals
@@ -166,19 +165,11 @@ final class CatalogServices {
             : "\(key) is not in the catalog (\(catalog.installable.map(\.id).joined(separator: ", ")))"]
     }
 
-    // MARK: - First run
+    // MARK: - Onboarding
 
-    private var firstRunMarker: URL { stateDirectory.appendingPathComponent("apps-first-run") }
-
-    /// When no sibling apps are installed and this has not been done before: open the Apps
-    /// tab with the bundled tools selected. An isolated instance only does this with
-    /// `MACHUD_FIRST_RUN=1`. Returns whether it opened the tab.
-    @discardableResult
-    func firstRunIfNeeded() -> Bool {
-        guard externals.apps.isEmpty, !FileManager.default.fileExists(atPath: firstRunMarker.path),
-              !Env.isIsolated || Env.value("FIRST_RUN") == "1" else { return false }
-        try? FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
-        FileManager.default.createFile(atPath: firstRunMarker.path, contents: Data(ISO8601DateFormatter().string(from: Date()).utf8))
+    /// Readies the onboarding's Apps step: selects the bundled tools that are not installed
+    /// yet, fetching a missing or stale catalog first.
+    func preselectBundled() {
         let select = { [weak self] in
             guard let self else { return }
             self.tab.selected = Set(self.statuses().filter { $0.entry.isBundled && $0.installed == nil }.map(\.entry.id))
@@ -186,8 +177,6 @@ final class CatalogServices {
         }
         select()
         if catalog.document == nil || catalog.isStale { catalog.refresh { _ in select() } }
-        showTab?()
-        return true
     }
 
     // MARK: - Control

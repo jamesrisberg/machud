@@ -336,8 +336,8 @@ installs its own entry: a newer MacHUD shows a note with a Download button (its 
 The settings window's **Apps** tab (`settings-window show tab=apps`; the menu's **Get Apps…**)
 lists the catalog with icon, summary, kind, installed vs available version and
 Install / Update / Remove / Open with progress, "Install bundled tools" (every `bundled`
-entry not installed yet) and "Install selected". On first launch with no sibling apps found,
-MacHUD opens it once with the bundled tools selected (marker: `state/apps-first-run`).
+entry not installed yet) and "Install selected". The onboarding's Apps step shows the same
+catalog with the bundled tools selected (see Onboarding).
 
 ## Tool dock
 
@@ -446,6 +446,35 @@ only that (`"layout": ""`, `"slots": []`):
 The status menu's MacHUD section lists the discovered apps (● running, ○ not) with Show/Hide,
 Park/Reveal, Launch/Quit and a Settings… item per app, plus Settings… for the window.
 
+## Onboarding
+
+On launch, until it has been finished or skipped, MacHUD shows its setup guide: a full-screen
+overlay (the screen with the pointer, its desktop blurred and dimmed, one dark glass card) that
+walks through six steps: **welcome**, **permissions** (Accessibility and Microphone, live
+status, buttons that ask macOS or open System Settings), **voice** (on/off, fn key hold or
+tap mode with the gestures explained, the agent gesture, and a "try it" area that follows the
+voice host's `subscribe` stream and has a text box dictation pastes into), **brain** (the
+runtimes with what `brain status` detected, the workspace folder, which is required, and why the
+brain is not up yet until it is; mclaude offers to install MechaHUD, which shows the same
+session), **apps** (the catalog with one-click installs, bundled tools preselected) and
+**tour** (the orb, the tool dock, loadouts, the CLI). Return (or ⌘→) goes on, ⌘← back, Esc
+closes it to finish later: it opens again at that step on the next launch. **Skip setup** on the
+first step and **Finish** on the last stop it from showing by itself. The menu's **Setup
+Guide…** opens it at any time. The overlay is a normal-level window, so System Settings and
+macOS's prompts come up over it. While it will show at launch, MacHUD does not raise the
+Accessibility prompt at launch; the permissions step asks. Voice and brain settings go through
+the voice host's socket (`settings get/set`, `brain action=status`), as the Voice and Brain tabs do.
+
+| Command | Args | Effect |
+| --- | --- | --- |
+| `onboarding` / `onboarding status` | | `visible`, `record` (`{status: inProgress\|completed\|skipped, step, updatedAt}` or null), `steps[]`, `step`, `permissions {accessibility, microphone}`, `voice {status, on, keyMode, phase, connected}`, `brain {ready, enabled, runtime, workspace, problem?, runtimes[]?, statusError?}`, `apps[] {id, state}` |
+| `onboarding show` | `step=welcome\|permissions\|voice\|brain\|apps\|tour` | shows it at `step`, else where it was left (the start once finished or skipped) |
+| `onboarding hide` | | closes it to finish later |
+| `onboarding next` / `back` | | moves while it is showing (`next` on the last step finishes) |
+| `onboarding skip` | | closes it and stops it showing at launch |
+| `onboarding reset` | | closes it and forgets it: it shows again at the next launch |
+| `onboarding snapshot` | `dir=<folder>` | writes every step as `onboarding-<n>-<step>.png` in `dir`, rendered offscreen (nothing appears on screen); returns `files[]` |
+
 ## Voice
 
 MacHUD runs its voice host, `Contents/Helpers/MacHUDVoice` (beside the `MacHUD` binary in a
@@ -539,7 +568,7 @@ service for secrets).
   `hotkeys.dock` (default ⌃⌥D) shows and hides the tool dock.
 - `~/.config/machud/voice.json` — the voice host's settings (see Voice). The voice host writes
   it; MacHUD reads only `enabled`, to decide whether to start it.
-- `~/.config/machud/state/catalog.json` — the last catalog fetched; `state/apps-first-run` marks the first-run Apps tab as done.
+- `~/.config/machud/state/catalog.json` — the last catalog fetched; `state/onboarding.json` records the onboarding (`status`, `step`).
 - `~/.config/machud/state/tooldock.json` — frames of panels dismissed from the tool dock (restored by summon).
 - `~/Library/Application Support/MacHUD/docks.json` — where each dock strip sits (`HUDDockRegistry`);
   `MACHUD_DOCKS_FILE` overrides it.
@@ -562,7 +591,8 @@ variables. MacHUD also starts it with `MACHUD_VOICE_NO_MIC=1`, `MACHUD_VOICE_NO_
 with `MACHUD_VOICE_KEYCHAIN_SERVICE=com.jrisberg.machud.voice.isolated` unless that variable is
 already set, so a test instance never touches the real Grok key.
 
-An isolated copy skips the first-run Apps tab unless `MACHUD_FIRST_RUN=1`. To try installs,
+An isolated copy does not show the onboarding at launch unless `MACHUD_FIRST_RUN=1`, and its
+onboarding never asks macOS for permissions or opens System Settings. To try installs,
 give it a `catalog` with a `file://` `url` and a temporary `installDir`.
 `MACHUD_INSTALL_SKIP_GATEKEEPER=1` skips the `spctl` check so a dev-signed zip installs:
 **test-only**, never set it for normal use.

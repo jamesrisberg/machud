@@ -60,7 +60,6 @@ final class AppCatalogTests: XCTestCase {
         installer.hooks.trash = { try FileManager.default.removeItem(at: $0) }
         let services = CatalogServices(externals: externals, catalog: catalog, installer: installer)
         services.ownVersion = "1.0.0"
-        services.stateDirectory = dir.appendingPathComponent("state", isDirectory: true)
         return (services, externals)
     }
 
@@ -252,18 +251,12 @@ final class AppCatalogTests: XCTestCase {
         XCTAssertTrue(error.description.contains("not in an Applications folder"))
     }
 
-    func testFirstRunSelectsBundledOnce() throws {
+    func testOnboardingPreselectsTheBundledTools() throws {
         let zip = try makeZip(version: "0.1.0")
         try writeCatalog([entry(version: "0.1.0", zip: zip, bundled: true)])
-        setenv("MACHUD_FIRST_RUN", "1", 1)
-        defer { unsetenv("MACHUD_FIRST_RUN") }
         let (services, _) = makeServices()
         XCTAssertNil(refresh(services.catalog))
-        var shown = 0
-        services.showTab = { shown += 1 }
-        XCTAssertTrue(services.firstRunIfNeeded())
+        services.preselectBundled()
         XCTAssertEqual(services.tab.selected, ["dev.test.zeta"])
-        XCTAssertFalse(services.firstRunIfNeeded(), "only once")
-        XCTAssertEqual(shown, 1)
     }
 }

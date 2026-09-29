@@ -6,6 +6,18 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 
 ## [Unreleased]
 
+### Setup guide
+- The first launch opens a full-screen setup guide, one step at a time: the permissions MacHUD
+  needs (Accessibility and the microphone, with live status and buttons to ask for them), voice
+  (on/off, hold or tap on the fn key with the gestures explained, and a "try it" area that shows
+  what the voice host hears as you speak), the brain (pick Codex, Claude Code, Hermes or mclaude
+  with what is installed shown, choose the workspace folder, and see why the brain is not ready
+  until it is; mclaude offers MechaHUD, where the same session shows up), the HUD apps with
+  one-click installs, and a short tour of the orb, the tool dock, loadouts and the CLI.
+- Esc leaves it for later and it reopens where you left it; Skip setup or Finish stops it
+  showing by itself. **Setup Guide…** in the menu and `machud onboarding show` bring it back;
+  `machud onboarding reset` starts it over. It replaces the first-run Apps tab.
+
 ### Voice
 - MacHUD runs its voice host as a helper inside the app and keeps it running: it starts with
   MacHUD, comes back after a crash, and stops when you turn voice off or quit MacHUD.
