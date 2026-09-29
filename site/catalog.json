@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-09-29T11:12:08Z",
+  "updatedAt": "2026-09-29T11:21:05Z",
   "hudkit": "0.2.0",
   "apps": [
     {
@@ -12,9 +12,9 @@
       "version": "0.2.0",
       "minOS": "14.0",
       "download": "https://github.com/jamesrisberg/machud/releases/download/v0.2.0/MacHUD-0.2.0.zip",
-      "sha256": "2d463aa1fc2537a53df36afc2b7bfccf62d2caf2e0cdda2355a1703434ec0c17",
-      "size": 3118340,
-      "publishedAt": "2026-09-29T11:12:08Z",
+      "sha256": "c106d9f5be8932062c2e6fa9e367ddeb482ed2a67be7e2b4693287448bb07cac",
+      "size": 25937888,
+      "publishedAt": "2026-09-29T11:21:05Z",
       "icon": "https://jamesrisberg.github.io/machud/icons/machud.png",
       "homepage": "https://github.com/jamesrisberg/machud",
       "bundled": false
