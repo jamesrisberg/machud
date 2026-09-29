@@ -22,6 +22,13 @@ public struct VoiceHostSettings: Codable, Equatable, Sendable {
     /// Loopback port for the brain service (Archibald uses 8790).
     public var brainPort: Int
     public var brain: BrainSettings
+    /// The brain gets MacHUD's tool server (`machud-mcp`) and a description of MacHUD and its
+    /// apps. Stored inside `brain` as `brain.machudTools`, beside BrainKit's own keys.
+    public var machudTools: Bool
+    /// MacHUD's tools ask before each call (`brain.machudToolsRequireApproval`); off, they run
+    /// without asking, as they only drive reversible UI. The brain's other actions keep its own
+    /// approval policy either way.
+    public var machudToolsRequireApproval: Bool
     public var voice: VoiceSettings
     /// Keep dictation history; nil (absent from `voice.json`) follows the default rule
     /// (`DictationHistoryLocator.plan(for:)`).
@@ -34,7 +41,8 @@ public struct VoiceHostSettings: Codable, Equatable, Sendable {
 
     public init(enabled: Bool = true, keyMode: KeyMode = .hold, agentGesture: Bool = true,
                 brainEnabled: Bool = true, brainPort: Int = 8791,
-                brain: BrainSettings = BrainSettings(), voice: VoiceSettings = VoiceSettings(),
+                brain: BrainSettings = BrainSettings(), machudTools: Bool = true,
+                machudToolsRequireApproval: Bool = false, voice: VoiceSettings = VoiceSettings(),
                 history: DictationHistorySettings? = nil, feedTranscripts: Bool = true,
                 feedAgentReplies: Bool = false) {
         self.enabled = enabled
@@ -43,10 +51,22 @@ public struct VoiceHostSettings: Codable, Equatable, Sendable {
         self.brainEnabled = brainEnabled
         self.brainPort = brainPort
         self.brain = brain
+        self.machudTools = machudTools
+        self.machudToolsRequireApproval = machudToolsRequireApproval
         self.voice = voice
         self.history = history
         self.feedTranscripts = feedTranscripts
         self.feedAgentReplies = feedAgentReplies
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case enabled, keyMode, agentGesture, brainEnabled, brainPort, brain, voice, history, feedTranscripts,
+             feedAgentReplies
+    }
+
+    /// The keys this host adds to the `brain` object.
+    private enum BrainToolKeys: String, CodingKey {
+        case machudTools, machudToolsRequireApproval
     }
 
     public init(from decoder: Decoder) throws {
@@ -59,10 +79,33 @@ public struct VoiceHostSettings: Codable, Equatable, Sendable {
         let port = (try? c.decode(Int.self, forKey: .brainPort)) ?? d.brainPort
         brainPort = (1024...65535).contains(port) ? port : d.brainPort
         brain = (try? c.decode(BrainSettings.self, forKey: .brain)) ?? d.brain
+        let tools = try? c.nestedContainer(keyedBy: BrainToolKeys.self, forKey: .brain)
+        machudTools = (try? tools?.decode(Bool.self, forKey: .machudTools)) ?? d.machudTools
+        machudToolsRequireApproval = (try? tools?.decode(Bool.self, forKey: .machudToolsRequireApproval))
+            ?? d.machudToolsRequireApproval
         voice = (try? c.decode(VoiceSettings.self, forKey: .voice)) ?? d.voice
         history = try? c.decodeIfPresent(DictationHistorySettings.self, forKey: .history)
         feedTranscripts = (try? c.decode(Bool.self, forKey: .feedTranscripts)) ?? d.feedTranscripts
         feedAgentReplies = (try? c.decode(Bool.self, forKey: .feedAgentReplies)) ?? d.feedAgentReplies
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(enabled, forKey: .enabled)
+        try c.encode(keyMode, forKey: .keyMode)
+        try c.encode(agentGesture, forKey: .agentGesture)
+        try c.encode(brainEnabled, forKey: .brainEnabled)
+        try c.encode(brainPort, forKey: .brainPort)
+        // One `brain` object: BrainKit's settings, then this host's keys in the same container.
+        let brainEncoder = c.superEncoder(forKey: .brain)
+        try brain.encode(to: brainEncoder)
+        var tools = brainEncoder.container(keyedBy: BrainToolKeys.self)
+        try tools.encode(machudTools, forKey: .machudTools)
+        try tools.encode(machudToolsRequireApproval, forKey: .machudToolsRequireApproval)
+        try c.encode(voice, forKey: .voice)
+        try c.encodeIfPresent(history, forKey: .history)
+        try c.encode(feedTranscripts, forKey: .feedTranscripts)
+        try c.encode(feedAgentReplies, forKey: .feedAgentReplies)
     }
 }
 

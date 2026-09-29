@@ -171,8 +171,9 @@ final class VoiceHostCommands {
         }
     }
 
-    /// `brain status`: whether the brain can take a turn, why not, the workspace and the
-    /// runtimes found on this Mac. Detection runs again each time, so an install shows up.
+    /// `brain status`: whether the brain can take a turn, why not, the workspace, the runtime
+    /// chosen and the one the companion runs (`activeRuntime`, while connected), the runtimes
+    /// found on this Mac and MacHUD's tools. Detection runs again each time, so an install shows up.
     private func brain(_ args: [String: String]) -> [String: Any] {
         let sub = args["action"] ?? args["_"] ?? "status"
         guard sub == "status" else { return ["ok": false, "error": "brain takes status, not \(sub)"] }
@@ -187,6 +188,18 @@ final class VoiceHostCommands {
         ]
         if let problem = state.brainProblem { reply["problem"] = problem }
         if let key = state.sessionKey { reply["sessionKey"] = key }
+        if let active = state.activeRuntime { reply["activeRuntime"] = active }
+        var tools: [String: Any] = [
+            "enabled": controller.settings.machudTools,
+            "requireApproval": controller.settings.machudToolsRequireApproval,
+            "available": controller.machudTools != nil,
+        ]
+        if let server = controller.machudTools { tools["path"] = server.command }
+        if let running = controller.brainToolServers {
+            tools["active"] = running.active && running.names.contains(MacHUDToolServer.name)
+            if let note = running.note { tools["note"] = note }
+        }
+        reply["machudTools"] = tools
         return reply
     }
 

@@ -136,15 +136,16 @@ final class FakeBrain: BrainDriving {
 
     static func snapshot(status: String, output: String, progress: String, approvals: [AgentApproval],
                          error: String?, requestId: String?, turnId: String?,
-                         sessionKey: String? = nil) -> AgentSessionSnapshot {
+                         sessionKey: String? = nil, runtime: String? = nil,
+                         toolServers: AgentToolServerStatus? = nil) -> AgentSessionSnapshot {
         struct Wire: Encodable {
             let threadId: String?, turnId: String?, status: String, output: String, progress: String
             let approvals: [AgentApproval], error: String?, revision: Int, instanceId: String?, requestId: String?
-            let sessionKey: String?
+            let sessionKey: String?, runtime: String?, toolServers: AgentToolServerStatus?
         }
         let wire = Wire(threadId: "thread", turnId: turnId, status: status, output: output, progress: progress,
                         approvals: approvals, error: error, revision: 1, instanceId: "i", requestId: requestId,
-                        sessionKey: sessionKey)
+                        sessionKey: sessionKey, runtime: runtime, toolServers: toolServers)
         let data = try! JSONEncoder().encode(wire)
         return try! JSONDecoder().decode(AgentSessionSnapshot.self, from: data)
     }
@@ -335,5 +336,28 @@ extension FakeModels {
         models.status = VoiceModelStatus(installed: installed, downloading: false, progress: installed ? 1 : 0,
                                          bytes: 3_685_906)
         return models
+    }
+}
+
+/// MacHUD's apps and loadouts as the fake MacHUD reports them; nil does not answer.
+final class FakeMacHUDStatus: MacHUDStatusReading, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _snapshot: MacHUDSnapshot?
+    private var _reads = 0
+
+    init(_ snapshot: MacHUDSnapshot?) { _snapshot = snapshot }
+
+    var current: MacHUDSnapshot? {
+        get { lock.withLock { _snapshot } }
+        set { lock.withLock { _snapshot = newValue } }
+    }
+
+    var reads: Int { lock.withLock { _reads } }
+
+    func snapshot() async -> MacHUDSnapshot? {
+        lock.withLock {
+            _reads += 1
+            return _snapshot
+        }
     }
 }
