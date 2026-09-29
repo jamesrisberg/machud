@@ -463,18 +463,21 @@ see Running several instances).
 
 | Command | Args | Effect |
 | --- | --- | --- |
-| `voice state` | | `state {phase, inputLevel, partialTranscript, card?, hiddenForFullScreen, brainAvailable, wakeListening, muted}` |
+| `voice state` | | `state {phase, inputLevel, partialTranscript, card?, hiddenForFullScreen, brainAvailable, brainProblem?, sessionKey?, sessionProvider?, wakeListening, muted}` |
 | `voice hello` | | the voice host's `name` (`MacHUDVoice`), `version`, `pid` |
 | `voice status` | | MacHUD's view of the process: `status` (`running`, `restarting`, `disabled`, `stopped`, `failed`, `notInstalled`), `pid` while running, `socket`, `connected`, `muted` once connected, `error` (why it gave up) when `failed` |
-| `voice action` | `name=` `click`, `ask`, `dictate`, `stop`, `cancel`, `approve`, `deny`, `dismiss`, `mute`, `unmute`; `id=` for `approve`/`deny` | performs it (`machud voice action mute` works too) |
+| `voice action` | `name=` `click`, `ask`, `dictate`, `stop`, `cancel`, `approve`, `deny`, `dismiss`, `mute`, `unmute`, `open-session`; `id=` for `approve`/`deny` | performs it (`machud voice action mute` works too) |
+| `voice brain status` | | the voice host's `brain status` (below): whether the brain can take a turn, why not, the workspace and the runtimes found |
 | `voice settings get` | | `settings`: the voice host's settings object |
 | `voice settings set` | `settings=<JSON object>`, or dotted `key=value` pairs | `settings=` replaces the whole object. `key=value` pairs (`enabled=false`, `voice.speakReplies=true`, `brain.runtime=claude`) are applied to the current settings, each converted to the type already stored, and the whole object is sent back; an unknown key is an error. Turning `enabled` off stops the voice host; on starts it |
 | `voice secret` | `set name=grok [value=…]` / `clear name=grok` | stores or removes the Grok API key in the Keychain; the key is never returned. Without `value=`, `machud voice secret set name=grok` reads the key from stdin (without echo at a terminal): prefer that, so the key stays out of the shell history and the process list |
 
 When the voice host is not answering, `voice` replies `ok: false` with why (`status` as above).
 The settings window's Voice tab (on/off, fn key mode, the agent gesture, wake word, phrase and
-sensitivity, reply voice, spoken replies, Grok key) and Brain tab (on/off, runtime, workspace,
-assistant name, port, per-runtime paths) edit the same settings through the same socket, and
+sensitivity, reply voice, spoken replies, Grok key) and Brain tab (why the brain cannot take a
+turn, or Ready; on/off; runtime, listing mclaude once it is installed and marking runtimes not
+found; the workspace folder, chosen with a folder picker and required; assistant name, port,
+per-runtime paths) edit the same settings through the same socket, and
 say why while the voice host is down (Retry restarts a stopped or failed host; Turn On Voice
 while voice is off). The status menu's Voice submenu has Mute/Unmute and Voice Settings…, with
 Turn On Voice while voice is off and Restart Voice Host while it is stopped or failed.
@@ -491,11 +494,21 @@ HUDKit's JSON-lines socket, one request per connection, served by `MacHUDVoice` 
 | `settings` | `action=get` | `settings`: the whole settings object |
 | `settings` | `action=set settings=<JSON object>` | replaces the whole object (decoded leniently: missing or invalid keys take their defaults), saves `voice.json`, applies it and returns the stored `settings` |
 | `action` | `name=<click\|ask\|dictate\|stop\|cancel\|approve\|deny\|dismiss\|mute\|unmute>`, `id=` for `approve`/`deny` | performs it; returns `state` |
+| `action` | `name=open-session` | asks MacHUD to show the brain's current session (`sessions open id=<sessionKey>` on MacHUD's control socket, `$MACHUD_SOCKET` else `/tmp/machud-<uid>.sock`); replies once MacHUD has, `{ok, app, state}`, or `{ok: false, error}` (also shown briefly under the orb) |
+| `brain` | `action=status` (or `brain status`) | `{ok, available, problem?, workspace, runtime, runtimes[]}`: `runtime` is the one chosen; each of `codex`, `claude`, `hermes`, `mclaude` is `{id, name, installed, path?}`, plus `tmux` (its path, or null) for mclaude and `apiServer` (whether `~/.hermes/.env` turns Hermes' API server on) for hermes. Tools are looked up again on each call |
 | `secret` | `action=set name=grok value=…` / `action=clear name=grok` | writes the Keychain; never returns a value |
 | `quit` | | exits after replying |
 
 `state` is `{phase, inputLevel, partialTranscript, card?, hiddenForFullScreen, brainAvailable,
-wakeListening, muted}`. `phase` is `{"name": …}`, one of `idle`, `listening`, `transcribing`,
+brainProblem?, sessionKey?, sessionProvider?, wakeListening, muted}`. `brainAvailable` is true
+when the brain can take a turn; otherwise `brainProblem` says why, in words for the user: voice
+or the brain is off, the brain companion's own reason (`Choose a workspace folder for the
+agent.`, a missing Node.js), the chosen runtime's tool is not installed (`Codex is not
+installed.`), or it is starting, connecting or restarting. A problem the user has to fix refuses
+an agent take with that reason; starting, connecting and restarting do not. `sessionKey` is the
+brain's current session when its runtime drives one other apps show too (mechaclaude's
+`claude:<sessionId>`), and `sessionProvider` the app MacHUD opens it in, once MacHUD has named
+one (`sessions providers`); the reply card then offers "Open in <app>". `phase` is `{"name": …}`, one of `idle`, `listening`, `transcribing`,
 `working`, `awaitingApproval`, `speaking`, `failed`, plus `"mode": "dictation"|"agent"` for
 `listening` and `transcribing` and `"message"` for `failed`. `card` is `{prompt, reply,
 progress[], approval?: {id, summary, detail}}`.
@@ -504,8 +517,8 @@ The host reads its environment: `MACHUD_VOICE_SOCKET` (its socket), `MACHUD_CONF
 of that path holds `voice.json`), `MACHUD_VOICE_PARENT_PIPE=1` (exit when stdin reaches end of
 file), `MACHUD_NO_HOTKEYS` (no fn key tap), `MACHUD_VOICE_NO_MIC=1` (simulated capture, the
 microphone is never opened), `MACHUD_VOICE_NO_BRAIN=1` (the brain never starts),
-`MACHUD_VOICE_HEADLESS=1` (no orb on screen) and `MACHUD_VOICE_KEYCHAIN_SERVICE` (the Keychain
-service for secrets).
+`MACHUD_VOICE_HEADLESS=1` (no orb on screen), `MACHUD_VOICE_KEYCHAIN_SERVICE` (the Keychain
+service for secrets) and `MACHUD_SOCKET` (MacHUD's control socket, for `open-session`).
 
 ## Lifecycle
 
