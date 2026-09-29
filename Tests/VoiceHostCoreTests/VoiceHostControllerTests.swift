@@ -11,6 +11,8 @@ final class VoiceHostControllerTests: XCTestCase {
     private var brain: FakeBrain!
     private var speaker: FakeSpeaker!
     private var wake: FakeWake!
+    /// The Hey Jarvis model's files, installed unless a test says otherwise.
+    private var wakeStore: FakeModels!
     private var presenter: RecordingPresenter!
     private var clock: ManualClock!
     private var sessions: FakeSessions!
@@ -23,6 +25,7 @@ final class VoiceHostControllerTests: XCTestCase {
         brain = FakeBrain()
         speaker = FakeSpeaker()
         wake = FakeWake()
+        wakeStore = FakeModels.wake(installed: true)
         presenter = RecordingPresenter()
         clock = ManualClock()
         sessions = FakeSessions()
@@ -35,7 +38,8 @@ final class VoiceHostControllerTests: XCTestCase {
         let fakeBrain = self.brain!
         let controller = VoiceHostController(
             settings: settings, dictation: dictation, keys: keys,
-            brain: brain ?? self.brain, speaker: speaker, wake: wake, brainStateRoot: brainRoot,
+            brain: brain ?? self.brain, speaker: speaker, wake: wake,
+            wakeModels: [WakePhraseModel(model: WakeModels.heyJarvis, store: wakeStore)], brainStateRoot: brainRoot,
             sessions: sessions, detectRuntimes: FakeRuntimes.detect(missing: missingRuntimes),
             sessionKeyOf: { _ in fakeBrain.sessionKey },
             now: { clock.now }, schedule: { clock.schedule($0, $1) })

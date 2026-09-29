@@ -28,6 +28,10 @@ final class FakeVoiceHost {
     var kokoro: [String: Any] = ["installed": false, "downloading": false, "progress": 0.0, "bytes": 330_000_000]
     var parakeet: [String: Any] = ["installed": false, "downloading": false, "progress": 0.0, "bytes": 600_000_000,
                                    "id": "parakeet-tdt-0.6b-v2"]
+    var wake: [String: Any] = ["id": "hey-jarvis", "phrase": "Hey Jarvis", "manifestId": "openwakeword-hey-jarvis-v0.1",
+                               "installed": false, "downloading": false, "progress": 0.0, "bytes": 3_685_906,
+                               "note": "Personal, non-commercial use only. Downloaded when you ask, never bundled with MacHUD."]
+    var wakeProblem: String?
     var historyRequests: [[String: String]] = []
     /// What `history status` resolves to while no `history` setting is saved.
     var historyDefault: [String: Any] = ["mode": "textAndAudio", "shareWithSpeakFree": true]
@@ -82,9 +86,13 @@ final class FakeVoiceHost {
         server.register("models") { [unowned self] args, done in
             self.modelRequests.append(args)
             if args["action"] == "download" {
-                if args["id"] == "parakeet" { self.parakeet["downloading"] = true } else { self.kokoro["downloading"] = true }
+                switch args["id"] {
+                case "parakeet": self.parakeet["downloading"] = true
+                case "hey-jarvis": self.wake["downloading"] = true
+                default: self.kokoro["downloading"] = true
+                }
             }
-            done(["ok": true, "kokoro": self.kokoro, "parakeet": self.parakeet])
+            done(["ok": true, "kokoro": self.kokoro, "parakeet": self.parakeet, "wake": [self.wake]])
         }
         server.register("history") { [unowned self] args, done in
             self.historyRequests.append(args)
@@ -107,6 +115,7 @@ final class FakeVoiceHost {
     var state: [String: Any] {
         var state: [String: Any] = ["phase": ["name": "idle"], "muted": muted, "brainAvailable": brainProblem == nil]
         if let brainProblem { state["brainProblem"] = brainProblem }
+        if let wakeProblem { state["wakeProblem"] = wakeProblem }
         return state
     }
 }
@@ -446,10 +455,11 @@ final class VoiceControlTests: XCTestCase {
         XCTAssertEqual(host.said, ["Hello there"])
         let status = run(["models", "status"])
         XCTAssertEqual((status["kokoro"] as? [String: Any])?["installed"] as? Bool, false)
-        XCTAssertEqual(host.modelRequests.last, ["action": "status"])
+        // The settings tab loads `models status` too, in its own time: look for the request, not the last one.
+        XCTAssertTrue(host.modelRequests.contains(["action": "status"]))
         let download = run(["models", "download", "id=kokoro"])
         XCTAssertEqual((download["kokoro"] as? [String: Any])?["downloading"] as? Bool, true)
-        XCTAssertEqual(host.modelRequests.last, ["action": "download", "id": "kokoro"])
+        XCTAssertTrue(host.modelRequests.contains(["action": "download", "id": "kokoro"]))
     }
 
     func testTestVoiceSaysASampleWithTheReplyVoice() {
@@ -515,6 +525,33 @@ final class VoiceControlTests: XCTestCase {
         XCTAssertTrue(spin(until: { model.history?.shareWithSpeakFree == false }))
         XCTAssertEqual(host.settings["history"] as? [String: AnyHashable], ["mode": "text", "shareWithSpeakFree": false])
         XCTAssertFalse(model.history?.isDefault ?? true)
+    }
+
+    func testTheVoiceTabOffersOnlyWakePhrasesWithAModel() {
+        supervisor.start()
+        let model = voice.settingsModel
+        XCTAssertTrue(spin(until: { !model.wakePhrases.isEmpty }))
+        XCTAssertEqual(model.wakePhrases.map(\.phrase), ["Hey Jarvis"])
+        XCTAssertEqual(model.string("voice.wakePhrase"), "Hey Computer", "the saved phrase is left alone while off")
+        XCTAssertEqual(model.wakePhrase?.id, "hey-jarvis", "a phrase without a model shows the first with one")
+        XCTAssertEqual(model.wakePhrase?.note,
+                       "Personal, non-commercial use only. Downloaded when you ask, never bundled with MacHUD.")
+        XCTAssertEqual(model.wakePhrase?.model.installed, false)
+
+        model.downloadWakeModel("hey-jarvis")
+        XCTAssertTrue(spin(until: { model.wakePhrase?.model.downloading == true }))
+        XCTAssertTrue(host.modelRequests.contains(["action": "download", "id": "hey-jarvis"]))
+        var installed = host.wake
+        installed["installed"] = true
+        installed["downloading"] = false
+        installed["progress"] = 1.0
+        host.server.publish("models", payload: ["wake": [installed]])
+        XCTAssertTrue(spin(until: { model.wakePhrase?.model.installed == true }))
+
+        host.wakeProblem = "Download the Hey Jarvis model to use the wake word."
+        host.server.publish("state", payload: ["state": host.state])
+        XCTAssertTrue(spin(until: { model.wakeProblem == "Download the Hey Jarvis model to use the wake word." }))
+        XCTAssertEqual(model.json["wakeProblem"] as? String, "Download the Hey Jarvis model to use the wake word.")
     }
 
     func testTheBrainTabShowsTheResolvedWorkspace() {

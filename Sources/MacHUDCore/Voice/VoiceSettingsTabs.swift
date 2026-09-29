@@ -4,7 +4,8 @@ import SwiftUI
 /// The Voice and Brain tabs of the settings window. Everything goes through the voice host's
 /// socket (`settings get`, `settings set` with the whole object, `secret set|clear`,
 /// `brain status`, `action say` for Test Voice, `models status|download` for the Parakeet
-/// speech model and the Kokoro voice, `history status`, and its `state` and `models` events);
+/// speech model, the Kokoro voice and the wake models, `history status`, and its `state` and
+/// `models` events);
 /// while the host is down the tabs say why and edit nothing.
 @MainActor
 final class VoiceSettingsModel: ObservableObject {
@@ -46,6 +47,44 @@ final class VoiceSettingsModel: ObservableObject {
     @Published private(set) var parakeet: ModelStatus?
     /// Where finished dictations are kept (`history status`); nil until known.
     @Published private(set) var history: HistoryStatus?
+    /// The wake phrases there are models for (`models status`'s `wake`), in the host's order.
+    @Published private(set) var wakePhrases: [WakePhrase] = []
+    /// Why the wake word is on and not listening (the host's `wakeProblem`); nil otherwise.
+    @Published private(set) var wakeProblem: String?
+
+    /// A wake phrase the host has a model for, and that model's state.
+    struct WakePhrase: Equatable, Identifiable {
+        /// What `models download id=` takes (`hey-jarvis`).
+        var id: String
+        var phrase: String
+        /// The model's terms in a few words.
+        var note: String
+        var model: ModelStatus
+
+        init?(_ json: Any?) {
+            guard let json = json as? [String: Any], let id = json["id"] as? String,
+                  let phrase = json["phrase"] as? String, let model = ModelStatus(json) else { return nil }
+            self.id = id
+            self.phrase = phrase
+            note = json["note"] as? String ?? ""
+            self.model = model
+        }
+
+        init(id: String, phrase: String, note: String, model: ModelStatus) {
+            self.id = id
+            self.phrase = phrase
+            self.note = note
+            self.model = model
+        }
+
+        /// Phrases compare as the host does: case, punctuation and spacing aside.
+        func matches(_ other: String) -> Bool { Self.normalize(other) == Self.normalize(phrase) }
+
+        static func normalize(_ text: String) -> String {
+            text.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .filter { !$0.isEmpty }.joined(separator: " ")
+        }
+    }
 
     /// The voice host's `history status`: the setting as it resolves on this Mac.
     struct HistoryStatus: Equatable {
@@ -164,6 +203,8 @@ final class VoiceSettingsModel: ObservableObject {
     /// A `state` from the host: keeps the brain's problem current. Called for every state event,
     /// so it publishes only a change.
     func hostStateChanged(_ state: [String: Any]?) {
+        let wakeProblem = state?["wakeProblem"] as? String
+        if wakeProblem != self.wakeProblem { self.wakeProblem = wakeProblem }
         let problem = state?["brainProblem"] as? String
         guard problem != brainProblem else { return }
         brainProblem = problem
@@ -225,7 +266,23 @@ final class VoiceSettingsModel: ObservableObject {
     func modelsChanged(_ reply: [String: Any]) {
         if let kokoro = ModelStatus(reply["kokoro"]), kokoro != self.kokoro { self.kokoro = kokoro }
         if let parakeet = ModelStatus(reply["parakeet"]), parakeet != self.parakeet { self.parakeet = parakeet }
+        if let list = reply["wake"] as? [Any] {
+            let phrases = list.compactMap(WakePhrase.init)
+            if phrases != wakePhrases { wakePhrases = phrases }
+        }
     }
+
+    /// The phrase the wake word listens for: the saved one when a model detects it, else the
+    /// first there is a model for (what the host switches to when the wake word is turned on).
+    var wakePhrase: WakePhrase? {
+        let saved = string("voice.wakePhrase")
+        return wakePhrases.first { $0.matches(saved) } ?? wakePhrases.first
+    }
+
+    func setWakePhrase(_ phrase: String) { set("voice.wakePhrase", phrase) }
+
+    /// Downloads a wake phrase's model (`models download id=`); progress arrives as `models` events.
+    func downloadWakeModel(_ id: String) { download(id) }
 
     /// Downloads the Kokoro voice; progress arrives as `models` events.
     func downloadKokoro() { download("kokoro") }
@@ -321,6 +378,9 @@ final class VoiceSettingsModel: ObservableObject {
         if let workspace { d["workspace"] = workspace }
         if let kokoro { d["kokoro"] = ["installed": kokoro.installed, "downloading": kokoro.downloading] }
         if let parakeet { d["parakeet"] = ["installed": parakeet.installed, "downloading": parakeet.downloading] }
+        d["wake"] = wakePhrases.map { ["id": $0.id, "phrase": $0.phrase, "installed": $0.model.installed,
+                                       "downloading": $0.model.downloading] }
+        if let wakeProblem { d["wakeProblem"] = wakeProblem }
         if let history { d["history"] = ["mode": history.mode, "shareWithSpeakFree": history.shareWithSpeakFree] }
         if let lastError { d["lastError"] = lastError }
         return d
@@ -355,7 +415,10 @@ struct VoiceTabView: View {
             Section("Wake word") {
                 VoiceToggle(model: model, title: "Listen for the wake word", path: "voice.wakeWordEnabled",
                             help: "Keeps the microphone open while on.")
-                VoiceText(model: model, title: "Phrase", path: "voice.wakePhrase")
+                if model.bool("voice.wakeWordEnabled"), let problem = model.wakeProblem {
+                    Label(problem, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                }
+                WakePhraseRows(model: model)
                 // The host stores a detection threshold (higher wakes less often); the slider shows
                 // its inverse, so moving right wakes more easily.
                 LabeledContent("Sensitivity") {
@@ -419,6 +482,40 @@ struct BrainTabView: View {
                 Text("Empty paths are looked up on PATH and the usual install folders.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+        }
+    }
+}
+
+/// The wake phrase picker, offering only phrases there is a model for, and the chosen
+/// phrase's model: installed, downloading with progress, or Download, with its terms.
+struct WakePhraseRows: View {
+    @ObservedObject var model: VoiceSettingsModel
+
+    var body: some View {
+        if let chosen = model.wakePhrase {
+            Picker("Phrase", selection: Binding(get: { chosen.id }, set: { id in
+                if let phrase = model.wakePhrases.first(where: { $0.id == id }) { model.setWakePhrase(phrase.phrase) }
+            })) {
+                ForEach(model.wakePhrases) { phrase in
+                    Text("\(phrase.phrase)\(phrase.model.installed ? "" : " (not installed)")").tag(phrase.id)
+                }
+            }
+            LabeledContent("\(chosen.phrase) model") {
+                if chosen.model.installed {
+                    Label("Installed", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                } else if chosen.model.downloading {
+                    ProgressView(value: chosen.model.progress) { Text("Downloading \(Int(chosen.model.progress * 100))%") }
+                        .frame(maxWidth: 200)
+                } else {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Button("Download (\(chosen.model.size))") { model.downloadWakeModel(chosen.id) }
+                        if let error = chosen.model.error { Text(error).font(.caption).foregroundStyle(.red) }
+                    }
+                }
+            }
+            Text(chosen.note).font(.caption).foregroundStyle(.secondary)
+        } else {
+            LabeledContent("Phrase") { Text("Unknown").foregroundStyle(.secondary) }
         }
     }
 }

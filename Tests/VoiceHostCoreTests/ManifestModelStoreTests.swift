@@ -6,7 +6,7 @@ import XCTest
 /// The live model store over VoiceKit's `ModelStore`, with a tiny `file://` manifest: nothing is
 /// downloaded from the network.
 @MainActor
-final class KokoroModelStoreTests: XCTestCase {
+final class ManifestModelStoreTests: XCTestCase {
     private var root: URL!
     private var source: URL!
 
@@ -32,7 +32,7 @@ final class KokoroModelStoreTests: XCTestCase {
                              licence: "test", redistributable: false)
     }
 
-    private func waitUntil(_ store: KokoroModelStore, _ done: @escaping (VoiceModelStatus) -> Bool) async {
+    private func waitUntil(_ store: ManifestModelStore, _ done: @escaping (VoiceModelStatus) -> Bool) async {
         let reached = expectation(description: "status")
         reached.assertForOverFulfill = false
         store.onChange = { if done(store.status) { reached.fulfill() } }
@@ -42,7 +42,7 @@ final class KokoroModelStoreTests: XCTestCase {
 
     func testDownloadVerifiesAndInstalls() async throws {
         let manifest = try manifest(["config.json": Data("{}".utf8), "voices/af_heart.npy": Data(repeating: 7, count: 64)])
-        let store = KokoroModelStore(manifest: manifest, directory: root.appendingPathComponent("installed"))
+        let store = ManifestModelStore(manifest: manifest, directory: root.appendingPathComponent("installed"))
         XCTAssertEqual(store.status, VoiceModelStatus(installed: false, downloading: false, progress: 0, bytes: 66))
         store.download()
         XCTAssertTrue(store.status.downloading)
@@ -53,7 +53,7 @@ final class KokoroModelStoreTests: XCTestCase {
 
     func testAFileThatFailsVerificationIsNotInstalled() async throws {
         let manifest = try manifest(["config.json": Data("{}".utf8)], corrupt: "config.json")
-        let store = KokoroModelStore(manifest: manifest, directory: root.appendingPathComponent("installed"))
+        let store = ManifestModelStore(manifest: manifest, directory: root.appendingPathComponent("installed"))
         store.download()
         await waitUntil(store) { !$0.downloading && $0.error != nil }
         XCTAssertFalse(store.status.installed)

@@ -177,7 +177,7 @@ final class FakeSpeaker: ReplySpeaking {
     }
 }
 
-/// The Kokoro model's store, without a download.
+/// A model's store (Kokoro, Parakeet, a wake model), without a download.
 @MainActor
 final class FakeModels: VoiceModelProviding {
     var status = VoiceModelStatus(installed: false, downloading: false, progress: 0, bytes: 325_000_000)
@@ -200,6 +200,7 @@ final class FakeModels: VoiceModelProviding {
 final class FakeWake: WakeDriving {
     var onWake: (() -> Void)?
     var onListeningChanged: ((Bool) -> Void)?
+    var onProblem: ((String?) -> Void)?
     var starts: [VoiceSettings] = []
     var stops = 0
     var listening = false
@@ -208,6 +209,13 @@ final class FakeWake: WakeDriving {
         starts.append(settings)
         listening = true
         onListeningChanged?(true)
+    }
+
+    /// Listening stops by itself, as a failed microphone does.
+    func fail(_ reason: String) {
+        listening = false
+        onListeningChanged?(false)
+        onProblem?(reason)
     }
 
     func stop() {
@@ -318,4 +326,14 @@ final class FakeSessions: SessionOpening, @unchecked Sendable {
     }
 
     func providerName() async -> String? { provider }
+}
+
+extension FakeModels {
+    /// A wake model's store, installed or not.
+    static func wake(installed: Bool) -> FakeModels {
+        let models = FakeModels()
+        models.status = VoiceModelStatus(installed: installed, downloading: false, progress: installed ? 1 : 0,
+                                         bytes: 3_685_906)
+        return models
+    }
 }

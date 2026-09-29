@@ -6,6 +6,22 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 
 ## [Unreleased]
 
+### Voice: the wake word works
+- The wake word never triggered: its default phrase, "Hey Computer", has no model yet, nothing
+  downloaded one, and the wake word stayed off without saying so. The phrase is now chosen from
+  the phrases there is a model for (today "Hey Jarvis"), each marked installed or not with its
+  terms, in the Voice tab and the setup guide's Voice section (where the wake word is off until
+  you turn it on).
+- Download the Hey Jarvis model from either place, or with `machud voice models download
+  id=hey-jarvis`. It is openWakeWord's model for personal, non-commercial use, downloaded when you
+  ask and never bundled with MacHUD. The wake word starts listening as soon as it is installed,
+  no restart.
+- When the wake word is on but cannot listen, the Voice tab says why (the model is missing or
+  downloading, the microphone is not allowed), and turning it on shows the reason under the orb.
+  A saved "Hey Computer" becomes "Hey Jarvis" when the wake word is turned on.
+- The wake word's microphone starts again by itself after an audio device change instead of
+  going quiet.
+
 ### Voice: speech model, dictation history, transcripts in Stash
 - Dictation needs the Parakeet speech model, and a Mac without SpeakFree has none. The Voice tab
   and the setup guide's Voice section now show whether it is installed and download it with
