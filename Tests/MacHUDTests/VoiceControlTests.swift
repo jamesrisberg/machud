@@ -26,6 +26,12 @@ final class FakeVoiceHost {
     var said: [String] = []
     var modelRequests: [[String: String]] = []
     var kokoro: [String: Any] = ["installed": false, "downloading": false, "progress": 0.0, "bytes": 330_000_000]
+    var parakeet: [String: Any] = ["installed": false, "downloading": false, "progress": 0.0, "bytes": 600_000_000,
+                                   "id": "parakeet-tdt-0.6b-v2"]
+    var historyRequests: [[String: String]] = []
+    /// What `history status` resolves to while no `history` setting is saved.
+    var historyDefault: [String: Any] = ["mode": "textAndAudio", "shareWithSpeakFree": true]
+    var speakFreeInstalled = true
     var workspace = "/Users/someone"
     var workspaceDefault = true
 
@@ -75,8 +81,20 @@ final class FakeVoiceHost {
         }
         server.register("models") { [unowned self] args, done in
             self.modelRequests.append(args)
-            if args["action"] == "download" { self.kokoro["downloading"] = true }
-            done(["ok": true, "kokoro": self.kokoro])
+            if args["action"] == "download" {
+                if args["id"] == "parakeet" { self.parakeet["downloading"] = true } else { self.kokoro["downloading"] = true }
+            }
+            done(["ok": true, "kokoro": self.kokoro, "parakeet": self.parakeet])
+        }
+        server.register("history") { [unowned self] args, done in
+            self.historyRequests.append(args)
+            let saved = self.settings["history"] as? [String: Any]
+            let chosen = saved ?? self.historyDefault
+            let share = (chosen["shareWithSpeakFree"] as? Bool ?? false) && self.speakFreeInstalled
+            done(["ok": true, "mode": chosen["mode"] ?? "off", "shareWithSpeakFree": share,
+                  "speakFreeInstalled": self.speakFreeInstalled, "default": saved == nil,
+                  "folder": share ? "/Users/someone/.config/speakfree/recordings"
+                      : "/Users/someone/Library/Application Support/MacHUD/Voice/History"])
         }
         server.register("secret") { [unowned self] args, done in
             guard let name = args["name"] else { done(["ok": false, "error": "secret needs name="]); return }
@@ -159,6 +177,9 @@ final class VoiceControlTests: XCTestCase {
         XCTAssertEqual(try parse(["models"]), .forward("models", ["action": "status"]))
         XCTAssertEqual(try parse(["models", "status"]), .forward("models", ["action": "status"]))
         XCTAssertEqual(try parse(["models", "download", "id=kokoro"]), .forward("models", ["action": "download", "id": "kokoro"]))
+        XCTAssertEqual(try parse(["models", "download", "id=parakeet"]), .forward("models", ["action": "download", "id": "parakeet"]))
+        XCTAssertEqual(try parse(["history"]), .forward("history", ["action": "status"]))
+        XCTAssertEqual(try parse(["history", "status"]), .forward("history", ["action": "status"]))
     }
 
     func testRejectsBadRequests() {
@@ -177,6 +198,17 @@ final class VoiceControlTests: XCTestCase {
         fails(["action", "say"], "say needs text")
         fails(["models", "download"], "download needs id")
         fails(["models", "action=delete", "id=kokoro"], "models only reports and downloads")
+        fails(["history", "action=clear"], "history only reports status")
+    }
+
+    func testSeedingHistoryStartsFromTheResolvedDefault() {
+        let status: [String: Any] = ["ok": true, "mode": "textAndAudio", "shareWithSpeakFree": true]
+        let seeded = VoiceSettingsJSON.seedingHistory(["enabled": true], from: status)
+        XCTAssertEqual(seeded["history"] as? [String: AnyHashable], ["mode": "textAndAudio", "shareWithSpeakFree": true])
+        let saved: [String: Any] = ["history": ["mode": "off", "shareWithSpeakFree": false]]
+        XCTAssertEqual(VoiceSettingsJSON.seedingHistory(saved, from: status)["history"] as? [String: AnyHashable],
+                       ["mode": "off", "shareWithSpeakFree": false], "a saved choice is kept")
+        XCTAssertNil(VoiceSettingsJSON.seedingHistory(["enabled": true], from: ["ok": false])["history"])
     }
 
     func testMergeFollowsTheStoredTypes() throws {
@@ -445,6 +477,44 @@ final class VoiceControlTests: XCTestCase {
         host.server.publish("models", payload: ["kokoro": ["installed": true, "downloading": false, "progress": 1.0,
                                                            "bytes": 330_000_000]])
         XCTAssertTrue(spin(until: { model.kokoro?.installed == true }))
+    }
+
+    func testSpeechModelAndHistoryReachTheHostInTheContractsShape() {
+        supervisor.start()
+        let download = run(["models", "download", "id=parakeet"])
+        XCTAssertEqual((download["parakeet"] as? [String: Any])?["downloading"] as? Bool, true)
+        XCTAssertTrue(host.modelRequests.contains(["action": "download", "id": "parakeet"]))
+        let history = run(["history"])
+        XCTAssertEqual(history["mode"] as? String, "textAndAudio")
+        XCTAssertTrue(host.historyRequests.contains(["action": "status"]))
+        // A dotted set with no history saved starts from what the default resolves to.
+        XCTAssertEqual(run(["settings", "set", "history.mode=text"])["ok"] as? Bool, true)
+        XCTAssertEqual(host.settings["history"] as? [String: AnyHashable], ["mode": "text", "shareWithSpeakFree": true])
+    }
+
+    func testTheVoiceTabShowsTheSpeechModelAndHistory() {
+        supervisor.start()
+        let model = voice.settingsModel
+        XCTAssertTrue(spin(until: { model.parakeet != nil && model.history != nil }))
+        XCTAssertEqual(model.parakeet?.installed, false)
+        XCTAssertEqual(model.history, VoiceSettingsModel.HistoryStatus(
+            mode: "textAndAudio", shareWithSpeakFree: true, speakFreeInstalled: true,
+            folder: "/Users/someone/.config/speakfree/recordings", isDefault: true))
+        model.downloadParakeet()
+        XCTAssertTrue(spin(until: { model.parakeet?.downloading == true }))
+        XCTAssertTrue(host.modelRequests.contains(["action": "download", "id": "parakeet"]))
+        host.server.publish("models", payload: ["parakeet": ["installed": true, "downloading": false, "progress": 1.0,
+                                                             "bytes": 600_000_000]])
+        XCTAssertTrue(spin(until: { model.parakeet?.installed == true }))
+
+        model.setHistory(mode: "text")
+        XCTAssertTrue(spin(until: { model.history?.mode == "text" }))
+        XCTAssertEqual(host.settings["history"] as? [String: AnyHashable], ["mode": "text", "shareWithSpeakFree": true],
+                       "saved whole, sharing as it was in effect")
+        model.setHistory(shareWithSpeakFree: false)
+        XCTAssertTrue(spin(until: { model.history?.shareWithSpeakFree == false }))
+        XCTAssertEqual(host.settings["history"] as? [String: AnyHashable], ["mode": "text", "shareWithSpeakFree": false])
+        XCTAssertFalse(model.history?.isDefault ?? true)
     }
 
     func testTheBrainTabShowsTheResolvedWorkspace() {

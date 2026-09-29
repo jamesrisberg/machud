@@ -83,6 +83,7 @@ final class OnboardingTests: XCTestCase {
     /// What the fake host answers to `models status`; nil answers as an older host would.
     private var models: [String: Any]? = ["installed": false, "downloading": false, "progress": 0, "bytes": 330_000_000]
     private var modelRequests: [[String: String]] = []
+    private var speechModel: [String: Any] = ["installed": false, "downloading": false, "progress": 0, "bytes": 600_000_000]
     /// What the fake host answers to `brain status`; nil answers as an older host would.
     private var brainReply: [String: Any]? = ["ok": true, "available": false, "problem": "Choose a workspace folder for the agent.",
                                               "workspace": "", "runtimes": [
@@ -118,17 +119,19 @@ final class OnboardingTests: XCTestCase {
         loadouts = FakeOnboardingLoadouts()
     }
 
-    /// `models` as the contract has it: `status` reports Kokoro, `download` starts it.
+    /// `models` as the contract has it: `status` reports Kokoro and Parakeet, `download` starts one.
     private func registerModels(on host: FakeVoiceHost) {
         host.server.register("models") { [unowned self] args, done in
             self.modelRequests.append(args)
             guard var kokoro = self.models else { done(["ok": false, "error": "unknown command models"]); return }
-            if args["action"] == "download" {
+            if args["action"] == "download", args["id"] == "parakeet" {
+                self.speechModel["downloading"] = true
+            } else if args["action"] == "download" {
                 kokoro["downloading"] = true
                 kokoro["progress"] = 0.1
                 self.models = kokoro
             }
-            done(["ok": true, "kokoro": kokoro])
+            done(["ok": true, "kokoro": kokoro, "parakeet": self.speechModel])
         }
     }
 
@@ -531,6 +534,29 @@ final class OnboardingTests: XCTestCase {
         XCTAssertTrue(model.live.isActive)
     }
 
+    func testVoiceStepOffersTheSpeechModelAndTheHistoryChoice() {
+        let model = makeModel()
+        connect()
+        model.go(to: .voice)
+        XCTAssertTrue(spin(until: { model.parakeet != nil && model.history != nil }))
+        XCTAssertEqual(model.parakeet, ModelDownloadStatus(installed: false, bytes: 600_000_000))
+        XCTAssertEqual(model.history?.mode, "textAndAudio")
+        XCTAssertEqual(model.history?.shareWithSpeakFree, true)
+        model.downloadParakeet()
+        XCTAssertTrue(spin(until: { model.parakeet?.downloading == true }))
+        XCTAssertTrue(modelRequests.contains { $0["action"] == "download" && $0["id"] == "parakeet" })
+        speechModel = ["installed": false, "downloading": true, "progress": 0.4, "bytes": 600_000_000]
+        model.tick()   // Downloading: refreshed every tick on the voice step.
+        XCTAssertTrue(spin(until: { model.parakeet?.progress == 0.4 }))
+
+        model.setHistoryMode("off")
+        XCTAssertTrue(spin(until: { model.history?.mode == "off" }))
+        XCTAssertEqual(host.settings["history"] as? [String: AnyHashable], ["mode": "off", "shareWithSpeakFree": true])
+        let voice = model.json["voice"] as? [String: Any]
+        XCTAssertEqual((voice?["history"] as? [String: Any])?["mode"] as? String, "off")
+        XCTAssertEqual((voice?["speechModel"] as? [String: Any])?["downloading"] as? Bool, true)
+    }
+
     // MARK: - Brain
 
     func testBrainStepShowsDetectionAndAsksForTheWorkspace() {
@@ -685,7 +711,7 @@ final class OnboardingTests: XCTestCase {
         connect()
         model.go(to: .brain)
         XCTAssertTrue(spin(until: { model.kokoro != nil }))
-        XCTAssertEqual(model.kokoro, KokoroModelStatus(installed: false, bytes: 330_000_000))
+        XCTAssertEqual(model.kokoro, ModelDownloadStatus(installed: false, bytes: 330_000_000))
         model.downloadKokoro()
         XCTAssertTrue(spin(until: { model.kokoro?.downloading == true }))
         XCTAssertTrue(modelRequests.contains { $0["action"] == "download" && $0["id"] == "kokoro" })

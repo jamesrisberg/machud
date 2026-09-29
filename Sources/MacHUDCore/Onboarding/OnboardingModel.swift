@@ -49,8 +49,11 @@ final class OnboardingModel: ObservableObject {
     @Published private(set) var sayNote: String?
     @Published private(set) var saying = false
     /// The Kokoro voice's download state (`models status`); nil when the host does not say.
-    @Published private(set) var kokoro: KokoroModelStatus?
+    @Published private(set) var kokoro: ModelDownloadStatus?
     @Published private(set) var kokoroNote: String?
+    /// The Parakeet speech model's download state (`models status`); nil when the host does not say.
+    @Published private(set) var parakeet: ModelDownloadStatus?
+    @Published private(set) var parakeetNote: String?
     @Published private(set) var dockEnabled = true
     @Published private(set) var dockPosition: HUDDockPosition = .bottom
     @Published private(set) var dockScreen: String?
@@ -221,11 +224,13 @@ final class OnboardingModel: ObservableObject {
         voiceStateChanged()
         refreshToolDock()
         switch step {
-        case .voice: voiceSettings.load()
+        case .voice:
+            voiceSettings.load()
+            refreshModels()
         case .brain:
             voiceSettings.load()
             refreshBrainStatus()
-            refreshKokoro()
+            refreshModels()
         default: break
         }
     }
@@ -238,7 +243,8 @@ final class OnboardingModel: ObservableObject {
         refreshPermissions()
         refreshToolDock()
         if step == .brain, ticks % 3 == 0 { refreshBrainStatus() }
-        if step == .brain, kokoro?.downloading == true || ticks % 3 == 0 { refreshKokoro() }
+        if step == .brain, kokoro?.downloading == true || ticks % 3 == 0 { refreshModels() }
+        if step == .voice, parakeet?.downloading == true || ticks % 3 == 0 { refreshModels() }
     }
 
     // MARK: - Permissions
@@ -344,7 +350,7 @@ final class OnboardingModel: ObservableObject {
     func setSpeakReplies(_ on: Bool) { apply(["voice.speakReplies": on]) }
     func setReplyVoice(_ id: String) {
         apply(["voice.replyVoice": id])
-        if id == "kokoro" { refreshKokoro() }
+        if id == "kokoro" { refreshModels() }
     }
 
     static let testPhrase = "Hi. This is how I will sound when I answer you."
@@ -365,31 +371,53 @@ final class OnboardingModel: ObservableObject {
         }
     }
 
-    /// `models status` for the Kokoro voice.
-    func refreshKokoro() {
+    /// `models status` for the Kokoro voice and the Parakeet speech model.
+    func refreshModels() {
         guard let voice, voice.connection.isConnected else { return }
         voice.perform(.forward("models", ["action": "status"])) { [weak self] reply in
             guard let self else { return }
-            let status = KokoroModelStatus(reply: reply)
-            if status != self.kokoro { self.kokoro = status }
-            if status == nil, self.kokoroNote == nil { self.kokoroNote = reply["error"] as? String }
+            let kokoro = ModelDownloadStatus(reply: reply, model: "kokoro")
+            if kokoro != self.kokoro { self.kokoro = kokoro }
+            if kokoro == nil, self.kokoroNote == nil { self.kokoroNote = reply["error"] as? String }
+            let parakeet = ModelDownloadStatus(reply: reply, model: "parakeet")
+            if parakeet != self.parakeet { self.parakeet = parakeet }
+            if parakeet == nil, self.parakeetNote == nil { self.parakeetNote = reply["error"] as? String }
         }
     }
 
     /// Starts the Kokoro download (`models action=download id=kokoro`); progress comes from
-    /// `refreshKokoro` on the tick.
+    /// `refreshModels` on the tick.
     func downloadKokoro() {
+        download("kokoro", note: \.kokoroNote, voiceOff: "Turn voice on first: the voice host downloads the voice.")
+    }
+
+    /// Starts the Parakeet download (`models action=download id=parakeet`), the speech model
+    /// dictation needs; progress comes from `refreshModels` on the tick.
+    func downloadParakeet() {
+        download("parakeet", note: \.parakeetNote,
+                 voiceOff: "Turn voice on first: the voice host downloads the speech model.")
+    }
+
+    private func download(_ id: String, note: ReferenceWritableKeyPath<OnboardingModel, String?>, voiceOff: String) {
         guard let voice, voice.connection.isConnected else {
-            kokoroNote = "Turn voice on first: the voice host downloads the voice."
+            self[keyPath: note] = voiceOff
             return
         }
-        kokoroNote = nil
-        voice.perform(.forward("models", ["action": "download", "id": "kokoro"])) { [weak self] reply in
+        self[keyPath: note] = nil
+        voice.perform(.forward("models", ["action": "download", "id": id])) { [weak self] reply in
             guard let self else { return }
-            if reply["ok"] as? Bool != true { self.kokoroNote = reply["error"] as? String ?? "download failed" }
-            self.refreshKokoro()
+            if reply["ok"] as? Bool != true { self[keyPath: note] = reply["error"] as? String ?? "download failed" }
+            self.refreshModels()
         }
     }
+
+    // MARK: - Dictation history
+
+    /// Where finished dictations are kept (`history status`), through the Voice tab's model.
+    var history: VoiceSettingsModel.HistoryStatus? { voiceSettings.history }
+
+    func setHistoryMode(_ mode: String) { voiceSettings.setHistory(mode: mode) }
+    func setShareHistory(_ share: Bool) { voiceSettings.setHistory(shareWithSpeakFree: share) }
 
     /// Several settings in one `settings set`, so they never race each other.
     func apply(_ changes: [String: Any]) {
@@ -496,6 +524,17 @@ final class OnboardingModel: ObservableObject {
 
     // MARK: - Report
 
+    private var voiceJSON: [String: Any] {
+        var voice: [String: Any] = ["status": voiceSettings.status.text, "on": voiceOn, "keyMode": keyMode,
+                                    "phase": live.phase, "connected": live.connected,
+                                    "speechModel": parakeet.map { $0.json as Any } ?? NSNull()]
+        if let history {
+            voice["history"] = ["mode": history.mode, "shareWithSpeakFree": history.shareWithSpeakFree,
+                                "speakFreeInstalled": history.speakFreeInstalled, "folder": history.folder]
+        }
+        return voice
+    }
+
     var json: [String: Any] {
         var brainJSON: [String: Any] = ["ready": brainReady, "enabled": brainEnabled, "runtime": selectedRuntime,
                                         "workspace": workspace]
@@ -514,8 +553,7 @@ final class OnboardingModel: ObservableObject {
             "compact": compact.map { $0.rawValue as Any } ?? NSNull(),
             "sections": sectionsJSON,
             "permissions": ["accessibility": accessibility, "microphone": microphone.rawValue],
-            "voice": ["status": voiceSettings.status.text, "on": voiceOn, "keyMode": keyMode,
-                      "phase": live.phase, "connected": live.connected],
+            "voice": voiceJSON,
             "brain": brainJSON,
             "apps": apps.rows.map { ["id": $0.id, "state": $0.status.state.rawValue] },
             "toolDock": ["enabled": dockEnabled, "position": dockPosition.rawValue,

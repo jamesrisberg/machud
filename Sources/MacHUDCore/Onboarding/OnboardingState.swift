@@ -270,21 +270,22 @@ struct OnboardingHotkeys: Equatable {
     var toolDock = "⌃⌥D"
 }
 
-/// The voice host's `models status` reply for the Kokoro reply voice.
-struct KokoroModelStatus: Equatable {
+/// One model in the voice host's `models status` reply (`kokoro`, the reply voice; `parakeet`,
+/// the speech model dictation needs).
+struct ModelDownloadStatus: Equatable {
     var installed: Bool
     var downloading: Bool
     /// 0...1 while downloading.
     var progress: Double
     var bytes: Int64?
 
-    /// Nil unless `reply` is an `ok` models status with a `kokoro` object.
-    init?(reply: [String: Any]) {
-        guard reply["ok"] as? Bool == true, let kokoro = reply["kokoro"] as? [String: Any] else { return nil }
-        installed = kokoro["installed"] as? Bool ?? false
-        downloading = kokoro["downloading"] as? Bool ?? false
-        progress = min(max((kokoro["progress"] as? NSNumber)?.doubleValue ?? 0, 0), 1)
-        bytes = (kokoro["bytes"] as? NSNumber)?.int64Value
+    /// Nil unless `reply` is an `ok` models status with an object for `model`.
+    init?(reply: [String: Any], model: String) {
+        guard reply["ok"] as? Bool == true, let status = reply[model] as? [String: Any] else { return nil }
+        installed = status["installed"] as? Bool ?? false
+        downloading = status["downloading"] as? Bool ?? false
+        progress = min(max((status["progress"] as? NSNumber)?.doubleValue ?? 0, 0), 1)
+        bytes = (status["bytes"] as? NSNumber)?.int64Value
     }
 
     init(installed: Bool, downloading: Bool = false, progress: Double = 0, bytes: Int64? = nil) {
