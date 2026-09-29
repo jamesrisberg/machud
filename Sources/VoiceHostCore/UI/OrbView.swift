@@ -34,15 +34,15 @@ final class OrbView: NSView {
     override var isFlipped: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    /// The shape's rect in this view: centered horizontally, `topOffset` below the top edge,
-    /// scaled about its center by the pulse.
+    /// The shape's rect in this view: centered horizontally, `topOffset` below the top edge
+    /// plus the resting float, scaled about its center by the pulse.
     func shapeRect() -> (rect: CGRect, shape: OrbShape) {
         let shape = OrbLayout.shape(stretch: animator.stretch, geometry: geometry)
         var size = shape.size
         let scale = pulseScale()
         size.width *= scale
         size.height *= scale
-        let center = CGPoint(x: bounds.midX, y: shape.topOffset + shape.size.height / 2)
+        let center = CGPoint(x: bounds.midX, y: shape.topOffset + animator.bobOffset + shape.size.height / 2)
         return (CGRect(x: center.x - size.width / 2, y: center.y - size.height / 2, width: size.width, height: size.height), shape)
     }
 
@@ -64,11 +64,13 @@ final class OrbView: NSView {
         ctx.saveGState()
         ctx.setAlpha(scene.muted && scene.form == .orb ? 0.55 : 1)
 
-        // Glow behind the orb: the level under Reduce Motion, the breathe, the approval ask.
+        // Glow behind the orb: the level under Reduce Motion, the breathe, the approval ask, and
+        // the resting halo, which is wider and softer.
         let glow = glowAmount()
         if glow > 0, t < 1 {
             ctx.saveGState()
-            ctx.setShadow(offset: .zero, blur: 10 * glow + 2, color: palette.glow.withAlphaComponent(0.85 * glow * (1 - t)).cgColor)
+            let blur = scene.motion == .idle ? 6 + 8 * glow : 10 * glow + 2
+            ctx.setShadow(offset: .zero, blur: blur, color: palette.glow.withAlphaComponent(0.85 * glow * (1 - t)).cgColor)
             ctx.addPath(path)
             ctx.setFillColor(palette.edge.cgColor)
             ctx.fillPath()
@@ -121,6 +123,7 @@ final class OrbView: NSView {
         case .pulse: return reduceMotion ? 0.3 + 0.7 * animator.level : 0.35
         case .breathe: return reduceMotion ? 0.6 : 0.45 + 0.35 * CGFloat(sin(animator.phase * 2.2))
         case .spin: return 0.35
+        case .idle: return reduceMotion ? 0.3 : 0.16 + 0.3 * OrbLayout.breath(phase: animator.phase)
         default: return scene.tint == .failed ? 0.8 : 0
         }
     }

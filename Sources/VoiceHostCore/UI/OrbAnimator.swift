@@ -1,22 +1,37 @@
 import Foundation
 
-/// The orb's continuous values between renders: the morph position, the smoothed input level
-/// and a free-running phase for spin, breathe and the spinner. Pure; the presenter advances
-/// it from a display timer while anything moves.
+/// The orb's continuous values between renders: the morph position, the smoothed input level,
+/// how much of the resting float is on, and a free-running phase for spin, breathe, the
+/// spinner and the float. Pure; the presenter advances it from a display timer while anything
+/// moves.
 struct OrbAnimator: Equatable {
     /// 0 = resting orb, 1 = waveform body.
     private(set) var stretch: CGFloat
     /// Smoothed input level, 0...1.
     private(set) var level: CGFloat = 0
+    /// How much of the resting float applies, 0...1: eases in when the orb rests and out when
+    /// anything else takes over, so the orb never jumps back to its rest position.
+    private(set) var float: CGFloat
     /// Seconds of running motion; frozen under Reduce Motion.
     private(set) var phase: Double = 0
 
     /// Rate of the morph's exponential ease, per second.
     static let stretchRate: Double = 11
+    /// Rate of the float's ease in and out, per second.
+    static let floatRate: Double = 4
     static let settleEpsilon: CGFloat = 0.004
 
-    init(stretch: CGFloat = 0) {
+    init(stretch: CGFloat = 0, float: CGFloat = 0) {
         self.stretch = stretch
+        self.float = float
+    }
+
+    /// The orb's downward drift now: the float's cycle scaled by how much of it is on.
+    var bobOffset: CGFloat { OrbLayout.bob(phase: phase) * float }
+
+    /// The float runs while the orb rests with nothing under it (no card, no message).
+    static func floatTarget(for scene: OrbScene, reduceMotion: Bool) -> CGFloat {
+        scene.motion == .idle && scene.card == nil && scene.errorMessage == nil && !reduceMotion ? 1 : 0
     }
 
     /// `other` with the morph pinned at `stretch` (snapshots of the in-between frames).
@@ -39,16 +54,41 @@ struct OrbAnimator: Equatable {
         let goal = CGFloat(min(max(input, 0), 1))
         let rate: Double = goal > level ? 50 : 12
         level += (goal - level) * CGFloat(1 - exp(-dt * rate))
+        let floatGoal = Self.floatTarget(for: scene, reduceMotion: reduceMotion)
+        if reduceMotion {
+            float = floatGoal
+        } else {
+            float += (floatGoal - float) * CGFloat(1 - exp(-dt * Self.floatRate))
+            if abs(floatGoal - float) < Self.settleEpsilon { float = floatGoal }
+        }
         if !reduceMotion { phase += dt }
     }
 
     /// Nothing will change until the next state: the driver timer can stop.
     func isSettled(for scene: OrbScene, reduceMotion: Bool = false) -> Bool {
-        guard stretch == Self.target(for: scene) else { return false }
+        guard stretch == Self.target(for: scene), float == Self.floatTarget(for: scene, reduceMotion: reduceMotion)
+        else { return false }
         switch scene.motion {
         case .none: return true
         case .pulse, .bars: return false
-        case .spin, .breathe, .spinner: return reduceMotion
+        case .spin, .breathe, .spinner, .idle: return reduceMotion
         }
+    }
+}
+
+/// The card's grow out of the orb, 0 (folded into the orb) to 1 (open), advanced linearly
+/// over `OrbLayout.cardOpenDuration` or `cardCloseDuration`; `OrbLayout.growEase` shapes it.
+/// Reversing mid-way continues from where it is.
+struct CardGrow: Equatable {
+    private(set) var progress: CGFloat = 0
+    var target: CGFloat = 0
+
+    var isSettled: Bool { progress == target }
+
+    mutating func advance(dt: Double, reduceMotion: Bool) {
+        guard !reduceMotion else { progress = target; return }
+        let duration = target > progress ? OrbLayout.cardOpenDuration : OrbLayout.cardCloseDuration
+        let step = CGFloat(dt / duration)
+        progress = target > progress ? min(target, progress + step) : max(target, progress - step)
     }
 }
