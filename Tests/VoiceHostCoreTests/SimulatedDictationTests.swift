@@ -10,7 +10,8 @@ final class SimulatedDictationTests: XCTestCase {
         let brain = FakeBrain()
         let controller = VoiceHostController(
             settings: VoiceHostSettings(), dictation: dictation, keys: nil, brain: brain, speaker: nil, wake: nil,
-            brainStateRoot: FileManager.default.temporaryDirectory, now: { clock.now },
+            brainStateRoot: FileManager.default.temporaryDirectory,
+            detectRuntimes: FakeRuntimes.detect(), now: { clock.now },
             schedule: { clock.schedule($0, $1) })
         controller.start()
         controller.perform(.start(.agent))
