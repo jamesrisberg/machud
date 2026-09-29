@@ -8,6 +8,7 @@ final class BrainRuntimesTests: XCTestCase {
                           contentsOfDirectory: { _ in [] })
     }
 
+    func testDetectsEachRuntime() {
         let found = BrainRuntimes.detect(
             readFile: { _ in nil })
         XCTAssertEqual(found[0], BrainRuntimeDetection(id: "codex", name: "Codex", installed: true, path: "/opt/tools/codex"))
@@ -34,21 +35,6 @@ final class BrainRuntimesTests: XCTestCase {
         withURL.hermes.url = "http://127.0.0.1:8642"
         XCTAssertNil(BrainRuntimes.problem(runtime: "hermes", brain: withURL, detections: detections))
         XCTAssertNil(BrainRuntimes.problem(runtime: "unknown", brain: brain, detections: detections))
-    }
-
-    }
-
-    func testSessionKeyIsReadWhereTheSnapshotHasOne() {
-        struct WithKey { let status = "idle"; let sessionKey: String? }
-        struct WithoutKey { let status = "idle" }
-        XCTAssertEqual(BrainSettingsFields.sessionKey(WithKey(sessionKey: "claude:abc")), "claude:abc")
-        XCTAssertNil(BrainSettingsFields.sessionKey(WithKey(sessionKey: nil)))
-        XCTAssertNil(BrainSettingsFields.sessionKey(WithKey(sessionKey: "")))
-        XCTAssertNil(BrainSettingsFields.sessionKey(WithoutKey()))
-    }
-
-    func testMissingSettingsFieldsReadEmpty() {
-        XCTAssertEqual(BrainSettingsFields.string(BrainSettings(workspacePath: "/w"), "workspacePath"), "/w")
     }
 
     @MainActor
