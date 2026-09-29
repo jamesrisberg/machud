@@ -2,24 +2,65 @@ import AppKit
 import HUDKit
 import SwiftUI
 
-/// The overlay's content: a dimmed screen with one dark glass card, one step at a time.
+/// The overlay's content. Full: the desktop shows through a light tint (the window blurs it),
+/// with the checklist beside one glass card per section; the welcome page is the checklist
+/// itself. Compact: a small card while the user arranges windows or tries the radial menu.
 /// Return (or ⌘→) goes on, ⌘← goes back, Esc leaves to finish later.
 struct OnboardingRootView: View {
     @ObservedObject var model: OnboardingModel
     /// Renders this step instead of the model's (snapshots).
     var forcedStep: OnboardingStep?
+    /// Renders this compact card (snapshots); `.some(nil)` forces the full overlay.
+    var forcedCompact: OnboardingModel.Compact??
+    /// Whether the window behind blurs the desktop (false in snapshots, which cannot render it).
+    var live = true
 
-    static let cardSize = CGSize(width: 880, height: 640)
+    static let cardSize = CGSize(width: 800, height: 640)
+    static let welcomeSize = CGSize(width: 860, height: 640)
+    static let sidebarWidth: CGFloat = 236
+    static let compactSize = CGSize(width: 500, height: 164)
 
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.4)
-            OnboardingCard(model: model, step: forcedStep ?? model.step)
-                .frame(width: Self.cardSize.width, height: Self.cardSize.height)
-                .shadow(color: .black.opacity(0.5), radius: 40, y: 12)
+        let compact = forcedCompact ?? model.compact
+        let step = forcedStep ?? model.step
+        Group {
+            if let compact {
+                OnboardingCompactCard(model: model, kind: compact)
+                    .frame(width: Self.compactSize.width, height: Self.compactSize.height)
+                    .padding(.top, live ? 0 : 44)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            } else {
+                ZStack {
+                    // A light tint only: the desktop stays visible through the window's blur.
+                    Color.black.opacity(OnboardingStyle.tint)
+                    HStack(alignment: .top, spacing: 16) {
+                        if step != .welcome {
+                            ChecklistSidebar(model: model, step: step)
+                                .frame(width: Self.sidebarWidth, height: Self.cardSize.height)
+                        }
+                        OnboardingCard(model: model, step: step)
+                            .frame(width: step == .welcome ? Self.welcomeSize.width : Self.cardSize.width,
+                                   height: Self.cardSize.height)
+                    }
+                    .shadow(color: .black.opacity(0.35), radius: 30, y: 10)
+                }
+            }
         }
         .environment(\.colorScheme, .dark)
+        .environment(\.onboardingLive, live)
         .tint(OnboardingStyle.accent)
+    }
+}
+
+private struct OnboardingLiveKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+extension EnvironmentValues {
+    /// The overlay is on screen over a live blur (false: an offscreen snapshot).
+    var onboardingLive: Bool {
+        get { self[OnboardingLiveKey.self] }
+        set { self[OnboardingLiveKey.self] = newValue }
     }
 }
 
@@ -27,9 +68,31 @@ enum OnboardingStyle {
     static let accent = Color(red: 0.38, green: 0.78, blue: 1.0)
     static let good = Color(red: 0.35, green: 0.85, blue: 0.55)
     static let warn = Color(red: 1.0, green: 0.72, blue: 0.3)
-    static let panel = Color.white.opacity(0.06)
-    static let stroke = Color.white.opacity(0.12)
-    static let secondary = Color.white.opacity(0.62)
+    static let panel = Color.white.opacity(0.07)
+    static let stroke = Color.white.opacity(0.14)
+    static let secondary = Color.white.opacity(0.66)
+    /// Over the whole screen, on top of the blur: enough to settle the desktop, never a cover.
+    static let tint = 0.16
+
+    /// A glass card's fill: light over the live blur, heavier in snapshots, where the card
+    /// sits on an unblurred picture and the glass itself cannot render.
+    static func cardFill(live: Bool) -> Color { Color.black.opacity(live ? 0.24 : 0.5) }
+}
+
+/// A glass card: the HUD's frosted glass with a light dark fill, rounded.
+struct OnboardingGlass: ViewModifier {
+    var radius: CGFloat = 24
+    @Environment(\.onboardingLive) private var live
+
+    func body(content: Content) -> some View {
+        content
+            .background(OnboardingStyle.cardFill(live: live))
+            .hudGlass(HUDGlassView.Style(cornerRadius: radius, borderWidth: 1, borderAlpha: 0.22))
+    }
+}
+
+extension View {
+    func onboardingGlass(radius: CGFloat = 24) -> some View { modifier(OnboardingGlass(radius: radius)) }
 }
 
 struct OnboardingCard: View {
@@ -39,7 +102,6 @@ struct OnboardingCard: View {
     var body: some View {
         VStack(spacing: 0) {
             OnboardingHeader(model: model, step: step)
-            Rectangle().fill(OnboardingStyle.stroke).frame(height: 1)
             Group {
                 switch step {
                 case .welcome: WelcomeStep(model: model)
@@ -47,50 +109,37 @@ struct OnboardingCard: View {
                 case .voice: VoiceStep(model: model, settings: model.voiceSettings)
                 case .brain: BrainStep(model: model, settings: model.voiceSettings, apps: model.apps)
                 case .apps: AppsStep(model: model, apps: model.apps)
-                case .tour: TourStep(model: model)
+                case .toolDock: ToolDockStep(model: model)
+                case .loadout: LoadoutStep(model: model)
+                case .radial: RadialStep(model: model)
+                case .done: DoneStep(model: model)
                 }
             }
-            .padding(.horizontal, 36)
-            .padding(.vertical, 26)
+            .padding(.horizontal, 32)
+            .padding(.top, 6)
+            .padding(.bottom, 20)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             Rectangle().fill(OnboardingStyle.stroke).frame(height: 1)
             OnboardingFooter(model: model, step: step)
         }
         .foregroundStyle(.white)
-        .background(Color(white: 0.06).opacity(0.84))
-        .hudGlass(HUDGlassView.Style(cornerRadius: 28, borderWidth: 1, borderAlpha: 0.22))
+        .onboardingGlass(radius: 28)
     }
 }
 
 // MARK: - Chrome
 
+/// The close button at the top right of the card.
 struct OnboardingHeader: View {
     @ObservedObject var model: OnboardingModel
     let step: OnboardingStep
 
     var body: some View {
-        HStack(spacing: 6) {
-            ForEach(OnboardingStep.allCases, id: \.self) { s in
-                Button { model.go(to: s) } label: {
-                    HStack(spacing: 6) {
-                        ZStack {
-                            Circle().fill(s == step ? OnboardingStyle.accent : Color.white.opacity(s.index < step.index ? 0.22 : 0.08))
-                                .frame(width: 20, height: 20)
-                            if s.index < step.index {
-                                Image(systemName: "checkmark").font(.system(size: 9, weight: .bold))
-                            } else {
-                                Text("\(s.index + 1)").font(.system(size: 10, weight: .bold))
-                                    .foregroundStyle(s == step ? Color.black : Color.white.opacity(0.7))
-                            }
-                        }
-                        Text(s.title).font(.system(size: 12, weight: s == step ? .semibold : .regular))
-                            .foregroundStyle(s == step ? Color.white : OnboardingStyle.secondary)
-                    }
-                    .padding(.horizontal, 8).padding(.vertical, 5)
-                    .background(Capsule().fill(s == step ? Color.white.opacity(0.08) : .clear))
-                }
-                .buttonStyle(.plain)
-                .help("Go to \(s.title)")
+        HStack(spacing: 8) {
+            if step.isSection {
+                Text("\(OnboardingStep.sections.firstIndex(of: step).map { $0 + 1 } ?? 0) of \(OnboardingStep.sections.count)")
+                    .font(.system(size: 11, weight: .medium)).foregroundStyle(OnboardingStyle.secondary)
+                SectionStatusPill(status: model.status(of: step))
             }
             Spacer()
             Button { model.later() } label: {
@@ -105,7 +154,99 @@ struct OnboardingHeader: View {
             .help("Close; pick up here next time (Esc)")
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 14)
+        .padding(.top, 14)
+        .padding(.bottom, 4)
+    }
+}
+
+/// The checklist beside every section: each section's state, updating in place; click one to
+/// go there.
+struct ChecklistSidebar: View {
+    @ObservedObject var model: OnboardingModel
+    let step: OnboardingStep
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button { model.go(to: .welcome) } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "rectangle.3.group.fill").foregroundStyle(OnboardingStyle.accent)
+                    Text("MacHUD setup").font(.system(size: 14, weight: .semibold))
+                }
+            }
+            .buttonStyle(.plain)
+            .help("Back to the checklist")
+            .padding(.bottom, 10)
+            ForEach(OnboardingStep.sections, id: \.self) { section in
+                Button { model.go(to: section) } label: {
+                    HStack(spacing: 10) {
+                        StatusMark(status: model.status(of: section), current: section == step)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(section.title).font(.system(size: 13, weight: section == step ? .semibold : .regular))
+                            Text(section.summary).font(.system(size: 10)).foregroundStyle(OnboardingStyle.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(section == step ? Color.white.opacity(0.12) : .clear))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Go to \(section.title)")
+            }
+            Spacer()
+            let done = OnboardingStep.sections.filter { model.status(of: $0) == .done }.count
+            Text("\(done) of \(OnboardingStep.sections.count) done").font(.system(size: 11))
+                .foregroundStyle(OnboardingStyle.secondary)
+            ProgressView(value: Double(done), total: Double(OnboardingStep.sections.count)).tint(OnboardingStyle.good)
+        }
+        .foregroundStyle(.white)
+        .padding(16)
+        .onboardingGlass(radius: 22)
+    }
+}
+
+/// A section's state as a round mark: a check (done), an arrow (skipped), a ring (to do).
+struct StatusMark: View {
+    let status: OnboardingSectionStatus
+    var current = false
+
+    var body: some View {
+        ZStack {
+            switch status {
+            case .done:
+                Circle().fill(OnboardingStyle.good)
+                Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.black)
+            case .skipped:
+                Circle().fill(Color.white.opacity(0.14))
+                Image(systemName: "arrow.uturn.right").font(.system(size: 9, weight: .bold)).foregroundStyle(OnboardingStyle.warn)
+            case .todo:
+                Circle().stroke(current ? OnboardingStyle.accent : Color.white.opacity(0.4), lineWidth: 1.5)
+                if current { Circle().fill(OnboardingStyle.accent).frame(width: 8, height: 8) }
+            }
+        }
+        .frame(width: 20, height: 20)
+        .accessibilityLabel(status.title)
+    }
+}
+
+struct SectionStatusPill: View {
+    let status: OnboardingSectionStatus
+
+    var body: some View {
+        Text(status.title).font(.system(size: 10, weight: .semibold))
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .foregroundStyle(color)
+            .background(Capsule().fill(color.opacity(0.16)))
+    }
+
+    private var color: Color {
+        switch status {
+        case .done: return OnboardingStyle.good
+        case .skipped: return OnboardingStyle.warn
+        case .todo: return Color.white.opacity(0.75)
+        }
     }
 }
 
@@ -124,9 +265,13 @@ struct OnboardingFooter: View {
                 Button("Skip setup") { model.skip() }
                     .buttonStyle(HUDButtonStyle(kind: .quiet))
             }
+            if step.isSection, model.status(of: step) != .done {
+                Button("Skip for now") { model.skipSection() }
+                    .buttonStyle(HUDButtonStyle(kind: .quiet))
+            }
             Spacer()
             Text("Return: next  ·  ⌘←: back  ·  Esc: later")
-                .font(.system(size: 11)).foregroundStyle(Color.white.opacity(0.4))
+                .font(.system(size: 11)).foregroundStyle(Color.white.opacity(0.45))
             Button(primaryTitle) { model.next() }
                 .buttonStyle(HUDButtonStyle(kind: .primary))
                 .keyboardShortcut(.defaultAction)
@@ -141,10 +286,12 @@ struct OnboardingFooter: View {
 
     private var primaryTitle: String {
         switch step {
-        case .welcome: return "Get started"
+        case .welcome:
+            let started = OnboardingStep.sections.contains { model.status(of: $0) != .todo }
+            return started ? "Continue setup" : "Get started"
         case .permissions: return model.permissionsGranted ? "Continue" : "Continue anyway"
         case .brain: return model.brainReady ? "Continue" : "Set up later"
-        case .tour: return "Finish"
+        case .done: return "Finish"
         default: return "Continue"
         }
     }
@@ -170,7 +317,7 @@ struct HUDButtonStyle: ButtonStyle {
     private var fill: Color {
         switch kind {
         case .primary: return OnboardingStyle.accent
-        case .secondary: return Color.white.opacity(0.1)
+        case .secondary: return Color.white.opacity(0.12)
         case .quiet: return .clear
         }
     }
@@ -187,7 +334,7 @@ struct StepTitle: View {
             Text(subtitle).font(.system(size: 14)).foregroundStyle(OnboardingStyle.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.bottom, 18)
+        .padding(.bottom, 16)
     }
 }
 
@@ -222,9 +369,11 @@ struct OnboardingPanel<Content: View>: View {
 
 struct KeyCap: View {
     let text: String
+    var large = false
+
     var body: some View {
-        Text(text).font(.system(size: 11, weight: .semibold, design: .rounded))
-            .padding(.horizontal, 7).padding(.vertical, 3)
+        Text(text).font(.system(size: large ? 15 : 11, weight: .semibold, design: .rounded))
+            .padding(.horizontal, large ? 10 : 7).padding(.vertical, large ? 5 : 3)
             .background(RoundedRectangle(cornerRadius: 5).fill(Color.white.opacity(0.14)))
             .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.25)))
     }
@@ -232,39 +381,42 @@ struct KeyCap: View {
 
 // MARK: - Steps
 
+/// The welcome page: what MacHUD is, and the checklist of every section with its state.
 struct WelcomeStep: View {
     @ObservedObject var model: OnboardingModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 14) {
-                Image(systemName: "rectangle.3.group.fill").font(.system(size: 40)).foregroundStyle(OnboardingStyle.accent)
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: "rectangle.3.group.fill").font(.system(size: 38)).foregroundStyle(OnboardingStyle.accent)
                 StepTitle(title: "Welcome to MacHUD",
-                          subtitle: "Your screen as a grid you design, a dock of HUD tools, and a voice you can dictate with or hand work to.")
+                          subtitle: "Your screen as a grid you design, a dock of HUD tools, and a voice you can dictate with or hand work to. Here is everything to set up; tick through it in order or jump to any item.")
             }
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
-                feature("rectangle.split.3x1", "Loadouts", "Every window in its place: snap with Shift, or apply a whole workspace at once.")
-                feature("dock.rectangle", "Tool dock", "A strip of HUD apps (file manager, scratchpad, agent dashboard) one click away.")
-                feature("waveform", "Voice", "Hold fn to dictate anywhere. Tap then hold to talk to your agent.")
-                feature("brain", "Brain", "An agent (Codex, Claude Code, Hermes or mclaude) working in a folder you choose.")
-            }
-            Spacer(minLength: 16)
-            Text("Setup takes a couple of minutes. Esc leaves it for later; it opens again where you left it, and the menu bar's Setup Guide… or `machud onboarding show` bring it back any time.")
-                .font(.system(size: 12)).foregroundStyle(OnboardingStyle.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private func feature(_ symbol: String, _ title: String, _ text: String) -> some View {
-        OnboardingPanel {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: symbol).font(.system(size: 20)).foregroundStyle(OnboardingStyle.accent).frame(width: 28)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title).font(.system(size: 14, weight: .semibold))
-                    Text(text).font(.system(size: 12)).foregroundStyle(OnboardingStyle.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+            VStack(spacing: 6) {
+                ForEach(OnboardingStep.sections, id: \.self) { section in
+                    Button { model.go(to: section) } label: {
+                        HStack(spacing: 12) {
+                            StatusMark(status: model.status(of: section))
+                            Image(systemName: section.symbol).font(.system(size: 15)).foregroundStyle(OnboardingStyle.accent)
+                                .frame(width: 22)
+                            Text(section.title).font(.system(size: 14, weight: .semibold)).frame(width: 120, alignment: .leading)
+                            Text(section.summary).font(.system(size: 12)).foregroundStyle(OnboardingStyle.secondary)
+                            Spacer()
+                            SectionStatusPill(status: model.status(of: section))
+                            Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(OnboardingStyle.secondary)
+                        }
+                        .padding(.horizontal, 14).padding(.vertical, 9)
+                        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(OnboardingStyle.panel))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Go to \(section.title)")
                 }
             }
+            Spacer(minLength: 12)
+            Text("Setup takes a few minutes. Esc leaves it for later; it opens again where you left it, and the menu bar's Setup Guide… or `machud onboarding show` bring it back any time.")
+                .font(.system(size: 12)).foregroundStyle(OnboardingStyle.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -459,111 +611,6 @@ struct LevelMeter: View {
     }
 }
 
-struct BrainStep: View {
-    @ObservedObject var model: OnboardingModel
-    @ObservedObject var settings: VoiceSettingsModel
-    @ObservedObject var apps: AppsTabModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            StepTitle(title: "Brain",
-                      subtitle: "The agent you talk to with the agent gesture or by clicking the orb. It works in one folder you choose.")
-            let choices = BrainRuntimeChoice.all
-            Grid(horizontalSpacing: 12, verticalSpacing: 12) {
-                ForEach(Array(stride(from: 0, to: choices.count, by: 2)), id: \.self) { i in
-                    GridRow {
-                        ForEach(choices[i..<min(i + 2, choices.count)]) { runtime in
-                            runtimeCard(runtime).frame(maxHeight: .infinity)
-                        }
-                    }
-                }
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            OnboardingPanel {
-                HStack(spacing: 12) {
-                    Image(systemName: "folder.fill").font(.system(size: 20)).foregroundStyle(OnboardingStyle.accent)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Workspace folder").font(.system(size: 13, weight: .semibold))
-                        Text(model.workspace.isEmpty ? "Required: none chosen yet." : model.workspace)
-                            .font(.system(size: 12, design: model.workspace.isEmpty ? .default : .monospaced))
-                            .foregroundStyle(model.workspace.isEmpty ? OnboardingStyle.warn : OnboardingStyle.secondary)
-                            .lineLimit(1).truncationMode(.middle)
-                    }
-                    Spacer()
-                    Button(model.workspace.isEmpty ? "Choose Folder…" : "Change…") { model.chooseWorkspace() }
-                        .buttonStyle(HUDButtonStyle(kind: model.workspace.isEmpty ? .primary : .secondary))
-                        .disabled(!model.voiceHostUp)
-                }
-            }
-            .padding(.top, 12)
-            HStack(spacing: 8) {
-                if let problem = model.brainProblem {
-                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(OnboardingStyle.warn)
-                    Text(problem).font(.system(size: 12)).foregroundStyle(OnboardingStyle.warn)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(OnboardingStyle.good)
-                    Text("The brain is ready. Try it: tap fn then hold, or click the orb.").font(.system(size: 12))
-                }
-                Spacer()
-                if let note = model.brainNote { Text(note).font(.system(size: 11)).foregroundStyle(.red).lineLimit(2) }
-            }
-            .padding(.top, 12)
-        }
-    }
-
-    private func runtimeCard(_ runtime: BrainRuntimeChoice) -> some View {
-        let selected = model.brainEnabled && model.selectedRuntime == runtime.id
-        return Button { model.chooseRuntime(runtime.id) } label: {
-            OnboardingPanel(highlighted: selected) {
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack {
-                        Text(runtime.title).font(.system(size: 14, weight: .semibold))
-                        Spacer()
-                        detection(runtime.id)
-                        Image(systemName: selected ? "largecircle.fill.circle" : "circle")
-                            .foregroundStyle(selected ? OnboardingStyle.accent : OnboardingStyle.secondary)
-                    }
-                    Text(runtime.blurb).font(.system(size: 11)).foregroundStyle(OnboardingStyle.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if runtime.id == "mclaude" { mechaHUDLine }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(!model.voiceHostUp)
-    }
-
-    @ViewBuilder private func detection(_ id: String) -> some View {
-        switch model.runtimeInstalled(id) {
-        case true?: StatusPill(text: "Found", ok: true).help(model.runtimePath(id) ?? "")
-        case false?: StatusPill(text: "Not found", ok: false)
-        case nil: EmptyView()
-        }
-    }
-
-    @ViewBuilder private var mechaHUDLine: some View {
-        if let row = model.mechaHUD {
-            HStack(spacing: 6) {
-                Image(systemName: "rectangle.stack").font(.system(size: 11))
-                switch row.status.state {
-                case .notInstalled:
-                    Text("MechaHUD is not installed.").font(.system(size: 11))
-                    if let phase = row.phase { Text(phase.text).font(.system(size: 11)).foregroundStyle(OnboardingStyle.secondary) }
-                    Button("Install MechaHUD") { apps.install(row.id) }
-                        .buttonStyle(HUDButtonStyle(kind: .secondary)).disabled(row.busy)
-                default:
-                    Text("MechaHUD is installed.").font(.system(size: 11)).foregroundStyle(OnboardingStyle.good)
-                }
-            }
-        } else {
-            Text("Get MechaHUD from the Apps step to see the session there too.").font(.system(size: 11))
-                .foregroundStyle(OnboardingStyle.secondary)
-        }
-    }
-}
 
 struct AppsStep: View {
     @ObservedObject var model: OnboardingModel
@@ -666,49 +713,6 @@ struct AppTile: View {
             }
         } else {
             Image(systemName: "app.dashed").resizable().scaledToFit().foregroundStyle(OnboardingStyle.secondary)
-        }
-    }
-}
-
-struct TourStep: View {
-    @ObservedObject var model: OnboardingModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            StepTitle(title: "A quick tour", subtitle: "Four things to know. Everything here is also in the menu bar menu.")
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
-                card("circle.fill", "The orb",
-                     "Sits at the top of your screen. Click it to talk to the agent; its card shows replies and approvals. Right-click for Mute and Dismiss.",
-                     keys: ["click"])
-                card("dock.rectangle", "Tool dock",
-                     "A strip of your HUD apps at the screen edge. Click an icon to summon the app; drop files on it to hand them over.",
-                     keys: [model.tour.toolDock])
-                card("rectangle.split.3x1", "Loadouts",
-                     "Hold Shift while dragging a window to snap it into a region. Hold the wheel hotkey and drag toward a loadout to apply it.",
-                     keys: ["⇧ drag", model.tour.radialWheel])
-                card("terminal", "The machud CLI",
-                     "Everything is scriptable: machud apply loadout=Work, machud voice status, machud apps install sift, machud onboarding show.",
-                     keys: ["machud help"])
-            }
-            Spacer(minLength: 12)
-            Label("Setup Guide… in the menu bar menu opens this again.", systemImage: "menubar.rectangle")
-                .font(.system(size: 12)).foregroundStyle(OnboardingStyle.secondary)
-        }
-    }
-
-    private func card(_ symbol: String, _ title: String, _ text: String, keys: [String]) -> some View {
-        OnboardingPanel {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 10) {
-                    Image(systemName: symbol).font(.system(size: 18)).foregroundStyle(OnboardingStyle.accent).frame(width: 24)
-                    Text(title).font(.system(size: 14, weight: .semibold))
-                    Spacer()
-                    HStack(spacing: 4) { ForEach(keys, id: \.self) { KeyCap(text: $0) } }
-                }
-                Text(text).font(.system(size: 12)).foregroundStyle(OnboardingStyle.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(minHeight: 96, alignment: .topLeading)
         }
     }
 }

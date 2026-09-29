@@ -462,32 +462,55 @@ Park/Reveal, Launch/Quit and a Settings… item per app, plus Settings… for th
 
 ## Onboarding
 
-On launch, until it has been finished or skipped, MacHUD shows its setup guide: a full-screen
-overlay (the screen with the pointer, its desktop blurred and dimmed, one dark glass card) that
-walks through six steps: **welcome**, **permissions** (Accessibility and Microphone, live
-status, buttons that ask macOS or open System Settings), **voice** (on/off, fn key hold or
-tap mode with the gestures explained, the agent gesture, and a "try it" area that follows the
-voice host's `subscribe` stream and has a text box dictation pastes into), **brain** (the
-runtimes with what `brain status` detected, the workspace folder, which is required, and why the
-brain is not up yet until it is; mclaude offers to install MechaHUD, which shows the same
-session), **apps** (the catalog with one-click installs, bundled tools preselected) and
-**tour** (the orb, the tool dock, loadouts, the CLI). Return (or ⌘→) goes on, ⌘← back, Esc
-closes it to finish later: it opens again at that step on the next launch. **Skip setup** on the
-first step and **Finish** on the last stop it from showing by itself. The menu's **Setup
-Guide…** opens it at any time. The overlay is a normal-level window, so System Settings and
-macOS's prompts come up over it. While it will show at launch, MacHUD does not raise the
-Accessibility prompt at launch; the permissions step asks. Voice and brain settings go through
-the voice host's socket (`settings get/set`, `brain action=status`), as the Voice and Brain tabs do.
+On launch, until it has been finished or skipped, MacHUD shows its setup guide: an overlay on
+the screen with the pointer that blurs the desktop behind it with a light tint (the desktop
+stays visible), with the step content on glass cards. The **welcome** page is a checklist of
+every section, each **to do**, **done** or **skipped**; clicking one goes there, and the same
+checklist stays beside the card in every section, updating in place. The sections, in order:
+
+- **permissions**: Accessibility and Microphone, live status, buttons that ask macOS or open
+  System Settings. Done once both are granted.
+- **voice**: on/off, fn key hold or tap mode with the gestures explained, the agent gesture,
+  and a "try it" area that follows the voice host's `subscribe` stream and has a text box
+  dictation pastes into.
+- **brain**: the runtimes with what `brain status` detected (mclaude offers to install
+  MechaHUD, which shows the same session); the workspace folder, the home folder unless one is
+  chosen (Change…, Use Home); spoken replies on/off, the reply voice, **Test voice** (`action
+  name=say`) and, for Kokoro, its download (`models action=status|download`); and why the brain
+  is not up yet until it is. Done once the brain is ready.
+- **apps**: the catalog with one-click installs, bundled tools preselected.
+- **tooldock**: what the tool dock is, on/off and its position (a miniature display with the
+  eight places), applied live through the dock and saved in layouts.json.
+- **loadout**: Arrange windows… shrinks the overlay to a small floating card at the top of the
+  screen; Capture saves the windows on that display as a loadout of the typed name (a hidden
+  layout of the same name, one region per window, as the menu's capture does) and the card
+  comes back showing its regions. Done once captured.
+- **radial**: how the wheel works (hotkey `loadoutMenu`, ⌃⌥Space by default, and its rings),
+  then practice: Try it on the desktop shrinks the overlay again, and applying the loadout just
+  made (else the first loadout there is), by the wheel or any other way, while practising or on
+  this step completes it and brings the overlay back.
+- **done**: what is still open, with links back.
+
+Moving on from a section marks it: apps and the tool dock count as done, voice as done when it
+is on; the others are left skipped, and still turn done by themselves when their condition comes
+true. **Skip for now** marks a section skipped. Return (or ⌘→) goes on, ⌘← back, Esc closes it
+to finish later: it opens again at that step on the next launch, with the checklist as it was.
+**Skip setup** on the welcome page and **Finish** on the last stop it from showing by itself.
+The menu's **Setup Guide…** opens it at any time. The overlay is a normal-level window, so
+System Settings and macOS's prompts come up over it. While it will show at launch, MacHUD does
+not raise the Accessibility prompt at launch; the permissions step asks. Voice and brain
+settings go through the voice host's socket (`settings get/set`, `brain action=status`), as the
+Voice and Brain tabs do.
 
 | Command | Args | Effect |
 | --- | --- | --- |
-| `onboarding` / `onboarding status` | | `visible`, `record` (`{status: inProgress\|completed\|skipped, step, updatedAt}` or null), `steps[]`, `step`, `permissions {accessibility, microphone}`, `voice {status, on, keyMode, phase, connected}`, `brain {ready, enabled, runtime, workspace, problem?, runtimes[]?, statusError?}`, `apps[] {id, state}` |
-| `onboarding show` | `step=welcome\|permissions\|voice\|brain\|apps\|tour` | shows it at `step`, else where it was left (the start once finished or skipped) |
+| `onboarding` / `onboarding status` | | `visible`, `record` (`{status: inProgress\|completed\|skipped, step, updatedAt, sections {<section>: done\|skipped}, loadout}` or null), `steps[]`, `step`, `compact` (`arrange`, `practice` or null), `sections {<section>: todo\|done\|skipped}`, `permissions {accessibility, microphone}`, `voice {status, on, keyMode, phase, connected}`, `brain {ready, enabled, runtime, workspace, workspaceIsDefault, replies {speak, voice, kokoro?}, problem?, runtimes[]?, statusError?}`, `apps[] {id, state}`, `toolDock {enabled, position, screen}`, `loadout {name, screen, regions[]}` or null, `radial {hotkey, target, applied?}` |
+| `onboarding show` | `step=welcome\|permissions\|voice\|brain\|apps\|tooldock\|loadout\|radial\|done` | shows it at `step`, else where it was left (the start once finished or skipped) |
 | `onboarding hide` | | closes it to finish later |
-| `onboarding next` / `back` | | moves while it is showing (`next` on the last step finishes) |
+| `onboarding next` / `back` | | moves while it is showing; `next` marks the section as the button does (on the welcome page it goes to the first section not done, on the last step it finishes) |
 | `onboarding skip` | | closes it and stops it showing at launch |
 | `onboarding reset` | | closes it and forgets it: it shows again at the next launch |
-| `onboarding snapshot` | `dir=<folder>` | writes every step as `onboarding-<n>-<step>.png` in `dir`, rendered offscreen (nothing appears on screen); returns `files[]` |
+| `onboarding snapshot` | `dir=<folder>` | writes every step as `onboarding-<n>-<step>.png` in `dir`, plus `onboarding-compact-arrange.png`, `onboarding-compact-practice.png` and `onboarding-tint-only.png` (the welcome page over the unblurred desktop), rendered offscreen (nothing appears on screen; the desktop blur is simulated); returns `files[]` |
 
 ## Voice
 

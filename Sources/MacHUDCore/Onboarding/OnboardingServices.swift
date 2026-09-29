@@ -28,7 +28,8 @@ final class OnboardingServices {
         self.model = model
         self.store = store
         self.presenter = presenter
-        model.onStepChange = { [weak self] step in self?.store.save(.inProgress, step: step) }
+        model.onStepChange = { [weak self] _ in self?.save(.inProgress) }
+        model.onProgress = { [weak self] in self?.save(self?.store.load()?.status ?? .inProgress) }
         model.onExit = { [weak self] exit in self?.exit(exit) }
     }
 
@@ -50,8 +51,9 @@ final class OnboardingServices {
         let record = store.load()
         let resume = step ?? (record?.status == .inProgress ? record?.step : nil) ?? .welcome
         prepareApps()
+        model.restore(sections: record?.sections ?? [:], loadout: record?.loadout)
         model.resume(at: resume)
-        store.save(.inProgress, step: resume)
+        save(.inProgress)
         if !presenter.isVisible { presenter.present(model) }
         startTicking()
     }
@@ -59,11 +61,16 @@ final class OnboardingServices {
     /// Takes the overlay down; it resumes at this step.
     func hide() { exit(.later) }
 
+    /// The record with the model's step, marked sections and first loadout.
+    private func save(_ status: OnboardingRecord.Status) {
+        store.save(status, step: model.step, sections: model.markedSections, loadout: model.firstLoadout?.name)
+    }
+
     private func exit(_ exit: OnboardingModel.Exit) {
         switch exit {
-        case .finished: store.save(.completed, step: model.step)
-        case .skipped: store.save(.skipped, step: model.step)
-        case .later: store.save(.inProgress, step: model.step)
+        case .finished: save(.completed)
+        case .skipped: save(.skipped)
+        case .later: save(.inProgress)
         }
         stopTicking()
         presenter.dismiss()

@@ -13,16 +13,22 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   the app if it is not running.
 
 ### Setup guide
-- The first launch opens a full-screen setup guide, one step at a time: the permissions MacHUD
-  needs (Accessibility and the microphone, with live status and buttons to ask for them), voice
-  (on/off, hold or tap on the fn key with the gestures explained, and a "try it" area that shows
-  what the voice host hears as you speak), the brain (pick Codex, Claude Code, Hermes or mclaude
-  with what is installed shown, choose the workspace folder, and see why the brain is not ready
-  until it is; mclaude offers MechaHUD, where the same session shows up), the HUD apps with
-  one-click installs, and a short tour of the orb, the tool dock, loadouts and the CLI.
-- Esc leaves it for later and it reopens where you left it; Skip setup or Finish stops it
-  showing by itself. **Setup Guide…** in the menu and `machud onboarding show` bring it back;
-  `machud onboarding reset` starts it over. It replaces the first-run Apps tab.
+- The first launch opens a setup guide over your desktop: a blurred, see-through overlay rather
+  than a cover. It opens on a checklist of every section, each marked to do, done or skipped,
+  and the checklist stays beside you as you go, ticking items off in place; click any item to
+  jump to it.
+- The sections: the permissions MacHUD needs (Accessibility and the microphone, with live
+  status); voice (on/off, hold or tap on the fn key, and a "try it" area that shows what the
+  voice host hears); the brain (pick Codex, Claude Code, Hermes or mclaude with what is
+  installed shown, the folder it works in, your home folder unless you choose another, spoken
+  replies, the reply voice with a Test voice button, and the Kokoro voice's download); the HUD
+  apps with one-click installs; the tool dock (what it is, on or off, and where it sits, changed
+  live); your first loadout (arrange a few windows while the guide shrinks out of the way,
+  capture them under a name, and see the regions); and the radial menu, where you practise
+  holding ⌃⌥Space and flicking to the loadout you just made until it applies.
+- Esc leaves it for later and it reopens where you left it, checklist included; Skip setup or
+  Finish stops it showing by itself. **Setup Guide…** in the menu and `machud onboarding show`
+  bring it back; `machud onboarding reset` starts it over.
 
 ### Voice
 - MacHUD runs its voice host as a helper inside the app and keeps it running: it starts with
