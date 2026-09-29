@@ -265,25 +265,32 @@ struct DockPositionPicker: View {
                 Rectangle().fill(Color.black.opacity(0.35)).frame(width: screen.width - 2, height: 8)
                     .position(x: screen.midX, y: screen.minY + 5)
                 ForEach(ToolDock.menuPositions, id: \.self) { p in
-                    let selected = p == position
                     ForEach(Array(Self.segments(p, in: screen).enumerated()), id: \.offset) { _, rect in
-                        RoundedRectangle(cornerRadius: 4, style: .continuous)
-                            .fill(selected ? (enabled ? OnboardingStyle.accent : Color.white.opacity(0.35)) : Color.white.opacity(0.12))
-                            .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .stroke(selected ? Color.white.opacity(0.8) : Color.white.opacity(0.28),
-                                        style: StrokeStyle(lineWidth: 1, dash: selected ? [] : [3, 3])))
-                            .frame(width: rect.width, height: rect.height)
-                            // Hit area = this piece only: sized and made tappable before
-                            // `.position`, which would otherwise stretch it over the whole
-                            // miniature and let the last position drawn take every tap.
-                            .contentShape(Rectangle())
-                            .onTapGesture { choose(p) }
-                            .help(ToolDock.title(of: p))
-                            .position(x: rect.midX, y: rect.midY)
+                        segment(rect, of: p)
                     }
                 }
             }
         }
+    }
+
+    /// One piece of `position`'s strip, tappable to choose it. Its own function so the
+    /// expression type-checks quickly.
+    private func segment(_ rect: CGRect, of position: HUDDockPosition) -> some View {
+        let selected = position == self.position
+        let fill: Color = selected ? (enabled ? OnboardingStyle.accent : Color.white.opacity(0.35)) : Color.white.opacity(0.12)
+        let stroke: Color = selected ? Color.white.opacity(0.8) : Color.white.opacity(0.28)
+        let style = StrokeStyle(lineWidth: 1, dash: selected ? [] : [3, 3])
+        let shape = RoundedRectangle(cornerRadius: 4, style: .continuous)
+        return shape.fill(fill)
+            .overlay(shape.stroke(stroke, style: style))
+            .frame(width: rect.width, height: rect.height)
+            // Hit area = this piece only: sized and made tappable before `.position`, which
+            // would otherwise stretch it over the whole miniature and let the last position
+            // drawn take every tap.
+            .contentShape(Rectangle())
+            .onTapGesture { choose(position) }
+            .help(ToolDock.title(of: position))
+            .position(x: rect.midX, y: rect.midY)
     }
 
     /// The strip's pieces for `position` on the miniature `screen` (SwiftUI coordinates, y down).
