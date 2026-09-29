@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBar: MenuBarManager!
     private var menuHost: MenuHostPublisher!
     private var toolDock: ToolDock!
+    private var sessions: SessionsBroker!
     private var voice: VoiceServices!
     private var startup: StartupLoadout?
     private var trustTimer: Timer?
@@ -60,6 +61,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         externals.rescan()
         externals.startWatching()
+        sessions = SessionsBroker(externals: externals)
+        sessions.registerControl(control)
         machud = MacHUDServices(externals: externals, host: hudHost)
         machud.registerControl(control)
         installCatalog()
