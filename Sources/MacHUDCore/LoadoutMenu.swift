@@ -11,6 +11,8 @@ final class LoadoutMenu {
     var openNewLayout: (() -> Void)?
     /// Opens the editor on a loadout's layout with that loadout selected.
     var editLoadout: ((String) -> Void)?
+    /// Deletes loadouts and sets the startup one, as the settings tab and `loadouts` verb do.
+    var library: LoadoutLibrary?
     private let engine: LoadoutEngine
     private let radial = RadialMenu()
     private var hotkeyIDs: [UInt32] = []
@@ -419,7 +421,7 @@ final class LoadoutMenu {
             let startup = action("Apply at Startup", loadout.name, #selector(startupItem(_:)))
             startup.state = store.config.startupLoadout == loadout.name ? .on : .off
             sub.addItem(startup)
-            sub.addItem(action("Delete", loadout.name, #selector(deleteItem(_:))))
+            sub.addItem(action("Delete…", loadout.name, #selector(deleteItem(_:))))
             item.submenu = sub
             items.append(item)
         }
@@ -501,7 +503,27 @@ final class LoadoutMenu {
 
     @objc private func deleteItem(_ sender: NSMenuItem) {
         guard let name = sender.representedObject as? String else { return }
-        store.removeLoadout(named: name)
+        confirmDelete(name)
+    }
+
+    /// Asks first, naming the layouts that go with it, then deletes through the library.
+    func confirmDelete(_ name: String) {
+        // The alert runs a modal: let the menu finish closing first.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let question = LoadoutLibrary.deleteQuestion(name, ownedLayouts: self.store.config.ownedLayouts(of: name))
+            let alert = NSAlert()
+            alert.messageText = question.title
+            alert.informativeText = question.detail ?? "It can’t be undone."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Delete").hasDestructiveAction = true
+            alert.addButton(withTitle: "Cancel")
+            NSApp.activate(ignoringOtherApps: true)
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            do { try self.library?.perform(.delete(name)) } catch {
+                Toast.show("Could not delete \(name)", detail: "\(error)", seconds: 3)
+            }
+        }
     }
 
     @objc private func captureItem() { captureCurrent() }
@@ -510,9 +532,7 @@ final class LoadoutMenu {
 
     @objc private func startupItem(_ sender: NSMenuItem) {
         guard let name = sender.representedObject as? String else { return }
-        var c = store.config
-        c.startupLoadout = c.startupLoadout == name ? nil : name
-        store.save(c)
+        _ = try? library?.perform(.startup(store.config.startupLoadout == name ? nil : name))
     }
 
     /// Asks for a name (and whether to put it back at startup), then saves the tool dock

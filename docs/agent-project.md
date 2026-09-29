@@ -29,7 +29,7 @@ development Mac; an item marked n/a does not apply to this project.
 | Local integration branch | `main` in each repo; the SpeakFree fork uses `integration/machud`, checked out in `../speakfree` (its `main` tracks upstream) |
 | Worktree parent directory and branch prefix | `../worktrees/<repo>-<lane>`, branch `wave/<wave>/<lane>`. A `../worktrees/hudkit` symlink makes `../hudkit` path dependencies resolve from a worktree |
 | Dependency/worktree preparation command | None beyond `git worktree add`; SwiftPM resolves on first build |
-| Local services start and health check | n/a for most lanes. MacHUD test instance: `MACHUD_SOCKET=<tmp>.sock MACHUD_CONFIG=<tmp dir>/layouts.json MACHUD_NO_HOTKEYS=1 build/MacHUD.app/Contents/MacOS/MacHUD`, health `MACHUD_SOCKET=<tmp>.sock scripts/machud hello`. Its voice host runs with no microphone, brain, orb or real Keychain item (`MACHUD_VOICE_LIVE=1` opts back in; see README's isolation table) on `<tmp>-voice.sock`, checked with `MACHUD_SOCKET=<tmp>.sock scripts/machud voice status` |
+| Local services start and health check | n/a for most lanes. MacHUD test instance: `MACHUD_SOCKET=<tmp>.sock MACHUD_CONFIG=<tmp dir>/layouts.json MACHUD_NO_HOTKEYS=1 build/MacHUD.app/Contents/MacOS/MacHUD`, health `MACHUD_SOCKET=<tmp>.sock scripts/machud hello`. Its voice host runs with no microphone, brain, orb or real Keychain item (`MACHUD_VOICE_LIVE=1` opts back in; see README's isolation table) on `<tmp>-voice.sock`, checked with `MACHUD_SOCKET=<tmp>.sock scripts/machud voice status`. It applies no startup loadout, re-applies nothing on display changes and launches no `autoLaunch` app unless `MACHUD_APPLY_STARTUP=1`. Add `HUD_NO_ANNOUNCE=1` to `./build.sh` so the build does not announce itself to the live MacHUD |
 | Backend identity check | n/a (no backend). The live instance is `/Applications/MacHUD.app` on `/tmp/machud-<uid>.sock`; tests never target it |
 | Local test fixture setup and reset authority | Temp dirs per test instance; no shared fixtures |
 | Shared resource coordinator | Orchestrator (live MacHUD, microphone, fn event tap, privacy grants) |
@@ -58,6 +58,10 @@ Nothing talks to a remote backend. What is shared across worktrees on this Mac:
   and UserDefaults domain (`com.jrisberg.machud`). A test instance must set
   `MACHUD_SOCKET` and `MACHUD_CONFIG`, and must not run `settings set`, since it shares
   the UserDefaults domain.
+- The user's real windows and apps. An isolated instance still drives them through
+  Accessibility: `apply`, `capture`, `clear`, `park`, `place`, previews and the editor act on
+  the live desktop. Tests and lanes must not capture or apply against them; use unit tests
+  with fakes and offscreen snapshots instead.
 - Sibling sockets in `~/Library/Application Support/MacHUD/sockets/`. A dev build
   announces itself to the live MacHUD unless `HUD_NO_ANNOUNCE=1`.
 - The microphone, the fn/Globe key event tap and the privacy database (TCC). Only one

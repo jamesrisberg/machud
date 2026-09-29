@@ -19,7 +19,19 @@ enum Env {
 
     /// A side-by-side dev/test instance (its own socket or config): it leaves the default
     /// instance's contract socket and permission prompts alone.
-    static var isIsolated: Bool { socketPath != nil || configURL != nil }
+    static var isIsolated: Bool { isIsolated(in: ProcessInfo.processInfo.environment) }
+    static func isIsolated(in environment: [String: String]) -> Bool {
+        value("SOCKET", in: environment) != nil || value("CONFIG", in: environment) != nil
+    }
+    /// Act on the user's windows and apps without being asked: apply `startupLoadout` at
+    /// launch, re-apply the active loadout when displays change, and launch (and relaunch)
+    /// the `apps.autoLaunch` siblings with their default placement. An isolated instance
+    /// still moves real windows through Accessibility, so it does none of this unless
+    /// `MACHUD_APPLY_STARTUP=1`.
+    static var autoApply: Bool { autoApply(in: ProcessInfo.processInfo.environment) }
+    static func autoApply(in environment: [String: String]) -> Bool {
+        !isIsolated(in: environment) || value("APPLY_STARTUP", in: environment) == "1"
+    }
     /// Watch window drags for snapping. An isolated instance (`MACHUD_NO_HOTKEYS`) leaves
     /// global drags to the real one unless `MACHUD_DRAG=1`: two instances watching the
     /// same drag both react to it (an empty test config used to open its editor).

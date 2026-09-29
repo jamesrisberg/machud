@@ -67,10 +67,7 @@ extension LoadoutEngine {
         guard !assignments.isEmpty else { return [:] }
         let screens = NSScreen.screens
         let outcomes = ScreenFallback.plan(
-            assignments.map {
-                ScreenFallback.Request(screen: $0.screen, space: $0.space ?? $0.slots.compactMap(\.space).min(),
-                                       fallback: $0.fallback)
-            },
+            ScreenFallback.requests(for: loadout),
             screens: screens.map(\.descriptor), policy: loadout.screenMissingPolicy,
             desktops: { index in
                 let monitor = Spaces.monitor(for: screens[index], in: monitors)

@@ -27,7 +27,7 @@ display). Region geometry in `layouts` is fractions of the screen's visible area
 | `help` | | `commands`: every command the running app accepts |
 | `ping` | | `pid` |
 | `layouts` | | `active` layout name, `layouts[]` with `regions[] {id, name, x, y, w, h}`; each carries `hidden` (true: kept for one loadout, not offered to snap into) |
-| `loadouts` | | `loadouts[]` (full `Loadout` objects: `name`, `layout`, `slots[] {regionID, occupant}`, `hotkey`, `screens?`, `hud?` — see HUD loadouts) |
+| `loadouts` | | `loadouts[]` (full `Loadout` objects: `name`, `layout`, `slots[] {regionID, occupant}`, `hotkey`, `screens?`, `hud?` — see HUD loadouts) and `startup` (the `startupLoadout`, or empty). The editing actions are under [Layouts and loadouts](#layouts-and-loadouts) |
 | `windows` | | `windows[] {window, pid, bundleID, app, title, x, y, w, h}` for every on-screen user window; windows MacHUD opened also carry `panel`, `web` or `browser` + `host` |
 | `status` | `screen=<ref>` (optional) | `layout`, `activeLoadout`, `regions[] {region, name, x, y, w, h, screen, space, occupant?, window?, iou, fits}` — what sits in each region now, plus `redirected[]` when the last apply had to stand in for a missing display |
 | `screens` | | `screens[] {index, name, persistentID, main, builtin, x, y, w, h, spaces, currentSpace}`; `persistentID` (`<vendor>-<model>-<serial>`, hex) is what loadouts pin displays to |
@@ -41,7 +41,11 @@ display). Region geometry in `layouts` is fractions of the screen's visible area
 | Command | Args | Effect |
 | --- | --- | --- |
 | `select-layout` | `name` | make a layout the active one (used for Shift-drag snapping and `status`) |
-| `edit` | | open the visual layout editor (a drag never opens it; with no layout, Shift-drag offers it in a toast) |
+| `edit` | `loadout=<name>` or `new=1` (optional) | open the visual layout editor (a drag never opens it; with no layout, Shift-drag offers it in a toast); `loadout` opens it on that loadout's layout (on a per-display loadout, the layout of the display under the mouse) with the loadout selected, `new=1` on a blank layout to draw |
+| `loadouts rename` | `name`, `to` | rename a loadout. The layouts a capture made for it alone (hidden ones no other loadout uses, named `<name>`, `<name> · <display>`, …) are renamed with it, and `startupLoadout` follows. Returns `loadout`, `renamedLayouts {old: new}` |
+| `loadouts duplicate` | `name`, `to` (optional, default `<name> copy`) | copy a loadout. The layouts it owns are copied too (new names, new region ids) so the two can be edited apart; shared layouts stay shared. The copy has no hotkey. Returns `loadout`, `addedLayouts[]` |
+| `loadouts delete` | `name` | delete a loadout and the hidden layouts it owns; clears `startupLoadout` if it was this one. Returns `removedLayouts[]` |
+| `loadouts startup` | `name` (omit, or `name=none`, to clear) | set `startupLoadout`, the loadout applied at launch |
 | `reload` | | re-read `~/.config/machud/layouts.json` |
 | `apply` | `loadout`, `clear=1`, `screen=<ref>` (optional) | launch/find each occupant and place it in its region; with `clear`, first minimise the other windows showing on each screen the loadout covers (on the desktops it visits); then the loadout's `hud` part, if any (see HUD loadouts). `screen` picks the display for the one-screen form (default: under the mouse). Returns `placed[]`, `failed{}`, `cleared`, `redirected[]` when a display was missing, `hud {dock?, apps {id: "applied" or why not}}`, and `slots[]`: the plan step per slot plus `result` (`placed`/`failed`), `error`, and `actual` {x, y, w, h} when the app kept a different frame. See [Placement plan](#placement-plan) |
 | `apply` | `loadout`, `plan=1` (+ optional `screen`) | **dry run**: `plan[]` of `{slot, region, occupant, action, from?, to, reason, window?}` without moving anything, plus `policy`, `failed{}` / `redirected[]` for missing displays and layouts |
@@ -470,7 +474,7 @@ only that (`"layout": ""`, `"slots": []`):
 
 | Command | Args | Effect |
 | --- | --- | --- |
-| `settings-window` | `show\|hide\|toggle\|state`, `tab=<bundle id, name, voice, brain or apps>`, `activate=0` | the shared settings window: a tab for MacHUD and each discovered app, plus Voice and Brain (see Voice; `state` reports them as `voice {status, settings?}`) and Apps (see App catalog; `state` reports it as `apps {rows[], selected[], selfUpdate?}`), rendering the app's settings schema (`settings schema` over its socket, else the file its manifest names) and reading/writing through `settings get/set` on its socket. Keys without a schema show as text rows. `show` answers once every tab has loaded with `tabs[] {id, title, status, schema, sections[{group?, rows[{key, title, control, value}]}]}`; `activate=0` shows it without taking focus |
+| `settings-window` | `show\|hide\|toggle\|state`, `tab=<bundle id, name, loadouts, voice, brain or apps>`, `activate=0` | the shared settings window: a tab for MacHUD and each discovered app, plus Loadouts (every loadout with a preview per display and desktop; `state` reports it as `loadouts {selected, desktop, loadouts[] {name, summary, startup, active, screens, desktops, regions, ownedLayouts[], problems[]}}`), Voice and Brain (see Voice; `state` reports them as `voice {status, settings?}`) and Apps (see App catalog; `state` reports it as `apps {rows[], selected[], selfUpdate?}`), rendering the app's settings schema (`settings schema` over its socket, else the file its manifest names) and reading/writing through `settings get/set` on its socket. Keys without a schema show as text rows. `show` answers once every tab has loaded with `tabs[] {id, title, status, schema, sections[{group?, rows[{key, title, control, value}]}]}`; `activate=0` shows it without taking focus |
 
 The status menu's MacHUD section lists the discovered apps (● running, ○ not) with Show/Hide,
 Park/Reveal, Launch/Quit and a Settings… item per app, plus Settings… for the window.

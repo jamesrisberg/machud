@@ -165,8 +165,12 @@ final class LoadoutEngine {
     /// A region's rect on a screen, with the configured gap — the same maths the
     /// drag monitor snaps with.
     func regionRect(_ region: Region, on screen: NSScreen) -> CGRect {
-        let gap = store.gap
-        var r = region.frame.cocoaRect(in: screen.visibleFrame.insetBy(dx: gap / 2, dy: gap / 2))
+        Self.regionRect(region, visible: screen.visibleFrame, gap: store.gap)
+    }
+
+    /// The same, for a display's visible frame given directly (the settings preview).
+    nonisolated static func regionRect(_ region: Region, visible: CGRect, gap: CGFloat) -> CGRect {
+        var r = region.frame.cocoaRect(in: visible.insetBy(dx: gap / 2, dy: gap / 2))
         r = r.insetBy(dx: gap / 2, dy: gap / 2)
         return r.integral
     }
@@ -215,6 +219,20 @@ final class LoadoutEngine {
             if let w = panel.window, w.isVisible { map[w.windowNumber] = panel.id }
         }
         return map
+    }
+
+    /// Follow a renamed or deleted loadout, which the engine remembers by name.
+    func loadoutEdited(_ edit: LoadoutEdit, _ result: LoadoutEditResult) {
+        switch edit {
+        case .rename(let old, _):
+            if activeLoadout == old { activeLoadout = result.loadout }
+            if redirectLoadout == old { redirectLoadout = result.loadout }
+        case .delete(let name):
+            if activeLoadout == name { activeLoadout = nil }
+            if redirectLoadout == name { redirectLoadout = nil; redirects = [] }
+        case .duplicate, .startup:
+            break
+        }
     }
 
     // MARK: - Apply
