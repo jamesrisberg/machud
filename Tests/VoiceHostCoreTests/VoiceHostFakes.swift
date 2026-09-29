@@ -87,7 +87,9 @@ final class FakeKeys: VoiceKeySource {
 
 @MainActor
 final class FakeBrain: BrainDriving {
-    var onAvailabilityChanged: ((Bool) -> Void)?
+    var onHealthChanged: ((BrainHealth) -> Void)?
+    /// What the controller reads as each snapshot's session key.
+    var sessionKey: String?
     var onSnapshot: ((AgentSessionSnapshot) -> Void)?
     var onStopped: (() -> Void)?
     var cancelError: Error?
@@ -120,13 +122,16 @@ final class FakeBrain: BrainDriving {
     }
 
     static func snapshot(status: String, output: String, progress: String, approvals: [AgentApproval],
-                         error: String?, requestId: String?, turnId: String?) -> AgentSessionSnapshot {
+                         error: String?, requestId: String?, turnId: String?,
+                         sessionKey: String? = nil) -> AgentSessionSnapshot {
         struct Wire: Encodable {
             let threadId: String?, turnId: String?, status: String, output: String, progress: String
             let approvals: [AgentApproval], error: String?, revision: Int, instanceId: String?, requestId: String?
+            let sessionKey: String?
         }
         let wire = Wire(threadId: "thread", turnId: turnId, status: status, output: output, progress: progress,
-                        approvals: approvals, error: error, revision: 1, instanceId: "i", requestId: requestId)
+                        approvals: approvals, error: error, revision: 1, instanceId: "i", requestId: requestId,
+                        sessionKey: sessionKey)
         let data = try! JSONEncoder().encode(wire)
         return try! JSONDecoder().decode(AgentSessionSnapshot.self, from: data)
     }
@@ -202,4 +207,33 @@ final class ManualClock {
         scheduled.removeAll { $0.at <= time }
         due.forEach { $0.work() }
     }
+}
+
+/// Every runtime installed, or those in `missing` not.
+enum FakeRuntimes {
+    static func detect(missing: Set<String> = []) -> (BrainSettings) -> [BrainRuntimeDetection] {
+        { _ in
+            BrainRuntimes.ids.map { id in
+                let installed = !missing.contains(id)
+                return BrainRuntimeDetection(id: id, name: BrainRuntimes.name(for: id), installed: installed,
+                                             path: installed ? "/fake/bin/\(id)" : nil,
+                                             tmuxPath: id == "mclaude" ? "/fake/bin/tmux" : nil,
+                                             apiServerEnabled: id == "hermes" ? true : nil)
+            }
+        }
+    }
+}
+
+/// MacHUD's session broker.
+final class FakeSessions: SessionOpening, @unchecked Sendable {
+    var result: Result<String, SessionOpenError> = .success("SessionsApp")
+    var provider: String? = "SessionsApp"
+    private(set) var opened: [String] = []
+
+    func open(id: String) async -> Result<String, SessionOpenError> {
+        opened.append(id)
+        return result
+    }
+
+    func providerName() async -> String? { provider }
 }

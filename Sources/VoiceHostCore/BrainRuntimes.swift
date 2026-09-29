@@ -1,0 +1,119 @@
+import BrainKit
+import Foundation
+
+/// One brain runtime as this Mac has it: whether its tool is installed and where.
+public struct BrainRuntimeDetection: Equatable, Sendable {
+    /// The settings value (`brain.runtime`): `codex`, `claude`, `hermes` or `mclaude`.
+    public var id: String
+    public var name: String
+    public var installed: Bool
+    /// The executable found (or the override given), nil when none is.
+    public var path: String?
+    /// mclaude only: `tmux`, which mechaclaude runs detached sessions in. Reported, not required
+    /// here: mechaclaude and MechaHUD own tmux readiness.
+    public var tmuxPath: String?
+    /// Hermes only: `~/.hermes/.env` turns on the API server the companion talks to.
+    public var apiServerEnabled: Bool?
+
+    public init(id: String, name: String, installed: Bool, path: String? = nil, tmuxPath: String? = nil,
+                apiServerEnabled: Bool? = nil) {
+        self.id = id
+        self.name = name
+        self.installed = installed
+        self.path = path
+        self.tmuxPath = tmuxPath
+        self.apiServerEnabled = apiServerEnabled
+    }
+
+    /// The `brain status` entry.
+    var json: [String: Any] {
+        var entry: [String: Any] = ["id": id, "name": name, "installed": installed]
+        if let path { entry["path"] = path }
+        if id == BrainRuntimes.mclaude { entry["tmux"] = tmuxPath ?? NSNull() }
+        if let apiServerEnabled { entry["apiServer"] = apiServerEnabled }
+        return entry
+    }
+}
+
+/// The runtimes the Brain settings offer, detected the way BrainKit looks tools up
+/// (`ExecutableLocator`: PATH, then the usual install folders; a path override wins).
+public enum BrainRuntimes {
+    static let mclaude = "mclaude"
+    /// In the order the Brain tab lists them.
+    public static let ids = ["codex", "claude", "hermes", mclaude]
+
+    public static func name(for id: String) -> String {
+        switch id {
+        case "codex": return "Codex"
+        case "claude": return "Claude"
+        case "hermes": return "Hermes"
+        case mclaude: return "mclaude"
+        default: return id
+        }
+    }
+
+    /// Every runtime in `ids`, with the path overrides in `brain`.
+    public static func detect(_ brain: BrainSettings, locator: ExecutableLocator = .live,
+                              readFile: (String) -> String? = { try? String(contentsOfFile: $0, encoding: .utf8) })
+        -> [BrainRuntimeDetection] {
+        ids.map { id in
+            if id == mclaude {
+                let path = locator.locate("mclaude", override: BrainSettingsFields.string(brain, "mclaude.executablePath"))
+                return BrainRuntimeDetection(id: id, name: name(for: id), installed: path != nil, path: path,
+                                             tmuxPath: locator.locate("tmux", override: BrainSettingsFields.string(brain, "mclaude.tmuxPath")))
+            }
+            guard let runtime = AgentRuntime(rawValue: id) else {
+                return BrainRuntimeDetection(id: id, name: name(for: id), installed: false)
+            }
+            let override: String
+            switch id {
+            case "codex": override = brain.codex.executablePath
+            case "claude": override = brain.claude.executablePath
+            default: override = ""
+            }
+            let found = BrainCatalog.detect(runtime, locator: locator, override: override, readFile: readFile)
+            return BrainRuntimeDetection(id: id, name: name(for: id), installed: found.isInstalled,
+                                         path: found.executable, apiServerEnabled: found.apiServerEnabled)
+        }
+    }
+
+    /// Why the chosen runtime cannot take a turn on this Mac, or nil.
+    static func problem(runtime id: String, brain: BrainSettings, detections: [BrainRuntimeDetection]) -> String? {
+        guard let detection = detections.first(where: { $0.id == id }) else { return nil }
+        if id == "hermes" {
+            // The companion reaches Hermes over HTTP: a URL given in the settings needs nothing local.
+            guard brain.hermes.url.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+            if !detection.installed { return "Hermes is not installed." }
+            if detection.apiServerEnabled == false {
+                return "Hermes' API server is off: set API_SERVER_ENABLED=true in ~/.hermes/.env."
+            }
+            return nil
+        }
+        return detection.installed ? nil : "\(detection.name) is not installed."
+    }
+}
+
+/// Reads fields of BrainKit values by their encoded names, for fields this build's BrainKit may
+/// not declare yet (the mclaude runtime's options, a snapshot's `sessionKey`): absent reads as
+/// empty or nil, so the host works with either BrainKit.
+enum BrainSettingsFields {
+    /// The string at a dotted path of `brain`'s JSON form, else "".
+    static func string(_ brain: BrainSettings, _ path: String) -> String {
+        guard let data = try? JSONEncoder().encode(brain),
+              var node = try? JSONSerialization.jsonObject(with: data) else { return "" }
+        for key in path.split(separator: ".") {
+            guard let object = node as? [String: Any], let next = object[String(key)] else { return "" }
+            node = next
+        }
+        return node as? String ?? ""
+    }
+
+    /// A snapshot's `sessionKey`: the external session the runtime drives, when it has one.
+    static func sessionKey(_ snapshot: Any) -> String? {
+        for child in Mirror(reflecting: snapshot).children where child.label == "sessionKey" {
+            guard let key = child.value as? String, !key.isEmpty else { return nil }
+            return key
+        }
+        return nil
+    }
+}

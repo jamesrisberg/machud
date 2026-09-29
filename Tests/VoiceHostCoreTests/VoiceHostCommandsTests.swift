@@ -10,15 +10,20 @@ final class VoiceHostCommandsTests: XCTestCase {
     private var secrets: InMemoryVoiceSecretStore!
     private var controller: VoiceHostController!
     private var commands: VoiceHostCommands!
+    private var sessions: FakeSessions!
 
     override func setUp() async throws {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-cmd-\(UUID().uuidString)")
         dictation = FakeDictation()
         brain = FakeBrain()
         secrets = InMemoryVoiceSecretStore()
+        sessions = FakeSessions()
+        let fakeBrain = brain!
         controller = VoiceHostController(
             settings: VoiceHostSettings(), dictation: dictation, keys: nil, brain: brain, speaker: nil,
-            wake: nil, brainStateRoot: directory, schedule: { _, _ in })
+            wake: nil, brainStateRoot: directory, sessions: sessions,
+            detectRuntimes: FakeRuntimes.detect(missing: ["mclaude"]),
+            sessionKeyOf: { _ in fakeBrain.sessionKey }, schedule: { _, _ in })
         controller.start()
         commands = VoiceHostCommands(controller: controller, store: VoiceHostSettingsStore(directory: directory),
                                      secrets: secrets, version: "1.2.3")
@@ -120,5 +125,62 @@ final class VoiceHostCommandsTests: XCTestCase {
         XCTAssertNil(secrets.string(forKey: VoiceSecrets.grokAPIKey))
         XCTAssertEqual(commands.handle("secret", ["_": "set", "name": "openai", "value": "x"])["ok"] as? Bool, false)
         XCTAssertEqual(commands.handle("secret", ["_": "get", "name": "grok"])["ok"] as? Bool, false)
+    }
+
+    // MARK: brain status
+
+    func testBrainStatusReportsTheProblemAndTheRuntimes() throws {
+        brain.onHealthChanged?(.unavailable("Choose a workspace folder for the agent."))
+        let reply = commands.handle("brain", ["_": "status"])
+        XCTAssertEqual(reply["ok"] as? Bool, true)
+        XCTAssertEqual(reply["available"] as? Bool, false)
+        XCTAssertEqual(reply["problem"] as? String, "Choose a workspace folder for the agent.")
+        XCTAssertEqual(reply["workspace"] as? String, "")
+        XCTAssertEqual(reply["runtime"] as? String, "codex")
+        let runtimes = try XCTUnwrap(reply["runtimes"] as? [[String: Any]])
+        XCTAssertEqual(runtimes.map { $0["id"] as? String }, ["codex", "claude", "hermes", "mclaude"])
+        XCTAssertEqual(runtimes[0]["installed"] as? Bool, true)
+        XCTAssertEqual(runtimes[0]["path"] as? String, "/fake/bin/codex")
+        XCTAssertEqual(runtimes[3]["installed"] as? Bool, false)
+        XCTAssertNil(runtimes[3]["path"])
+        XCTAssertEqual(runtimes[3]["tmux"] as? String, "/fake/bin/tmux")
+        XCTAssertTrue(JSONSerialization.isValidJSONObject(reply))
+    }
+
+    func testBrainStatusWhenReady() {
+        brain.onHealthChanged?(.ready)
+        let reply = commands.handle("brain", [:])
+        XCTAssertEqual(reply["available"] as? Bool, true)
+        XCTAssertNil(reply["problem"])
+        XCTAssertEqual(commands.handle("brain", ["_": "restart"])["ok"] as? Bool, false)
+    }
+
+    func testStateCarriesTheProblem() throws {
+        brain.onHealthChanged?(.unavailable("Choose a workspace folder for the agent."))
+        let state = try XCTUnwrap(commands.handle("state", [:])["state"] as? [String: Any])
+        XCTAssertEqual(state["brainProblem"] as? String, "Choose a workspace folder for the agent.")
+        XCTAssertEqual(state["brainAvailable"] as? Bool, false)
+    }
+
+    // MARK: open-session
+
+    func testOpenSessionAnswersWithTheApp() async {
+        brain.sessionKey = "claude:abc"
+        _ = commands.handle("action", ["name": "ask"])
+        _ = commands.handle("action", ["name": "stop"])
+        dictation.finish("hi")
+        await controller.pendingWork?.value
+        brain.push(status: "idle", output: "Hello")
+        let reply = await commands.openSession()
+        XCTAssertEqual(reply["ok"] as? Bool, true)
+        XCTAssertEqual(reply["app"] as? String, "SessionsApp")
+        XCTAssertEqual(sessions.opened, ["claude:abc"])
+    }
+
+    func testOpenSessionWithoutASessionFails() async {
+        let reply = await commands.openSession()
+        XCTAssertEqual(reply["ok"] as? Bool, false)
+        XCTAssertEqual(reply["error"] as? String, VoiceHostController.noSession)
+        XCTAssertEqual(VoiceHostCommands.actionName(["name": "open-session"]), "open-session")
     }
 }
