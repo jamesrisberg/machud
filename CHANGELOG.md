@@ -6,6 +6,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-29
+
 ### The brain can drive MacHUD
 - MacHUD ships an MCP tool server, `Contents/Helpers/machud-mcp`, so an agent (Codex, Claude
   Code, mclaude or any MCP client) can read and drive MacHUD directly: see the displays, loadouts,
@@ -19,8 +21,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 
 ### Brain: MacHUD tools, and switching the agent works
 - Changing the agent (Codex, Claude, mclaude, Hermes) in the Brain tab now takes effect: the
-  running agent switches, without a restart, as soon as it is between turns. Before, it stayed
-  on the agent it was started with. While a switch is waiting, the Brain tab says so, and
+  running agent switches, without a restart, as soon as it is between turns. While a switch is
+  waiting, the Brain tab says so, and
   `machud voice brain status` shows the agent actually running (`activeRuntime`) next to the one
   chosen.
 - When MacHUD starts, the agent starts once, knowing every HUD app that announces itself in the
@@ -31,12 +33,10 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   drive the screen. It is told which HUD apps and loadouts you have. On by default; turn it off,
   or have each MacHUD action ask first, in the Brain tab's MacHUD tools section.
 
-### Voice: the wake word works
-- The wake word never triggered: its default phrase, "Hey Computer", has no model yet, nothing
-  downloaded one, and the wake word stayed off without saying so. The phrase is now chosen from
-  the phrases there is a model for (today "Hey Jarvis"), each marked installed or not with its
-  terms, in the Voice tab and the setup guide's Voice section (where the wake word is off until
-  you turn it on).
+### Voice: wake word and capture
+- The wake phrase is chosen from the phrases there is a model for (today "Hey Jarvis"), each
+  marked installed or not with its terms, in the Voice tab and the setup guide's Voice section
+  (where the wake word is off until you turn it on).
 - Download the Hey Jarvis model from either place, or with `machud voice models download
   id=hey-jarvis`. It is openWakeWord's model for personal, non-commercial use, downloaded when you
   ask and never bundled with MacHUD. The wake word starts listening as soon as it is installed,
@@ -46,6 +46,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   A saved "Hey Computer" becomes "Hey Jarvis" when the wake word is turned on.
 - The wake word's microphone starts again by itself after an audio device change instead of
   going quiet.
+- The first dictation or agent request after MacHUD starts records from the microphone like
+  every later one, instead of failing with "Capture failed".
 
 ### Voice: speech model, dictation history, transcripts in Stash
 - Dictation needs the Parakeet speech model, and a Mac without SpeakFree has none. The Voice tab
