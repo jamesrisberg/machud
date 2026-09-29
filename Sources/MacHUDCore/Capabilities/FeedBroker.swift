@@ -10,10 +10,7 @@ import HUDKit
 @MainActor
 final class FeedBroker {
     /// The manifest capability a panel lists to accept fed text.
-    // HUDKit's `text-feed` capability (`HUDTextFeed.capability`) is still on
-    // wave/voice-5/feed; machud builds against hudkit main until it merges, so this stays a
-    // literal until a follow-up commit switches it to the constant.
-    static let capability = "text-feed"
+    static let capability = HUDTextFeed.capability
     private static let command = "feed"
     private static let addAction = "add"
 
