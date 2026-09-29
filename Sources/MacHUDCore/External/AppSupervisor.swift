@@ -72,6 +72,13 @@ final class AppSupervisor {
 
         init(app: ExternalApp) { self.app = app }
 
+        /// The manifest as a JSON object (its panels' verbs and capabilities included), so a
+        /// client learns what an app offers from `apps` without reading its bundle.
+        private static func object(_ manifest: HUDManifest) -> [String: Any]? {
+            guard let data = try? JSONEncoder().encode(manifest) else { return nil }
+            return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        }
+
         var isSubscribed: Bool { subscription != nil }
 
         var json: [String: Any] {
@@ -81,6 +88,7 @@ final class AppSupervisor {
                                     "reachable": health == .running, "autoLaunch": autoLaunch,
                                     "launchAttempts": launchAttempts,
                                     "panels": app.manifest.panels.map { "\(app.id)/\($0.id)" }]
+            if let manifest = Self.object(app.manifest) { d["manifest"] = manifest }
             if let lastError { d["lastError"] = lastError }
             return d
         }
