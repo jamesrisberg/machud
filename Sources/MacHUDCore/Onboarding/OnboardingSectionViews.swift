@@ -273,11 +273,14 @@ struct DockPositionPicker: View {
                                 .stroke(selected ? Color.white.opacity(0.8) : Color.white.opacity(0.28),
                                         style: StrokeStyle(lineWidth: 1, dash: selected ? [] : [3, 3])))
                             .frame(width: rect.width, height: rect.height)
+                            // Hit area = this piece only: sized and made tappable before
+                            // `.position`, which would otherwise stretch it over the whole
+                            // miniature and let the last position drawn take every tap.
+                            .contentShape(Rectangle())
+                            .onTapGesture { choose(p) }
+                            .help(ToolDock.title(of: p))
                             .position(x: rect.midX, y: rect.midY)
                     }
-                    .contentShape(Rectangle())
-                    .onTapGesture { choose(p) }
-                    .help(ToolDock.title(of: p))
                 }
             }
         }
@@ -287,10 +290,7 @@ struct DockPositionPicker: View {
     /// The usable area (below the menu-bar strip) is a three-by-three grid of cells with a
     /// `gap` between them; every position's region stays inside its own cell (an edge in the
     /// middle cell of its side, a corner's L in the corner cell), so no two positions' regions
-    /// ever overlap and a tap always reaches the one the user meant, even after the strip has
-    /// already moved to a neighboring spot. (An earlier version sized edges and corner arms by
-    /// fractions of the whole screen with no gap between them, so an edge and the neighboring
-    /// corner's arm overlapped; the corner, drawn on top, then swallowed taps meant for the edge.)
+    /// ever overlap.
     static func segments(_ position: HUDDockPosition, in screen: CGRect) -> [CGRect] {
         let t: CGFloat = 10, inset: CGFloat = 6, gap: CGFloat = 6
         let usable = CGRect(x: screen.minX, y: screen.minY + 14, width: screen.width, height: screen.height - 14)
