@@ -8,9 +8,9 @@ final class BrainRuntimesTests: XCTestCase {
                           contentsOfDirectory: { _ in [] })
     }
 
-    func testDetectsEachRuntimeAndTmux() {
+    func testDetectsEachRuntime() {
         let found = BrainRuntimes.detect(
-            BrainSettings(), locator: locator(["/opt/tools/codex", "/Users/test/.local/bin/mclaude", "/opt/homebrew/bin/tmux"]),
+            BrainSettings(), locator: locator(["/opt/tools/codex", "/Users/test/.local/bin/mclaude"]),
             readFile: { _ in nil })
         XCTAssertEqual(found.map(\.id), ["codex", "claude", "hermes", "mclaude"])
         XCTAssertEqual(found[0], BrainRuntimeDetection(id: "codex", name: "Codex", installed: true, path: "/opt/tools/codex"))
@@ -18,7 +18,6 @@ final class BrainRuntimesTests: XCTestCase {
         XCTAssertFalse(found[2].installed)
         XCTAssertEqual(found[2].apiServerEnabled, false)
         XCTAssertEqual(found[3].path, "/Users/test/.local/bin/mclaude")
-        XCTAssertEqual(found[3].tmuxPath, "/opt/homebrew/bin/tmux")
     }
 
     func testAnOverrideWins() {
@@ -40,26 +39,6 @@ final class BrainRuntimesTests: XCTestCase {
         withURL.hermes.url = "http://127.0.0.1:8642"
         XCTAssertNil(BrainRuntimes.problem(runtime: "hermes", brain: withURL, detections: detections))
         XCTAssertNil(BrainRuntimes.problem(runtime: "unknown", brain: brain, detections: detections))
-    }
-
-    func testMclaudeEntryAlwaysReportsTmux() {
-        let entry = BrainRuntimeDetection(id: "mclaude", name: "mclaude", installed: true, path: "/bin/mclaude")
-        XCTAssertTrue(entry.json["tmux"] is NSNull)
-        XCTAssertNil(BrainRuntimeDetection(id: "codex", name: "Codex", installed: false).json["tmux"])
-    }
-
-    func testSessionKeyIsReadWhereTheSnapshotHasOne() {
-        struct WithKey { let status = "idle"; let sessionKey: String? }
-        struct WithoutKey { let status = "idle" }
-        XCTAssertEqual(BrainSettingsFields.sessionKey(WithKey(sessionKey: "claude:abc")), "claude:abc")
-        XCTAssertNil(BrainSettingsFields.sessionKey(WithKey(sessionKey: nil)))
-        XCTAssertNil(BrainSettingsFields.sessionKey(WithKey(sessionKey: "")))
-        XCTAssertNil(BrainSettingsFields.sessionKey(WithoutKey()))
-    }
-
-    func testMissingSettingsFieldsReadEmpty() {
-        XCTAssertEqual(BrainSettingsFields.string(BrainSettings(), "mclaude.executablePath"), "")
-        XCTAssertEqual(BrainSettingsFields.string(BrainSettings(workspacePath: "/w"), "workspacePath"), "/w")
     }
 
     @MainActor

@@ -125,12 +125,12 @@ public final class VoiceHostController: VoiceHostActing {
     ///   - brainStateRoot: the folder per-workspace brain state directories go under.
     ///   - sessions: MacHUD's session broker; nil leaves `openSession` unavailable.
     ///   - detectRuntimes: which runtimes are installed, for the settings given.
-    ///   - sessionKeyOf: a snapshot's session key (see `BrainSettingsFields.sessionKey`).
+    ///   - sessionKeyOf: a snapshot's session key.
     init(settings: VoiceHostSettings, dictation: DictationDriving, keys: VoiceKeySource?,
          brain: BrainDriving?, speaker: ReplySpeaking?, wake: WakeDriving?, brainStateRoot: URL,
          sessions: SessionOpening? = nil,
          detectRuntimes: @escaping (BrainSettings) -> [BrainRuntimeDetection] = { BrainRuntimes.detect($0) },
-         sessionKeyOf: @escaping (AgentSessionSnapshot) -> String? = { BrainSettingsFields.sessionKey($0) },
+         sessionKeyOf: @escaping (AgentSessionSnapshot) -> String? = { $0.sessionKey },
          now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
          schedule: @escaping VoiceScheduler = mainQueueScheduler) {
         self.settings = settings

@@ -376,6 +376,23 @@ final class VoiceHostControllerTests: XCTestCase {
         XCTAssertEqual(controller.state.sessionProvider, "SessionsApp")
     }
 
+    func testDefaultSessionKeyOfReadsTheSnapshotDirectly() async {
+        let fakeBrain = brain!
+        let clock = self.clock!
+        let controller = VoiceHostController(
+            settings: VoiceHostSettings(), dictation: dictation, keys: keys,
+            brain: fakeBrain, speaker: speaker, wake: wake, brainStateRoot: brainRoot,
+            sessions: sessions, detectRuntimes: FakeRuntimes.detect(missing: missingRuntimes),
+            now: { clock.now }, schedule: { clock.schedule($0, $1) })
+        controller.presenter = presenter
+        controller.start()
+        await startTurn(controller)
+        fakeBrain.onSnapshot?(FakeBrain.snapshot(status: "running", output: "", progress: "", approvals: [],
+                                                 error: nil, requestId: fakeBrain.submitted.last?.requestId,
+                                                 turnId: "turn-1", sessionKey: "claude:xyz"))
+        XCTAssertEqual(controller.state.sessionKey, "claude:xyz")
+    }
+
     func testNoSessionKeyWithoutOne() async {
         let controller = makeController()
         await startTurn(controller)

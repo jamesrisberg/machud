@@ -143,7 +143,7 @@ final class VoiceHostCommandsTests: XCTestCase {
         XCTAssertEqual(runtimes[0]["path"] as? String, "/fake/bin/codex")
         XCTAssertEqual(runtimes[3]["installed"] as? Bool, false)
         XCTAssertNil(runtimes[3]["path"])
-        XCTAssertEqual(runtimes[3]["tmux"] as? String, "/fake/bin/tmux")
+        XCTAssertNil(runtimes[3]["tmux"])
         XCTAssertTrue(JSONSerialization.isValidJSONObject(reply))
     }
 
