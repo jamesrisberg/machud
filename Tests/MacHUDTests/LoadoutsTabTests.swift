@@ -166,6 +166,17 @@ final class LoadoutsTabTests: XCTestCase {
         XCTAssertThrowsError(try config.apply(.duplicate("Code", as: "Reading")))
     }
 
+    func testDeleteQuestionNamesTheLayoutsItRemoves() throws {
+        let config = try LoadoutsFixture.config()
+        let desk = LoadoutLibrary.deleteQuestion("Desk", ownedLayouts: config.ownedLayouts(of: "Desk"))
+        XCTAssertEqual(desk.title, "Delete “Desk”?")
+        XCTAssertEqual(desk.detail, "Also removes the 3 layouts captured for it: Desk · DELL, Desk · DELL · Desktop 2, Desk · Built-in.")
+        let one = LoadoutLibrary.deleteQuestion("Solo", ownedLayouts: ["Solo"])
+        XCTAssertEqual(one.detail, "Also removes the layout captured for it: Solo.")
+        let code = LoadoutLibrary.deleteQuestion("Code", ownedLayouts: config.ownedLayouts(of: "Code"))
+        XCTAssertNil(code.detail, "a shared layout stays, so there is nothing more to say")
+    }
+
     func testStartupSetsAndClears() throws {
         var config = try LoadoutsFixture.config()
         XCTAssertEqual(try config.apply(.startup("Code")).loadout, "Code")

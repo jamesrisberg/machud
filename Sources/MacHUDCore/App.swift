@@ -53,6 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return engine.applyDefaultPlacement(app, placement)
         }
         externals.onAppStopped = { [weak engine] app in engine?.parking.forgetCooperative(socketPath: app.socketPath) }
+        externals.autoLaunches = Env.autoApply
         externals.registerControl(control)
         externals.saveConfig = { [weak store] apps in
             guard let store else { return }
@@ -182,6 +183,10 @@ extension AppDelegate {
     /// `startupLoadout`, about two seconds in, once the siblings it names are listening.
     fileprivate func scheduleStartupLoadout() {
         guard let name = store.config.startupLoadout, !name.isEmpty else { return }
+        guard Env.autoApply else {
+            NSLog("MacHUD: isolated instance, not applying startup loadout '%@' (MACHUD_APPLY_STARTUP=1 to apply)", name)
+            return
+        }
         let supervisor = externals.supervisor
         let startup = StartupLoadout(schedule: supervisor.schedule, loadout: { [weak store] in
             store?.config.startupLoadout.flatMap { store?.loadout(named: $0) }
@@ -450,11 +455,12 @@ extension AppDelegate {
     }
 
     /// The set of attached displays changed: pin by-name references to the displays now
-    /// present, then put the active loadout back where it belongs.
+    /// present, then put the active loadout back where it belongs (not in an isolated
+    /// instance; see `Env.autoApply`).
     fileprivate func displaysChanged() {
         toolDock.refresh()
         store.pinDisplays()
-        guard let name = engine.activeLoadout, let loadout = store.loadout(named: name) else { return }
+        guard Env.autoApply, let name = engine.activeLoadout, let loadout = store.loadout(named: name) else { return }
         engine.apply(loadout, clear: false) { report in
             NSLog("MacHUD: displays changed, re-applied %@: %d placed, %d failed",
                   name, report.placed.count, report.failed.count)

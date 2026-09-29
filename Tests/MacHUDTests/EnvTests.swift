@@ -13,6 +13,17 @@ final class EnvTests: XCTestCase {
         XCTAssertNil(Env.value("SOCKET", in: ["MACHUD_CONFIG": "x", "OTHER_SOCKET": "y"]))
     }
 
+    func testIsolatedInstancesDoNotActOnRealWindowsUnasked() {
+        XCTAssertTrue(Env.autoApply(in: [:]), "the real instance applies its startup loadout and launches apps")
+        XCTAssertFalse(Env.isIsolated(in: [:]))
+        for isolated in [["MACHUD_SOCKET": "/tmp/t.sock"], ["MACHUD_CONFIG": "/tmp/t/layouts.json"]] {
+            XCTAssertTrue(Env.isIsolated(in: isolated))
+            XCTAssertFalse(Env.autoApply(in: isolated))
+            XCTAssertTrue(Env.autoApply(in: isolated.merging(["MACHUD_APPLY_STARTUP": "1"]) { a, _ in a }))
+            XCTAssertFalse(Env.autoApply(in: isolated.merging(["MACHUD_APPLY_STARTUP": "0"]) { a, _ in a }))
+        }
+    }
+
     func testEmptyValueIsPresent() {
         // Presence, not content, decides: `MACHUD_NO_HOTKEYS=` is set.
         XCTAssertEqual(Env.value("NO_HOTKEYS", in: ["MACHUD_NO_HOTKEYS": ""]), "")

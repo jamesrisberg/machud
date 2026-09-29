@@ -14,11 +14,14 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - From there: Apply, Preview on your displays, Edit Layout (the drawing editor on that
   loadout), Rename, Duplicate, Apply at Startup and Delete (it asks first); New captures your
   current windows or opens the editor on a blank layout.
-- Deleting a loadout also removes the layouts a capture made just for it, from the menu too;
-  renaming or duplicating one takes those layouts along.
+- Deleting a loadout also removes the layouts a capture made just for it; the menu's Delete…
+  now asks first and names them. Renaming or duplicating a loadout takes those layouts along.
 - The same from the shell: `machud loadouts rename name= to=`, `duplicate name= [to=]`,
   `delete name=`, `startup [name=]`; `machud edit loadout=<name>` opens the editor on a loadout
   and `machud edit new=1` on a blank layout.
+- A test copy of MacHUD (its own `MACHUD_SOCKET` or `MACHUD_CONFIG`) no longer applies the
+  startup loadout, re-applies a loadout when displays change or launches your auto-launch
+  apps on its own; `MACHUD_APPLY_STARTUP=1` turns that back on.
 
 ### Agent sessions
 - MacHUD can find and open an agent session in whichever app shows it, without naming the app:

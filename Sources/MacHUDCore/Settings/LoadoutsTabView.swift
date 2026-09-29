@@ -304,7 +304,13 @@ struct LoadoutDetailView: View {
     private var deleteBar: some View {
         HStack(spacing: 8) {
             Image(systemName: "trash").foregroundStyle(.red)
-            Text(deleteQuestion).font(.callout).lineLimit(2)
+            let question = LoadoutLibrary.deleteQuestion(item.name, ownedLayouts: item.ownedLayouts)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(question.title).font(.callout.weight(.semibold))
+                if let detail = question.detail {
+                    Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                }
+            }
             Spacer()
             Button("Cancel") { model.cancelDelete() }.keyboardShortcut(.cancelAction)
             Button("Delete", role: .destructive) { model.confirmDelete() }
@@ -313,12 +319,6 @@ struct LoadoutDetailView: View {
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.red.opacity(0.14)))
         .controlSize(.small)
-    }
-
-    private var deleteQuestion: String {
-        let n = item.ownedLayouts.count
-        guard n > 0 else { return "Delete \(item.name)?" }
-        return "Delete \(item.name) and the \(n == 1 ? "layout" : "\(n) layouts") captured for it?"
     }
 }
 
