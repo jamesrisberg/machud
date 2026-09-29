@@ -517,6 +517,7 @@ struct VoiceStep: View {
                         }
                     }
                     SpeechModelPanel(model: model, settings: settings)
+                    WakeWordPanel(model: model, settings: settings)
                     OnboardingPanel {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("Gestures").font(.system(size: 12, weight: .semibold)).foregroundStyle(OnboardingStyle.secondary)
@@ -546,6 +547,67 @@ struct VoiceStep: View {
         }
         rows.append((["click orb"], "A hands-free turn with the agent; it listens until you stop."))
         return rows
+    }
+}
+
+/// The wake word (off by default): on/off, the phrase from those there is a model for, and
+/// that model's state with Download and its terms.
+struct WakeWordPanel: View {
+    @ObservedObject var model: OnboardingModel
+    @ObservedObject var settings: VoiceSettingsModel
+
+    var body: some View {
+        OnboardingPanel {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Text("Wake word").font(.system(size: 13, weight: .semibold)).fixedSize()
+                    Toggle("Wake word", isOn: Binding(get: { model.wakeWordOn }, set: { model.setWakeWord(on: $0) }))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .disabled(!model.voiceOn || model.wakePhrase == nil)
+                    Spacer(minLength: 8)
+                    if let chosen = model.wakePhrase, model.wakePhrases.count > 1 {
+                        Picker("Phrase", selection: Binding(get: { chosen.id }, set: { id in
+                            if let phrase = model.wakePhrases.first(where: { $0.id == id }) { model.setWakePhrase(phrase.phrase) }
+                        })) {
+                            ForEach(model.wakePhrases) { Text($0.phrase).tag($0.id) }
+                        }
+                        .labelsHidden().fixedSize().disabled(!model.voiceOn)
+                    } else if let chosen = model.wakePhrase {
+                        Text("“\(chosen.phrase)”").font(.system(size: 12, weight: .medium)).fixedSize()
+                    }
+                    modelState
+                }
+                Text(caption).font(.system(size: 11))
+                    .foregroundStyle(model.wakeProblem == nil && model.wakeNote == nil ? OnboardingStyle.secondary : OnboardingStyle.warn)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    @ViewBuilder private var modelState: some View {
+        if let chosen = model.wakePhrase {
+            if chosen.model.installed {
+                StatusPill(text: "Installed", ok: true)
+            } else if chosen.model.downloading {
+                ProgressView(value: chosen.model.progress).frame(width: 70)
+                Text("\(Int(chosen.model.progress * 100))%").font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(OnboardingStyle.secondary)
+            } else {
+                Button("Download") { model.downloadWakeModel() }
+                    .help("About \(chosen.model.size)")
+                    .buttonStyle(HUDButtonStyle(kind: .secondary)).fixedSize()
+                    .disabled(!model.voiceHostUp)
+            }
+        }
+    }
+
+    private var caption: String {
+        if let note = model.wakeNote { return note }
+        if let problem = model.wakeProblem { return problem }
+        guard let chosen = model.wakePhrase else { return "The wake word's phrases show here once voice is on." }
+        let say = "Say “\(chosen.phrase)” to talk to the agent hands-free; the microphone stays open while it is on."
+        return chosen.note.isEmpty ? say : "\(say) \(chosen.note)"
     }
 }
 

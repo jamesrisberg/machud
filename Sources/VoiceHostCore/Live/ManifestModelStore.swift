@@ -2,16 +2,17 @@ import Combine
 import Foundation
 import VoiceKit
 
-/// The Kokoro reply voice's files through VoiceKit's `ModelStore`: pinned by size and SHA-256,
-/// each verified before it is installed, readiness marked only after the whole set passes.
-/// `ReplySpeaker` picks Kokoro up for the next reply once the files are in place.
+/// A VoiceKit model's files through its `ModelStore` (the Kokoro reply voice, a wake model):
+/// pinned by size and SHA-256, each verified before it is installed, readiness marked only
+/// after the whole set passes. `ReplySpeaker` picks Kokoro up for the next reply, and the wake
+/// word listens, once the files are in place.
 @MainActor
-final class KokoroModelStore: VoiceModelProviding {
+final class ManifestModelStore: VoiceModelProviding {
     var onChange: (() -> Void)?
     private let store: ModelStore
     private var observation: AnyCancellable?
 
-    init(manifest: ModelManifest = KokoroModels.manifest, directory: URL,
+    init(manifest: ModelManifest, directory: URL,
          downloader: ModelStore.Downloader? = nil) {
         store = downloader.map { ModelStore(manifest: manifest, directory: directory, downloader: $0) }
             ?? ModelStore(manifest: manifest, directory: directory)
