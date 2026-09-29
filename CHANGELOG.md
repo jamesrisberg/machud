@@ -6,6 +6,19 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 
 ## [Unreleased]
 
+### Voice: speech model, dictation history, transcripts in Stash
+- Dictation needs the Parakeet speech model, and a Mac without SpeakFree has none. The Voice tab
+  and the setup guide's Voice section now show whether it is installed and download it with
+  progress (`machud voice models download id=parakeet`); dictation works as soon as it finishes,
+  no restart. SpeakFree uses the same download, so either app's copy serves both.
+- Keep dictation history: Off, Text only or Text and audio, in the Voice tab and the setup guide.
+  With SpeakFree installed you can share one history with it, kept in SpeakFree's recordings
+  folder in its format; until you choose, MacHUD follows SpeakFree's own "save recordings"
+  choice. Otherwise history goes to `~/Library/Application Support/MacHUD/Voice/History`.
+  `machud voice history` shows where.
+- Each finished dictation's text is sent to apps with a text feed, such as Stash's history
+  (turn off with "Send dictations to the text feed"); agent replies can be sent too.
+
 ### Agent sessions
 - MacHUD can find and open an agent session in whichever app shows it, without naming the app:
   `machud sessions providers` lists the discovered apps that show agent sessions (MechaHUD's

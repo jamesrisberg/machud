@@ -48,10 +48,15 @@ final class FakeDictation: DictationDriving {
 
     func insert(_ text: String) { inserted.append(text) }
 
-    /// Completes the current take with `text`.
-    func finish(_ text: String) {
+    /// Every history setting handed over, in order.
+    var histories: [DictationHistorySettings?] = []
+    func setHistory(_ history: DictationHistorySettings?) { histories.append(history) }
+
+    /// Completes the current take with `text` (typed or returned) and `transcript` (the words
+    /// as spoken; `text` when not given).
+    func finish(_ text: String, transcript: String? = nil) {
         isCapturing = false
-        onUpdate?(takeID, .finished(text: text, destination: currentDestination ?? .cursor))
+        onUpdate?(takeID, .finished(text: text, destination: currentDestination ?? .cursor, transcript: transcript ?? text))
     }
 
     func level(_ value: Double) { onUpdate?(takeID, .level(value)) }
@@ -247,6 +252,57 @@ enum FakeRuntimes {
                                              apiServerEnabled: id == "hermes" ? true : nil)
             }
         }
+    }
+}
+
+/// MacHUD's text-feed broker: what was sent.
+final class FakeFeed: TextFeeding, @unchecked Sendable {
+    struct Item: Equatable {
+        var text: String
+        var source: String
+        var title: String?
+    }
+    private(set) var items: [Item] = []
+
+    func add(text: String, source: String, title: String?) {
+        items.append(Item(text: text, source: source, title: title))
+    }
+}
+
+/// Parakeet's download without a network: `installed` is what is on "disk"; `prefetch` and
+/// `install` wait until the test lets them go (`finish`).
+final class FakeParakeet: ParakeetDownloading, @unchecked Sendable {
+    var installed: Set<String> = []
+    var failure: Error?
+    private(set) var prefetched: [String] = []
+    private(set) var installs: [String] = []
+    private var prefetchProgress: (@Sendable (Int64, Int64) -> Void)?
+    private var installProgress: (@Sendable (Double) -> Void)?
+    private var release: CheckedContinuation<Void, Never>?
+
+    func isDownloaded(_ id: String) -> Bool { installed.contains(id) }
+
+    func prefetch(_ id: String, progress: @escaping @Sendable (Int64, Int64) -> Void) async throws {
+        prefetched.append(id)
+        prefetchProgress = progress
+    }
+
+    func install(_ id: String, progress: @escaping @Sendable (Double) -> Void) async throws {
+        installs.append(id)
+        installProgress = progress
+        await withCheckedContinuation { release = $0 }
+        if let failure { throw failure }
+        installed.insert(id)
+    }
+
+    var isInstalling: Bool { release != nil }
+    func reportBytes(_ written: Int64, of total: Int64) { prefetchProgress?(written, total) }
+    func reportInstall(_ fraction: Double) { installProgress?(fraction) }
+
+    /// Lets the install end (with `failure`, if set).
+    func finish() {
+        release?.resume()
+        release = nil
     }
 }
 

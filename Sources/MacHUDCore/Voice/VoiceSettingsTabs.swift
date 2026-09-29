@@ -3,8 +3,9 @@ import SwiftUI
 
 /// The Voice and Brain tabs of the settings window. Everything goes through the voice host's
 /// socket (`settings get`, `settings set` with the whole object, `secret set|clear`,
-/// `brain status`, `action say` for Test Voice, `models status|download` for Kokoro, and its
-/// `state` and `models` events); while the host is down the tabs say why and edit nothing.
+/// `brain status`, `action say` for Test Voice, `models status|download` for the Parakeet
+/// speech model and the Kokoro voice, `history status`, and its `state` and `models` events);
+/// while the host is down the tabs say why and edit nothing.
 @MainActor
 final class VoiceSettingsModel: ObservableObject {
     static let voiceTabID = "voice"
@@ -41,6 +42,40 @@ final class VoiceSettingsModel: ObservableObject {
     @Published private(set) var workspaceIsDefault = false
     /// The Kokoro voice's files (`models status` and `models` events); nil until known.
     @Published private(set) var kokoro: ModelStatus?
+    /// The Parakeet speech model dictation needs (`models status` and `models` events); nil until known.
+    @Published private(set) var parakeet: ModelStatus?
+    /// Where finished dictations are kept (`history status`); nil until known.
+    @Published private(set) var history: HistoryStatus?
+
+    /// The voice host's `history status`: the setting as it resolves on this Mac.
+    struct HistoryStatus: Equatable {
+        var mode: String
+        var shareWithSpeakFree: Bool
+        var speakFreeInstalled: Bool
+        var folder: String
+        /// No setting is saved; the default rule applies.
+        var isDefault: Bool
+
+        init?(_ reply: [String: Any]) {
+            guard reply["ok"] as? Bool == true, let mode = reply["mode"] as? String else { return nil }
+            self.mode = mode
+            shareWithSpeakFree = reply["shareWithSpeakFree"] as? Bool ?? false
+            speakFreeInstalled = reply["speakFreeInstalled"] as? Bool ?? false
+            folder = reply["folder"] as? String ?? ""
+            isDefault = reply["default"] as? Bool ?? false
+        }
+
+        init(mode: String, shareWithSpeakFree: Bool, speakFreeInstalled: Bool, folder: String, isDefault: Bool) {
+            self.mode = mode
+            self.shareWithSpeakFree = shareWithSpeakFree
+            self.speakFreeInstalled = speakFreeInstalled
+            self.folder = folder
+            self.isDefault = isDefault
+        }
+    }
+
+    /// The choices `history.mode` takes, in the order they are offered.
+    static let historyModes = [("off", "Off"), ("text", "Text only"), ("textAndAudio", "Text and audio")]
 
     /// A downloadable model as the host reports it.
     struct ModelStatus: Equatable {
@@ -62,7 +97,7 @@ final class VoiceSettingsModel: ObservableObject {
             guard let json = json as? [String: Any] else { return nil }
             installed = json["installed"] as? Bool ?? false
             downloading = json["downloading"] as? Bool ?? false
-            progress = (json["progress"] as? NSNumber)?.doubleValue ?? 0
+            progress = min(max((json["progress"] as? NSNumber)?.doubleValue ?? 0, 0), 1)
             bytes = (json["bytes"] as? NSNumber)?.int64Value ?? 0
             error = json["error"] as? String
         }
@@ -104,6 +139,7 @@ final class VoiceSettingsModel: ObservableObject {
                 self.hostStateChanged(services.connection.state)
                 self.loadBrainStatus()
                 self.loadModels()
+                self.loadHistory()
             } else {
                 self.status = .unavailable(services.connection.isConnected
                     ? reply["error"] as? String ?? "settings get failed" : "The voice host is starting.")
@@ -154,7 +190,28 @@ final class VoiceSettingsModel: ObservableObject {
         }
     }
 
-    /// `models status`: whether Kokoro is installed or downloading.
+    /// `history status`: where finished dictations are kept.
+    func loadHistory(completion: (() -> Void)? = nil) {
+        guard let services else { completion?(); return }
+        services.perform(.forward("history", ["action": "status"])) { [weak self] reply in
+            defer { completion?() }
+            guard let self, let history = HistoryStatus(reply), history != self.history else { return }
+            self.history = history
+        }
+    }
+
+    /// Saves the history setting whole (the host keeps no half of it): `mode` and sharing, each
+    /// defaulting to what is in effect now.
+    func setHistory(mode: String? = nil, shareWithSpeakFree: Bool? = nil) {
+        let current = history
+        let value: [String: Any] = [
+            "mode": mode ?? current?.mode ?? "off",
+            "shareWithSpeakFree": shareWithSpeakFree ?? current?.shareWithSpeakFree ?? false,
+        ]
+        set("history", value) { [weak self] in self?.loadHistory() }
+    }
+
+    /// `models status`: whether the speech model and Kokoro are installed or downloading.
     func loadModels(completion: (() -> Void)? = nil) {
         guard let services else { completion?(); return }
         services.perform(.forward("models", ["action": "status"])) { [weak self] reply in
@@ -166,13 +223,18 @@ final class VoiceSettingsModel: ObservableObject {
 
     /// A `models status` reply or `models` event.
     func modelsChanged(_ reply: [String: Any]) {
-        guard let kokoro = ModelStatus(reply["kokoro"]), kokoro != self.kokoro else { return }
-        self.kokoro = kokoro
+        if let kokoro = ModelStatus(reply["kokoro"]), kokoro != self.kokoro { self.kokoro = kokoro }
+        if let parakeet = ModelStatus(reply["parakeet"]), parakeet != self.parakeet { self.parakeet = parakeet }
     }
 
     /// Downloads the Kokoro voice; progress arrives as `models` events.
-    func downloadKokoro() {
-        services?.perform(.forward("models", ["action": "download", "id": "kokoro"])) { [weak self] reply in
+    func downloadKokoro() { download("kokoro") }
+
+    /// Downloads the Parakeet speech model dictation needs; progress arrives as `models` events.
+    func downloadParakeet() { download("parakeet") }
+
+    private func download(_ id: String) {
+        services?.perform(.forward("models", ["action": "download", "id": id])) { [weak self] reply in
             guard let self else { return }
             if reply["ok"] as? Bool == true { self.modelsChanged(reply) } else { self.lastError = reply["error"] as? String ?? "download failed" }
         }
@@ -209,7 +271,7 @@ final class VoiceSettingsModel: ObservableObject {
     func double(_ path: String) -> Double { (value(path) as? NSNumber)?.doubleValue ?? 0 }
 
     /// Changes one value and sends the whole object.
-    func set(_ path: String, _ value: Any) {
+    func set(_ path: String, _ value: Any, then: (() -> Void)? = nil) {
         guard canEdit, let services else { return }
         let updated = VoiceSettingsJSON.setting(settings, path, to: value)
         services.sendSettings(updated) { [weak self] reply in
@@ -220,6 +282,7 @@ final class VoiceSettingsModel: ObservableObject {
             } else {
                 self.lastError = reply["error"] as? String ?? "settings set failed"
             }
+            then?()
         }
     }
 
@@ -257,6 +320,8 @@ final class VoiceSettingsModel: ObservableObject {
         if let brainProblem { d["brainProblem"] = brainProblem }
         if let workspace { d["workspace"] = workspace }
         if let kokoro { d["kokoro"] = ["installed": kokoro.installed, "downloading": kokoro.downloading] }
+        if let parakeet { d["parakeet"] = ["installed": parakeet.installed, "downloading": parakeet.downloading] }
+        if let history { d["history"] = ["mode": history.mode, "shareWithSpeakFree": history.shareWithSpeakFree] }
         if let lastError { d["lastError"] = lastError }
         return d
     }
@@ -277,6 +342,15 @@ struct VoiceTabView: View {
                             options: [("hold", "Hold to dictate"), ("toggle", "Tap to dictate")])
                 VoiceToggle(model: model, title: "Talk to the agent with fn", path: "agentGesture",
                             help: "Hold mode: tap then hold. Tap mode: double-tap.")
+                ParakeetRow(model: model)
+            }
+            Section("Dictation history") {
+                DictationHistoryRows(model: model)
+            }
+            Section("Text feed") {
+                VoiceToggle(model: model, title: "Send dictations to the text feed", path: "feedTranscripts",
+                            help: "Each dictation's text joins the history of apps that keep a text feed, such as Stash.")
+                VoiceToggle(model: model, title: "Send agent replies too", path: "feedAgentReplies")
             }
             Section("Wake word") {
                 VoiceToggle(model: model, title: "Listen for the wake word", path: "voice.wakeWordEnabled",
@@ -373,6 +447,61 @@ struct KokoroRow: View {
         }
         Text("Kokoro speaks on this Mac. Until it is downloaded, replies use the system voice.")
             .font(.caption).foregroundStyle(.secondary)
+    }
+}
+
+/// The Parakeet speech model dictation transcribes with: installed, downloading with
+/// progress, or a Download button. SpeakFree uses the same model, so either app's download serves both.
+struct ParakeetRow: View {
+    @ObservedObject var model: VoiceSettingsModel
+
+    var body: some View {
+        LabeledContent("Speech model") {
+            if let parakeet = model.parakeet {
+                if parakeet.installed {
+                    Label("Installed", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                } else if parakeet.downloading {
+                    ProgressView(value: parakeet.progress) { Text("Downloading \(Int(parakeet.progress * 100))%") }
+                        .frame(maxWidth: 200)
+                } else {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Button("Download (\(parakeet.size))") { model.downloadParakeet() }
+                        if let error = parakeet.error { Text(error).font(.caption).foregroundStyle(.red) }
+                    }
+                }
+            } else {
+                Text("Unknown").foregroundStyle(.secondary)
+            }
+        }
+        Text("Parakeet turns speech into text on this Mac; dictation needs it. SpeakFree shares the same download.")
+            .font(.caption).foregroundStyle(.secondary)
+    }
+}
+
+/// Keep dictation history (off, text only, text and audio), sharing it with SpeakFree when that
+/// is installed, and where it is kept.
+struct DictationHistoryRows: View {
+    @ObservedObject var model: VoiceSettingsModel
+
+    var body: some View {
+        Picker("Keep dictation history", selection: Binding(
+            get: { model.history?.mode ?? "off" }, set: { model.setHistory(mode: $0) })) {
+            ForEach(VoiceSettingsModel.historyModes, id: \.0) { Text($0.1).tag($0.0) }
+        }
+        if model.history?.speakFreeInstalled == true {
+            Toggle("Share history with SpeakFree", isOn: Binding(
+                get: { model.history?.shareWithSpeakFree ?? false }, set: { model.setHistory(shareWithSpeakFree: $0) }))
+        }
+        Text(historyNote).font(.caption).foregroundStyle(.secondary)
+    }
+
+    private var historyNote: String {
+        guard let history = model.history else { return "Where dictations are kept shows here once voice is on." }
+        let folder = (history.folder as NSString).abbreviatingWithTildeInPath
+        var note = history.mode == "off" ? "Nothing is kept." : "Kept in \(folder)."
+        if history.shareWithSpeakFree { note += " One history with SpeakFree, in its format." }
+        if history.isDefault, history.speakFreeInstalled { note += " Following SpeakFree's own setting until you choose." }
+        return note
     }
 }
 

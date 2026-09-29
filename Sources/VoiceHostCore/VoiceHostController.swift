@@ -20,6 +20,9 @@ import VoiceKit
 /// `brainProblem` says why the brain cannot take a turn (settings, the chosen runtime's tool, or
 /// the companion's own reason). A problem the user has to fix first refuses an agent take up
 /// front with that reason; one that passes on its own (starting, restarting) does not.
+///
+/// Each finished take's words go to MacHUD's text feed (`feedTranscripts`), and each finished
+/// agent reply too with `feedAgentReplies`; the history setting is handed to the dictation.
 @MainActor
 public final class VoiceHostController: VoiceHostActing {
     public private(set) var state = VoiceHostState() {
@@ -66,6 +69,7 @@ public final class VoiceHostController: VoiceHostActing {
     private let wake: WakeDriving?
     private let brainStateRoot: URL
     private let sessions: SessionOpening?
+    private let feed: TextFeeding?
     private let detectRuntimes: (BrainSettings) -> [BrainRuntimeDetection]
     private let sessionKeyOf: (AgentSessionSnapshot) -> String?
     /// The brain's workspace while the settings name none.
@@ -138,12 +142,13 @@ public final class VoiceHostController: VoiceHostActing {
     ///   - wake: nil without a microphone for it.
     ///   - brainStateRoot: the folder per-workspace brain state directories go under.
     ///   - sessions: MacHUD's session broker; nil leaves `openSession` unavailable.
+    ///   - feed: MacHUD's text-feed broker; nil sends nothing.
     ///   - detectRuntimes: which runtimes are installed, for the settings given.
     ///   - sessionKeyOf: a snapshot's session key.
     ///   - homeDirectory: the brain's workspace while `brain.workspacePath` is empty.
     init(settings: VoiceHostSettings, dictation: DictationDriving, keys: VoiceKeySource?,
          brain: BrainDriving?, speaker: ReplySpeaking?, wake: WakeDriving?, brainStateRoot: URL,
-         sessions: SessionOpening? = nil,
+         sessions: SessionOpening? = nil, feed: TextFeeding? = nil,
          detectRuntimes: @escaping (BrainSettings) -> [BrainRuntimeDetection] = { BrainRuntimes.detect($0) },
          sessionKeyOf: @escaping (AgentSessionSnapshot) -> String? = { $0.sessionKey },
          homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
@@ -157,6 +162,7 @@ public final class VoiceHostController: VoiceHostActing {
         self.wake = wake
         self.brainStateRoot = brainStateRoot
         self.sessions = sessions
+        self.feed = feed
         self.detectRuntimes = detectRuntimes
         self.sessionKeyOf = sessionKeyOf
         self.homeDirectory = homeDirectory
@@ -190,9 +196,10 @@ public final class VoiceHostController: VoiceHostActing {
         apply(settings)
     }
 
-    /// Applies new settings: keys, wake word, brain and voice follow at once.
+    /// Applies new settings: keys, wake word, brain, voice and history follow at once.
     func apply(_ settings: VoiceHostSettings) {
         self.settings = settings
+        dictation.setHistory(settings.history)
         if appliedVoice != settings.voice {
             appliedVoice = settings.voice
             speaker?.configure(settings.voice)
@@ -449,10 +456,11 @@ public final class VoiceHostController: VoiceHostActing {
             next.inputLevel = 0
             state = next
             refreshWake()
-        case .finished(let text, let destination):
+        case .finished(let text, let destination, let transcript):
             let notice = isCurrent ? take?.pastedNotice : pendingNotice
             pendingNotice = nil
             endCapture(ifCurrent: isCurrent)
+            if settings.feedTranscripts { sendToFeed(transcript, source: Self.dictationSource) }
             if destination == .caller {
                 submit(text, isLatest: isLatest)
             } else if isLatest {
@@ -583,6 +591,9 @@ public final class VoiceHostController: VoiceHostActing {
         case "idle" where snapshot.turnId != nil:
             if turn.speaks { speaker?.finish() }
             self.turn = nil
+            if settings.feedAgentReplies {
+                sendToFeed(snapshot.output, source: Self.agentSource, title: next.card?.prompt)
+            }
             next.phase = turn.speaks && isSpeaking ? .speaking : .idle
         case "interrupted":
             speaker?.stop()
@@ -615,6 +626,18 @@ public final class VoiceHostController: VoiceHostActing {
                 self?.fail(error.localizedDescription)
             }
         }
+    }
+
+    // MARK: - Text feed
+
+    static let dictationSource = "Dictation"
+    static let agentSource = "Agent"
+
+    /// Hands `text` to MacHUD's text feed; empty text is not sent.
+    private func sendToFeed(_ text: String, source: String, title: String? = nil) {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let feed else { return }
+        feed.add(text: text, source: source, title: title)
     }
 
     // MARK: - Speech

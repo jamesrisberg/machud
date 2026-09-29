@@ -14,7 +14,7 @@ enum VoiceCommand: Equatable {
     /// The actions `action name=` takes (the host's `VoiceHostAction`s).
     static let actions = ["click", "ask", "dictate", "stop", "cancel", "approve", "deny", "dismiss", "mute", "unmute",
                           "open-session", "say"]
-    static let subVerbs = ["state", "status", "hello", "action", "settings", "brain", "models", "secret"]
+    static let subVerbs = ["state", "status", "hello", "action", "settings", "brain", "models", "history", "secret"]
 
     struct Invalid: Error, CustomStringConvertible {
         let description: String
@@ -40,10 +40,12 @@ enum VoiceCommand: Equatable {
             return try brain(args)
         case "models":
             return try models(args)
+        case "history":
+            return try history(args)
         case "secret":
             return try secret(args)
         default:
-            throw Invalid("voice takes state, status, action, settings, brain, models or secret, not \(sub)")
+            throw Invalid("voice takes state, status, action, settings, brain, models, history or secret, not \(sub)")
         }
     }
 
@@ -96,7 +98,15 @@ enum VoiceCommand: Equatable {
         return .forward("brain", ["action": "status"])
     }
 
-    /// `models status` and `models download id=kokoro`: the host's downloadable models.
+    /// `history status` (the only one): the host's `history action=status`.
+    private static func history(_ args: [String: String]) throws -> VoiceCommand {
+        let inline = args["action"].flatMap { $0 == "1" ? nil : $0 }
+        let op = inline ?? (args["status"] != nil ? "status" : nil) ?? "status"
+        guard op == "status" else { throw Invalid("voice history takes status, not \(op)") }
+        return .forward("history", ["action": "status"])
+    }
+
+    /// `models status` and `models download id=kokoro|parakeet`: the host's downloadable models.
     private static func models(_ args: [String: String]) throws -> VoiceCommand {
         let inline = args["action"].flatMap { $0 == "1" ? nil : $0 }
         let op = inline ?? ["download", "status"].first { args[$0] != nil } ?? "status"
@@ -104,7 +114,7 @@ enum VoiceCommand: Equatable {
         case "status":
             return .forward("models", ["action": "status"])
         case "download":
-            guard let id = args["id"], !id.isEmpty else { throw Invalid("voice models download needs id= (kokoro)") }
+            guard let id = args["id"], !id.isEmpty else { throw Invalid("voice models download needs id= (kokoro or parakeet)") }
             return .forward("models", ["action": "download", "id": id])
         default:
             throw Invalid("voice models takes status or download, not \(op)")
@@ -139,6 +149,16 @@ enum VoiceSettingsJSON {
         var copy = object
         copy[key] = keys.count == 1 ? value : set(object[key] as? [String: Any] ?? [:], keys.dropFirst(), value)
         return copy
+    }
+
+    /// `settings` with `history` set to what `history status` says the default rule resolves to
+    /// (`mode`, `shareWithSpeakFree`); unchanged when it already has one or the status failed.
+    static func seedingHistory(_ settings: [String: Any], from status: [String: Any]) -> [String: Any] {
+        guard settings["history"] == nil, status["ok"] as? Bool == true, let mode = status["mode"] as? String
+        else { return settings }
+        var out = settings
+        out["history"] = ["mode": mode, "shareWithSpeakFree": status["shareWithSpeakFree"] as? Bool ?? false]
+        return out
     }
 
     /// `pairs` applied to `base`, each value converted to the type already stored at its path.

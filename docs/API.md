@@ -486,8 +486,10 @@ checklist stays beside the card in every section, updating in place. The section
 - **permissions**: Accessibility and Microphone, live status, buttons that ask macOS or open
   System Settings. Done once both are granted.
 - **voice**: on/off, fn key hold or tap mode with the gestures explained, the agent gesture,
-  and a "try it" area that follows the voice host's `subscribe` stream and has a text box
-  dictation pastes into.
+  the Parakeet speech model (installed, or Download with progress, `models id=parakeet`), the
+  dictation history choice (Off, Text only, Text and audio; Share history with SpeakFree while
+  it is installed; `history status`), and a "try it" area that follows the voice host's
+  `subscribe` stream and has a text box dictation pastes into.
 - **brain**: the runtimes with what `brain status` detected (mclaude offers to install
   MechaHUD, which shows the same session); the workspace folder, the home folder unless one is
   chosen (Change…, Use Home); spoken replies on/off, the reply voice, **Test voice** (`action
@@ -519,7 +521,7 @@ Voice and Brain tabs do.
 
 | Command | Args | Effect |
 | --- | --- | --- |
-| `onboarding` / `onboarding status` | | `visible`, `record` (`{status: inProgress\|completed\|skipped, step, updatedAt, sections {<section>: done\|skipped}, loadout}` or null), `steps[]`, `step`, `compact` (`arrange`, `practice` or null), `sections {<section>: todo\|done\|skipped}`, `permissions {accessibility, microphone}`, `voice {status, on, keyMode, phase, connected}`, `brain {ready, enabled, runtime, workspace, workspaceIsDefault, replies {speak, voice, kokoro?}, problem?, runtimes[]?, statusError?}`, `apps[] {id, state}`, `toolDock {enabled, position, screen}`, `loadout {name, screen, regions[]}` or null, `radial {hotkey, target, applied?}` |
+| `onboarding` / `onboarding status` | | `visible`, `record` (`{status: inProgress\|completed\|skipped, step, updatedAt, sections {<section>: done\|skipped}, loadout}` or null), `steps[]`, `step`, `compact` (`arrange`, `practice` or null), `sections {<section>: todo\|done\|skipped}`, `permissions {accessibility, microphone}`, `voice {status, on, keyMode, phase, connected, speechModel, history?}`, `brain {ready, enabled, runtime, workspace, workspaceIsDefault, replies {speak, voice, kokoro?}, problem?, runtimes[]?, statusError?}`, `apps[] {id, state}`, `toolDock {enabled, position, screen}`, `loadout {name, screen, regions[]}` or null, `radial {hotkey, target, applied?}` |
 | `onboarding show` | `step=welcome\|permissions\|voice\|brain\|apps\|tooldock\|loadout\|radial\|done` | shows it at `step`, else where it was left (the start once finished or skipped) |
 | `onboarding hide` | | closes it to finish later |
 | `onboarding next` / `back` | | moves while it is showing; `next` marks the section as the button does (on the welcome page it goes to the first section not done, on the last step it finishes) |
@@ -549,13 +551,17 @@ see Running several instances).
 | `voice status` | | MacHUD's view of the process: `status` (`running`, `restarting`, `disabled`, `stopped`, `failed`, `notInstalled`), `pid` while running, `socket`, `connected`, `muted` once connected, `error` (why it gave up) when `failed` |
 | `voice action` | `name=` `click`, `ask`, `dictate`, `stop`, `cancel`, `approve`, `deny`, `dismiss`, `mute`, `unmute`, `open-session`, `say`; `id=` for `approve`/`deny`; `text=` for `say` | performs it (`machud voice action mute` works too) |
 | `voice brain status` | | the voice host's `brain status` (below): whether the brain can take a turn, why not, the workspace and the runtimes found |
-| `voice models` | `status` (default) / `download id=kokoro` | the voice host's `models` (below): whether the Kokoro reply voice is installed or downloading, or start its download |
+| `voice models` | `status` (default) / `download id=kokoro\|parakeet` | the voice host's `models` (below): whether the Parakeet speech model and the Kokoro reply voice are installed or downloading, or start a download |
+| `voice history` | `status` (default) | the voice host's `history status` (below): where finished dictations are kept |
 | `voice settings get` | | `settings`: the voice host's settings object |
-| `voice settings set` | `settings=<JSON object>`, or dotted `key=value` pairs | `settings=` replaces the whole object. `key=value` pairs (`enabled=false`, `voice.speakReplies=true`, `brain.runtime=claude`) are applied to the current settings, each converted to the type already stored, and the whole object is sent back; an unknown key is an error. Turning `enabled` off stops the voice host; on starts it |
+| `voice settings set` | `settings=<JSON object>`, or dotted `key=value` pairs | `settings=` replaces the whole object. `key=value` pairs (`enabled=false`, `voice.speakReplies=true`, `brain.runtime=claude`) are applied to the current settings, each converted to the type already stored, and the whole object is sent back; an unknown key is an error. A `history.` key while no `history` is saved starts from what `history status` resolves to. Turning `enabled` off stops the voice host; on starts it |
 | `voice secret` | `set name=grok [value=…]` / `clear name=grok` | stores or removes the Grok API key in the Keychain; the key is never returned. Without `value=`, `machud voice secret set name=grok` reads the key from stdin (without echo at a terminal): prefer that, so the key stays out of the shell history and the process list |
 
 When the voice host is not answering, `voice` replies `ok: false` with why (`status` as above).
-The settings window's Voice tab (on/off, fn key mode, the agent gesture, wake word, phrase and
+The settings window's Voice tab (on/off, fn key mode, the agent gesture, the Parakeet speech
+model's Download button and progress, dictation history (Off, Text only, Text and audio; Share
+history with SpeakFree while SpeakFree is installed; where it is kept), the text feed toggles,
+wake word, phrase and
 sensitivity, reply voice, spoken replies, Test Voice (`action say`), the Kokoro voice's
 Download button and progress (`models`), Grok key) and Brain tab (why the brain cannot take a
 turn, or Ready; on/off; runtime, listing mclaude once it is installed and marking runtimes not
@@ -573,17 +579,37 @@ HUDKit's JSON-lines socket, one request per connection, served by `MacHUDVoice` 
 | --- | --- | --- |
 | `hello` | | `name`, `version` (the enclosing MacHUD's), `pid` |
 | `state` | | `state`: the host's state (below) |
-| `subscribe` | `events=state,models` (optional) | keeps the connection open and pushes `{"event": "state", "state": {…}}` on every change (many times a second while listening) and `{"event": "models", "kokoro": {…}}` as a model's status changes (its download progress) |
+| `subscribe` | `events=state,models` (optional) | keeps the connection open and pushes `{"event": "state", "state": {…}}` on every change (many times a second while listening) and `{"event": "models", "kokoro": {…}, "parakeet": {…}}` as a model's status changes (its download progress) |
 | `settings` | `action=get` | `settings`: the whole settings object |
 | `settings` | `action=set settings=<JSON object>` | replaces the whole object (decoded leniently: missing or invalid keys take their defaults), saves `voice.json`, applies it and returns the stored `settings` |
 | `action` | `name=<click\|ask\|dictate\|stop\|cancel\|approve\|deny\|dismiss\|mute\|unmute>`, `id=` for `approve`/`deny` | performs it; returns `state` |
 | `action` | `name=say text=<text>` | speaks `text` with the configured reply voice, whether or not `voice.speakReplies` is on (previews in settings and onboarding), replacing anything being said; `{ok, state}`, or `{ok: false, error}` without `text`, while a take is recording, or without a voice. Silent under `MACHUD_VOICE_NO_SPEECH=1` |
 | `action` | `name=open-session` | asks MacHUD to show the brain's current session (`sessions open id=<sessionKey>` on MacHUD's control socket, `$MACHUD_SOCKET` else `/tmp/machud-<uid>.sock`); replies once MacHUD has, `{ok, app, state}`, or `{ok: false, error}` (also shown briefly under the orb) |
 | `brain` | `action=status` (or `brain status`) | `{ok, available, problem?, workspace, workspaceDefault, runtime, runtimes[]}`: `workspace` is the folder the agent works in, the home folder while `brain.workspacePath` is empty (`workspaceDefault` true; the setting itself stays empty until the user chooses one); `runtime` is the one chosen; each of `codex`, `claude`, `hermes`, `mclaude` is `{id, name, installed, path?}`, plus `apiServer` (whether `~/.hermes/.env` turns Hermes' API server on) for hermes. Tools are looked up again on each call; mclaude's readiness (tmux and mechaclaude's other prerequisites) is MechaHUD's `sessions` reply (`canStart`/`problem`/`fix`), not this one |
-| `models` | `action=status` (or `models status`) | `{ok, kokoro: {installed, downloading, progress, bytes, error?}}`: `progress` is 0…1 (1 once installed), `bytes` the whole download's size, `error` why the last download failed |
+| `models` | `action=status` (or `models status`) | `{ok, kokoro: {…}, parakeet: {…}}`, each `{installed, downloading, progress, bytes, id?, error?}`: `progress` is 0…1 (1 once installed), `bytes` the whole download's size (Parakeet's is an estimate until its download reports the real size), `error` why the last download failed. `parakeet.id` is the speech model dictation uses (`parakeet-tdt-0.6b-v2`, English, or `-v3`, multilingual), else the one a download fetches. Parakeet is installed when either model is complete in FluidAudio's cache (`~/Library/Application Support/FluidAudio/Models`), the folder SpeakFree uses, so either app's download serves both; it is read from disk on each call |
 | `models` | `action=download id=kokoro` | starts downloading the Kokoro reply voice into `~/Library/Application Support/MacHUD/Voice/Models` (unless it is installed or already downloading) and returns the status; each file is checked against its pinned size and SHA-256 before it is installed. Progress arrives through `models status` and `models` events; the next reply uses Kokoro once it is installed |
+| `models` | `action=download id=parakeet` | downloads SpeakFree's default Parakeet model (English) through SpeakFreeLib's `ParakeetModelManager`, as SpeakFree does: the large files with byte progress, then FluidAudio fetches the rest and compiles it for this Mac. Returns the status; progress as above. Dictation uses it from the next take, without a restart. Without a speech model a dictation fails with "Speech model not installed" |
+| `history` | `action=status` (or `history status`) | `{ok, mode, shareWithSpeakFree, speakFreeInstalled, folder, default}`: the `history` setting as it resolves on this Mac now. `mode` is `off`, `text` or `textAndAudio`; `shareWithSpeakFree` is true only while SpeakFree is installed; `folder` is where takes are kept (or would be); `default` is true while no setting is saved |
 | `secret` | `action=set name=grok value=…` / `action=clear name=grok` | writes the Keychain; never returns a value |
 | `quit` | | exits after replying |
+
+The settings object's `history` is `{mode: "off"|"text"|"textAndAudio", shareWithSpeakFree}`.
+While it is absent the history follows SpeakFree when SpeakFree is installed (its bundle id
+`com.definitelyreal.speakfree` is known to LaunchServices, or its `config.json` exists): its own
+`saveRecordings` choice (on: text and audio; off: nothing), shared into its folder; otherwise it is
+off. A kept take is filed in SpeakFree's `RecordingStore` layout
+(`recording-<yyyy-MM-dd-HHmmss>-<id>.wav` beside `.txt`, the text as typed; `.raw.txt`, the
+engine's words; `.meta.json`), so SpeakFree's tools read either folder: MacHUD's own
+`~/Library/Application Support/MacHUD/Voice/History`, or SpeakFree's `recordings` when shared.
+`text` keeps the sidecars and deletes the recording. Nothing is pruned. A take is recorded in
+the host's scratch folder (`~/Library/Application Support/MacHUD/Voice/Dictation/recordings`),
+which is emptied at start and whenever no take is in flight.
+
+`feedTranscripts` (default true) sends each finished dictation's words (cursor or agent take,
+punctuation and glossary applied) to MacHUD's `feed add text=… source=Dictation` on MacHUD's
+control socket, which hands them to the apps that provide `text-feed` (Stash); `feedAgentReplies`
+(default false) sends each finished agent reply as `source=Agent` with the prompt as `title`.
+Sending never waits on MacHUD or fails a take.
 
 `state` is `{phase, inputLevel, partialTranscript, card?, hiddenForFullScreen, brainAvailable,
 brainProblem?, sessionKey?, sessionProvider?, wakeListening, muted}`. `brainAvailable` is true
@@ -610,8 +636,10 @@ file), `MACHUD_NO_HOTKEYS` (no fn key tap), `MACHUD_VOICE_NO_MIC=1` (simulated c
 microphone is never opened), `MACHUD_VOICE_NO_BRAIN=1` (the brain never starts),
 `MACHUD_VOICE_HEADLESS=1` (no orb on screen), `MACHUD_VOICE_NO_SPEECH=1` (replies and `say` make
 no sound), `MACHUD_VOICE_MODELS_DIR` (where downloaded models are kept),
+`MACHUD_VOICE_HISTORY_DIR` (MacHUD's own history folder), `SPEAKFREE_CONFIG_DIR` (SpeakFree's
+config folder, for its `saveRecordings` and a shared history),
 `MACHUD_VOICE_KEYCHAIN_SERVICE` (the Keychain service for secrets) and `MACHUD_SOCKET` (MacHUD's
-control socket, for `open-session`).
+control socket, for `open-session` and `feed add`).
 
 ## Lifecycle
 
@@ -665,8 +693,9 @@ Its voice host listens on `$MACHUD_VOICE_SOCKET`, else `<MACHUD_SOCKET>-voice.so
 `machud-voice.sock` beside `MACHUD_CONFIG`), never the real one's, and inherits the isolation
 variables. MacHUD also starts it with `MACHUD_VOICE_NO_MIC=1`, `MACHUD_VOICE_NO_BRAIN=1`,
 `MACHUD_VOICE_HEADLESS=1` and `MACHUD_VOICE_NO_SPEECH=1` (no microphone, no brain, no orb, no
-sound) and `MACHUD_VOICE_MODELS_DIR=<voice socket without its extension>-models` (never the real
-models folder) unless `MACHUD_VOICE_LIVE=1`, and
+sound), `MACHUD_VOICE_MODELS_DIR=<voice socket without its extension>-models` (never the real
+models folder) and `MACHUD_VOICE_HISTORY_DIR=<voice socket without its extension>-history`
+unless `MACHUD_VOICE_LIVE=1`, and
 with `MACHUD_VOICE_KEYCHAIN_SERVICE=com.jrisberg.machud.voice.isolated` unless that variable is
 already set, so a test instance never touches the real Grok key.
 
