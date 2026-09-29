@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-09-29T11:26:51Z",
+  "updatedAt": "2026-09-29T11:27:44Z",
   "hudkit": "0.2.0",
   "apps": [
     {
@@ -73,12 +73,12 @@
       "name": "serversHUD",
       "kind": "hover",
       "summary": "See and kill your local dev servers",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "minOS": "14.0",
-      "download": "https://github.com/jamesrisberg/servershud/releases/download/v0.1.0/serversHUD-0.1.0.zip",
-      "sha256": "370baf85a99a974d2ca67342b275b5de5ec45747ae212d65f753a8a948bad3ff",
-      "size": 1633533,
-      "publishedAt": "2026-09-27T15:49:13Z",
+      "download": "https://github.com/jamesrisberg/servershud/releases/download/v0.2.0/serversHUD-0.2.0.zip",
+      "sha256": "4844e1bd9bab08864d73390729743336bd2ecd15bfca22af433b15dba977c87e",
+      "size": 1676624,
+      "publishedAt": "2026-09-29T11:27:44Z",
       "icon": "https://jamesrisberg.github.io/machud/icons/servershud.png",
       "homepage": "https://github.com/jamesrisberg/servershud",
       "bundled": true
