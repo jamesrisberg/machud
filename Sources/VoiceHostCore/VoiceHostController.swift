@@ -925,7 +925,8 @@ public final class VoiceHostController: VoiceHostActing {
         guard key != nil, state.sessionProvider == nil, let sessions else { return }
         providerLookup = Task { [weak self] in
             let name = await sessions.providerName()
-            guard let self, let name, state.sessionKey != nil else { return }
+            // An open that answered meanwhile named the provider already; it is the fresher answer.
+            guard let self, let name, state.sessionKey != nil, state.sessionProvider == nil else { return }
             state.sessionProvider = name
         }
     }
