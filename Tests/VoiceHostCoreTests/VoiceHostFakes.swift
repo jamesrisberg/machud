@@ -217,7 +217,6 @@ enum FakeRuntimes {
                 let installed = !missing.contains(id)
                 return BrainRuntimeDetection(id: id, name: BrainRuntimes.name(for: id), installed: installed,
                                              path: installed ? "/fake/bin/\(id)" : nil,
-                                             tmuxPath: id == "mclaude" ? "/fake/bin/tmux" : nil,
                                              apiServerEnabled: id == "hermes" ? true : nil)
             }
         }

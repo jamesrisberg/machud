@@ -9,19 +9,15 @@ public struct BrainRuntimeDetection: Equatable, Sendable {
     public var installed: Bool
     /// The executable found (or the override given), nil when none is.
     public var path: String?
-    /// mclaude only: `tmux`, which mechaclaude runs detached sessions in. Reported, not required
-    /// here: mechaclaude and MechaHUD own tmux readiness.
-    public var tmuxPath: String?
     /// Hermes only: `~/.hermes/.env` turns on the API server the companion talks to.
     public var apiServerEnabled: Bool?
 
-    public init(id: String, name: String, installed: Bool, path: String? = nil, tmuxPath: String? = nil,
+    public init(id: String, name: String, installed: Bool, path: String? = nil,
                 apiServerEnabled: Bool? = nil) {
         self.id = id
         self.name = name
         self.installed = installed
         self.path = path
-        self.tmuxPath = tmuxPath
         self.apiServerEnabled = apiServerEnabled
     }
 
@@ -29,7 +25,6 @@ public struct BrainRuntimeDetection: Equatable, Sendable {
     var json: [String: Any] {
         var entry: [String: Any] = ["id": id, "name": name, "installed": installed]
         if let path { entry["path"] = path }
-        if id == BrainRuntimes.mclaude { entry["tmux"] = tmuxPath ?? NSNull() }
         if let apiServerEnabled { entry["apiServer"] = apiServerEnabled }
         return entry
     }
@@ -58,9 +53,8 @@ public enum BrainRuntimes {
         -> [BrainRuntimeDetection] {
         ids.map { id in
             if id == mclaude {
-                let path = locator.locate("mclaude", override: BrainSettingsFields.string(brain, "mclaude.executablePath"))
-                return BrainRuntimeDetection(id: id, name: name(for: id), installed: path != nil, path: path,
-                                             tmuxPath: locator.locate("tmux", override: BrainSettingsFields.string(brain, "mclaude.tmuxPath")))
+                let path = locator.locate("mclaude", override: brain.mclaude.executablePath)
+                return BrainRuntimeDetection(id: id, name: name(for: id), installed: path != nil, path: path)
             }
             guard let runtime = AgentRuntime(rawValue: id) else {
                 return BrainRuntimeDetection(id: id, name: name(for: id), installed: false)
@@ -90,30 +84,5 @@ public enum BrainRuntimes {
             return nil
         }
         return detection.installed ? nil : "\(detection.name) is not installed."
-    }
-}
-
-/// Reads fields of BrainKit values by their encoded names, for fields this build's BrainKit may
-/// not declare yet (the mclaude runtime's options, a snapshot's `sessionKey`): absent reads as
-/// empty or nil, so the host works with either BrainKit.
-enum BrainSettingsFields {
-    /// The string at a dotted path of `brain`'s JSON form, else "".
-    static func string(_ brain: BrainSettings, _ path: String) -> String {
-        guard let data = try? JSONEncoder().encode(brain),
-              var node = try? JSONSerialization.jsonObject(with: data) else { return "" }
-        for key in path.split(separator: ".") {
-            guard let object = node as? [String: Any], let next = object[String(key)] else { return "" }
-            node = next
-        }
-        return node as? String ?? ""
-    }
-
-    /// A snapshot's `sessionKey`: the external session the runtime drives, when it has one.
-    static func sessionKey(_ snapshot: Any) -> String? {
-        for child in Mirror(reflecting: snapshot).children where child.label == "sessionKey" {
-            guard let key = child.value as? String, !key.isEmpty else { return nil }
-            return key
-        }
-        return nil
     }
 }
