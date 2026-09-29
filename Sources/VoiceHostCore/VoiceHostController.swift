@@ -207,7 +207,7 @@ public final class VoiceHostController: VoiceHostActing {
         brain?.onSnapshot = { [weak self] in self?.handle($0) }
         brain?.onStopped = { [weak self] in
             self?.brainLost()
-            // Each (re)start describes MacHUD as it is now; a changed description restarts it once more.
+            // A restart describes MacHUD as it is now; a changed description restarts it once more.
             self?.loadHostContext()
         }
         speaker?.onFinished = { [weak self] in
@@ -822,8 +822,9 @@ public final class VoiceHostController: VoiceHostActing {
     private func loadHostContext() {
         guard brainEnabled, givesMacHUDTools, hostContextLoad == nil else { return }
         let status = machudStatus
+        let settle = hostContextSettle
         hostContextLoad = Task { [weak self] in
-            let snapshot = await status?.snapshot()
+            let snapshot = await Self.settledSnapshot(status, settle)
             guard let self else { return }
             hostContextLoad = nil
             let context = MacHUDHostContext.build(snapshot: snapshot)
@@ -831,6 +832,30 @@ public final class VoiceHostController: VoiceHostActing {
             hostContext = context
             refreshBrain()
         }
+    }
+
+    /// How MacHUD's description is read: again every `interval` until two reads agree, at most
+    /// `reads` times. At MacHUD's launch its apps announce themselves over a few seconds; the
+    /// brain starts on the settled list, so its first launch carries the final context and no
+    /// restart (for mclaude, a relaunch of the session) follows.
+    struct HostContextSettle: Sendable {
+        var interval: TimeInterval = 1.5
+        var reads = 8
+    }
+
+    var hostContextSettle = HostContextSettle()
+
+    private nonisolated static func settledSnapshot(_ status: MacHUDStatusReading?,
+                                                    _ settle: HostContextSettle) async -> MacHUDSnapshot? {
+        guard let status else { return nil }
+        var last = await status.snapshot()
+        for _ in 1..<max(settle.reads, 1) {
+            try? await Task.sleep(nanoseconds: UInt64(settle.interval * 1_000_000_000))
+            let next = await status.snapshot()
+            if next == last { break }
+            last = next
+        }
+        return last
     }
 
     /// The tool servers the connected companion reports (whether its runtime gives them to the

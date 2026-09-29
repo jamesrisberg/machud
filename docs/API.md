@@ -616,11 +616,9 @@ the host's scratch folder (`~/Library/Application Support/MacHUD/Voice/Dictation
 which is emptied at start and whenever no take is in flight.
 
 The brain runs on the runtime in `brain.runtime`. A change of runtime alone reaches the running
-companion without restarting it (BrainKit's `POST /v1/runtime`, sent about a second after the
-change, once BrainKit has applied it); whenever the connected companion reports another runtime
-than the one chosen (a change in settings, or a companion started on another one), the voice host
-asks it to switch. The companion refuses a switch during a turn, so it is asked again once the
-turn ends. Any other brain setting restarts the companion, which then starts on the chosen runtime.
+companion without restarting it: BrainKit switches it once no turn is running, and checks each
+time the companion comes up that it runs the chosen runtime. Any other brain setting restarts the
+companion, which then starts on the chosen runtime.
 
 `brain.machudTools` (default true) gives the brain MacHUD's tool server, `machud-mcp` beside
 `MacHUDVoice` in `Contents/Helpers` (MCP over stdio, `MACHUD_SOCKET` set to MacHUD's control
@@ -628,8 +626,10 @@ socket), under the name `machud`, and a host context: markdown appended to the r
 instructions that says the agent is MacHUD's brain, to act on MacHUD only through those tools
 (not computer use, AppleScript or the `machud` CLI), and lists the installed HUD apps with their
 panels and the loadouts (read from MacHUD's `apps` and `loadouts`; at most 40 of each). The
-context is read before the brain first starts and again each time it (re)starts; a changed
-context restarts it once more. `brain.machudToolsRequireApproval` (default false) makes each
+context is read before the brain first starts, again every 1.5 s until two reads agree (at most
+8 reads), so the apps that announce themselves while MacHUD starts are in the first launch; it is
+read again the same way when a companion that was running restarts, and a changed context
+restarts it once more. `brain.machudToolsRequireApproval` (default false) makes each
 MacHUD tool call ask first, shown on the reply card like any other approval; off, MacHUD's tools
 run without asking and the agent's other actions keep the runtime's own approval policy. With
 `machud-mcp` missing, or the setting off, the brain runs with neither.

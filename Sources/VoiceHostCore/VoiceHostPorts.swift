@@ -84,7 +84,8 @@ enum BrainHealth: Equatable {
 protocol BrainDriving: AnyObject {
     var onHealthChanged: ((BrainHealth) -> Void)? { get set }
     var onSnapshot: ((AgentSessionSnapshot) -> Void)? { get set }
-    /// The companion stopped or is restarting: any turn it was running is gone.
+    /// The companion that was running stopped or is restarting: any turn it was running is
+    /// gone. A first start, or a start that never came up, is not a stop.
     var onStopped: (() -> Void)? { get set }
     /// Run the companion as configured; nil stops it. A change of runtime alone reaches the
     /// running companion without a restart.
