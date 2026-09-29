@@ -35,7 +35,7 @@ final class OrbView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     /// The shape's rect in this view: centered horizontally, `topOffset` below the top edge
-    /// plus the resting float, scaled about its center by the pulse.
+    /// plus the resting float, scaled about its center by the pulse and the armed swell.
     func shapeRect() -> (rect: CGRect, shape: OrbShape) {
         let shape = OrbLayout.shape(stretch: animator.stretch, geometry: geometry)
         var size = shape.size
@@ -46,9 +46,25 @@ final class OrbView: NSView {
         return (CGRect(x: center.x - size.width / 2, y: center.y - size.height / 2, width: size.width, height: size.height), shape)
     }
 
+    /// The pulse and the armed swell, which hand over to each other as an armed take commits
+    /// to the agent; together they stay within the room the window keeps for the pulse.
     private func pulseScale() -> CGFloat {
-        guard scene.motion == .pulse, !reduceMotion else { return 1 }
-        return 1 + OrbLayout.pulseMax * animator.level * (1 - animator.stretch)
+        guard !reduceMotion else { return 1 }
+        let round = 1 - animator.stretch
+        let pulse = scene.motion == .pulse ? OrbLayout.pulseMax * animator.level * round : 0
+        let swell = OrbLayout.armedSwell * animator.armed * round
+        return 1 + min(pulse + swell, OrbLayout.pulseMax)
+    }
+
+    /// How far the armed ring sits outside the orb at an input level.
+    static func armedRingReach(level: CGFloat) -> CGFloat { 1 + 1.6 * min(max(level, 0), 1) }
+
+    /// The orb's colors: the tint's, blended toward the armed look's neutral brightening by how
+    /// much of it applies, so the armed look fades in from the resting orb and hands over to the
+    /// committed tint without a jump.
+    private func palette() -> OrbPalette {
+        let base = OrbPalette.for(scene.tint == .armed ? .resting : scene.tint)
+        return base.blended(toward: .for(.armed), by: animator.armed)
     }
 
     // MARK: Drawing
@@ -59,7 +75,7 @@ final class OrbView: NSView {
         let scale = rect.width / max(shape.size.width, 1)
         let path = OrbLayout.path(in: rect, topRadius: shape.topRadius * scale, bottomRadius: shape.bottomRadius * scale)
         let t = animator.stretch
-        let palette = OrbPalette.for(scene.tint)
+        let palette = palette()
 
         ctx.saveGState()
         ctx.setAlpha(scene.muted && scene.form == .orb ? 0.55 : 1)
@@ -109,6 +125,10 @@ final class OrbView: NSView {
             ctx.strokePath()
         }
 
+        if animator.armed > 0.01, !reduceMotion, t < 1 {
+            drawArmedRing(ctx, rect: rect, color: palette.glow, fade: animator.armed * (1 - t) * (1 - t))
+        }
+
         switch scene.motion {
         case .spin: drawSpin(ctx, rect: rect, color: palette.glow)
         case .bars where t > 0.55: drawBars(ctx, rect: rect, alpha: (t - 0.55) / 0.45)
@@ -124,8 +144,21 @@ final class OrbView: NSView {
         case .breathe: return reduceMotion ? 0.6 : 0.45 + 0.35 * CGFloat(sin(animator.phase * 2.2))
         case .spin: return 0.35
         case .idle: return reduceMotion ? 0.3 : 0.16 + 0.3 * OrbLayout.breath(phase: animator.phase)
+        case .armed: return 0.3
         default: return scene.tint == .failed ? 0.8 : 0
         }
+    }
+
+    /// A soft ring just outside the armed orb whose reach and strength follow the input level.
+    private func drawArmedRing(_ ctx: CGContext, rect: CGRect, color: NSColor, fade: CGFloat) {
+        let level = animator.level
+        let ring = rect.insetBy(dx: -Self.armedRingReach(level: level), dy: -Self.armedRingReach(level: level))
+        ctx.saveGState()
+        ctx.setShadow(offset: .zero, blur: 3, color: color.withAlphaComponent(0.6 * fade).cgColor)
+        ctx.setStrokeColor(color.withAlphaComponent((0.38 + 0.5 * level) * fade).cgColor)
+        ctx.setLineWidth(1.25)
+        ctx.strokeEllipse(in: ring.insetBy(dx: 0.625, dy: 0.625))
+        ctx.restoreGState()
     }
 
     /// A short bright arc circling the rim: the working motion.
@@ -240,6 +273,8 @@ struct OrbPalette: Equatable {
         switch tint {
         case .resting: return OrbPalette(core: rgb(0.36, 0.37, 0.41), edge: rgb(0.07, 0.07, 0.09), glow: rgb(0.6, 0.6, 0.65))
         case .muted: return OrbPalette(core: rgb(0.22, 0.22, 0.23), edge: rgb(0.06, 0.06, 0.06), glow: rgb(0.4, 0.4, 0.4))
+        // The resting orb brightened, still neutral: no dictation red or agent cyan yet.
+        case .armed: return OrbPalette(core: rgb(0.66, 0.68, 0.73), edge: rgb(0.17, 0.18, 0.21), glow: rgb(0.88, 0.9, 0.95))
         case .dictation: return OrbPalette(core: rgb(0.2, 0.2, 0.2), edge: rgb(0, 0, 0), glow: rgb(1, 0.3, 0.25))
         case .agent: return OrbPalette(core: rgb(0.45, 0.93, 1.0), edge: rgb(0.02, 0.36, 0.5), glow: rgb(0.3, 0.85, 1.0))
         case .working: return OrbPalette(core: rgb(0.72, 0.6, 1.0), edge: rgb(0.2, 0.1, 0.45), glow: rgb(0.62, 0.48, 1.0))
@@ -247,5 +282,12 @@ struct OrbPalette: Equatable {
         case .speaking: return OrbPalette(core: rgb(0.6, 1.0, 0.85), edge: rgb(0.03, 0.4, 0.34), glow: rgb(0.35, 0.95, 0.75))
         case .failed: return OrbPalette(core: rgb(1.0, 0.45, 0.42), edge: rgb(0.5, 0.05, 0.07), glow: rgb(1.0, 0.25, 0.22))
         }
+    }
+
+    /// This palette moved `fraction` (0...1) of the way to `other`.
+    func blended(toward other: OrbPalette, by fraction: CGFloat) -> OrbPalette {
+        guard fraction > 0 else { return self }
+        func mix(_ a: NSColor, _ b: NSColor) -> NSColor { a.blended(withFraction: min(fraction, 1), of: b) ?? a }
+        return OrbPalette(core: mix(core, other.core), edge: mix(edge, other.edge), glow: mix(glow, other.glow))
     }
 }

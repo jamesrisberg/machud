@@ -27,6 +27,21 @@ final class OrbViewTests: XCTestCase {
         XCTAssertEqual(view.accessibilityValue() as? String, "Working")
     }
 
+    func testArmedSwellsExceptUnderReduceMotion() {
+        let view = orb()
+        let resting = view.shapeRect().rect
+        view.scene = OrbSceneTracker.map(.idle, muted: false, gesturePending: true)
+        var animator = OrbAnimator()
+        for _ in 0..<60 { animator.advance(dt: 1.0 / 60, scene: view.scene, level: 0, reduceMotion: false) }
+        view.animator = animator
+        XCTAssertGreaterThan(view.shapeRect().rect.width, resting.width)
+        // The swell and the ring stay inside the room the window keeps for the pulse.
+        XCTAssertLessThanOrEqual(view.shapeRect().rect.width + 2 * OrbView.armedRingReach(level: 1),
+                                 OrbLayout.orbDiameter + OrbLayout.pulseRoom(stretch: 0))
+        view.reduceMotion = true
+        XCTAssertEqual(view.shapeRect().rect.width, resting.width)
+    }
+
     func testOnlyTheShapeTakesTheMouse() {
         let view = orb()
         let container = NSView(frame: view.frame)
