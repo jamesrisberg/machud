@@ -32,8 +32,9 @@ apps that make up the rest of the HUD:
 
 **Download** MacHUD from <https://jamesrisberg.github.io/machud/>: the zip is signed and
 notarized, so unzip it, drag MacHUD to Applications and open it. It lives in the menu bar.
-The first launch opens a setup guide: permissions, voice, the agent brain, the HUD apps
-(bundled tools preselected) and a short tour; **Setup Guide…** in the menu opens it again.
+The first launch opens a setup guide over the desktop, a checklist that ticks off as you go:
+permissions, voice, the agent brain, the HUD apps (bundled tools preselected), the tool dock,
+a first loadout and practice with the radial menu; **Setup Guide…** in the menu opens it again.
 Later, **Get Apps…** in the menu (or `machud apps install <name>`) installs,
 updates and removes the others from the same catalog. Downloads are checked against the
 catalog's size and SHA-256 and must pass Gatekeeper; see

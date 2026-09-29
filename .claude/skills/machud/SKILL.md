@@ -136,7 +136,7 @@ machud orb show|hide                      # orbs are hidden while the tool dock 
   `machud settings schema`.
 - Shared settings window (a tab per app): `machud settings-window show tab=Sift`
   (`hide|toggle|state`, `activate=0` to not take focus).
-- Setup guide (full-screen onboarding): `machud onboarding status|show [step=brain]|hide|next|back|skip|reset`;
+- Setup guide (a checklist overlay: permissions, voice, brain, apps, tooldock, loadout, radial): `machud onboarding status|show [step=brain]|hide|next|back|skip|reset`;
   `machud onboarding snapshot dir=<folder>` renders every step to PNGs offscreen.
 
 ## Isolated instances (development and tests)
