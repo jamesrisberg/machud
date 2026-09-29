@@ -24,6 +24,9 @@ final class ExternalPanels {
     /// Called after an announce or forget changed what is registered, so the app pushes a
     /// `state` event and the tool dock rebuilds at once.
     var onAppsChanged: (() -> Void)?
+    /// false: `autoLaunch` apps are neither launched, relaunched nor placed (an isolated
+    /// instance; see `Env.autoApply`).
+    var autoLaunches = true
     /// Rescans when an app appears in, leaves or is replaced in a watched directory.
     private(set) var watcher: AppDirectoryWatcher?
     /// Puts an app's panel where its `apps.<id>.placement` says (wired to the loadout
@@ -195,7 +198,8 @@ final class ExternalPanels {
     var duplicatesJSON: [String: [String]] { duplicates.mapValues { $0.map(\.path) } }
 
     /// Registers `apps` (replacing any earlier set). Split from `rescan` for tests.
-    func install(_ apps: [ExternalApp], autoLaunch: Set<String>) {
+    func install(_ apps: [ExternalApp], autoLaunch configured: Set<String>) {
+        let autoLaunch = autoLaunches ? configured : []
         self.apps = apps
         let wanted = Set(apps.flatMap { app in app.manifest.panels.map { ExternalPanel.id(app: app.id, panel: $0.id) } })
         registry.unregister { panel in

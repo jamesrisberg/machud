@@ -30,6 +30,14 @@ enum ScreenFallback {
         case needsDesktops(screen: Int, count: Int)
     }
 
+    /// One request per display assignment of `loadout`, in order: its desktop is the
+    /// assignment's, else the lowest one its slots name.
+    static func requests(for loadout: Loadout) -> [Request] {
+        (loadout.screens ?? []).map {
+            Request(screen: $0.screen, space: $0.space ?? $0.slots.compactMap(\.space).min(), fallback: $0.fallback)
+        }
+    }
+
     /// Decide for every assignment in turn. Assignments whose display is
     /// attached keep their desktop and reserve it, so a redirected one lands
     /// somewhere nothing else is using.

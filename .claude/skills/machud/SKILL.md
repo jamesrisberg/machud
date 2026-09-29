@@ -58,7 +58,11 @@ Coordinates are Cocoa points (origin bottom-left).
 - A loadout captured on a now-unplugged display still applies: it is redirected to its
   `fallback`, else the main display. `apply`/`status` report `redirected[]`;
   `reason: needsDesktops` means the user must add desktops in Mission Control.
-- Open the visual editor for the user: `machud edit`.
+- Open the visual editor for the user: `machud edit` (`loadout=<name>` on that loadout,
+  `new=1` on a blank layout). Manage saved loadouts: `machud loadouts rename name=A to=B`,
+  `duplicate name=A [to=]`, `delete name=A` (also removes the hidden layouts captured for it),
+  `startup name=A` (no name clears). The settings window's Loadouts tab
+  (`machud settings-window show tab=loadouts`) shows them all with previews.
 
 To build a loadout by hand, edit `~/.config/machud/layouts.json` (`loadouts[]` with
 `slots[] {regionID, occupant}`, optional `screens[]`, `whenScreenMissing: desktop|skip`,
