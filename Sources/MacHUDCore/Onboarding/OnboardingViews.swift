@@ -347,7 +347,7 @@ struct VoiceStep: View {
                             Toggle(isOn: Binding(get: { model.voiceOn }, set: { model.setVoice(on: $0) })) {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("Voice on").font(.system(size: 14, weight: .semibold))
-                                    Text("The fn gestures, the orb under the camera and the wake word.")
+                                    Text("The fn gestures, the orb at the top of your screen and the wake word.")
                                         .font(.system(size: 11)).foregroundStyle(OnboardingStyle.secondary)
                                 }
                             }
@@ -678,7 +678,7 @@ struct TourStep: View {
             StepTitle(title: "A quick tour", subtitle: "Four things to know. Everything here is also in the menu bar menu.")
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
                 card("circle.fill", "The orb",
-                     "Sits under the camera. Click it to talk to the agent; its card shows replies and approvals. Right-click for Mute and Dismiss.",
+                     "Sits at the top of your screen. Click it to talk to the agent; its card shows replies and approvals. Right-click for Mute and Dismiss.",
                      keys: ["click"])
                 card("dock.rectangle", "Tool dock",
                      "A strip of your HUD apps at the screen edge. Click an icon to summon the app; drop files on it to hand them over.",
