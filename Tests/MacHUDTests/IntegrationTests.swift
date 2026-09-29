@@ -366,6 +366,19 @@ final class PlacementOnLaunchTests: XCTestCase {
         XCTAssertEqual(placed, [AppPlacement(edge: .left)])
     }
 
+    func testAutoLaunchOffLaunchesAndPlacesNothing() {
+        // An isolated instance (`Env.autoApply` false) never starts the user's apps.
+        config = AppsConfig(perApp: [id: AppEntryConfig(placement: AppPlacement(edge: .left))])
+        externals.autoLaunches = false
+        externals.install([app], autoLaunch: [id])
+        XCTAssertEqual(workspace.launches, [])
+        XCTAssertEqual(externals.supervisor.record(id)?.autoLaunch, false)
+        workspace.start(id)
+        clock.runQueued()
+        clock.runQueued()
+        XCTAssertTrue(placed.isEmpty)
+    }
+
     func testPlacementIsDroppedIfTheAppNeverListens() throws {
         config = AppsConfig(perApp: [id: AppEntryConfig(placement: AppPlacement(edge: .left))])
         connector.reachable = []

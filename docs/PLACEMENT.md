@@ -22,8 +22,8 @@ under the cursor.
 
 A loadout owns its layout. The status menu leads with **Loadouts**; each loadout has
 *Apply*, *Clear Others + Apply*, *Preview…*, *Edit Layout…* (the editor opens on that
-loadout's layout with the loadout selected), *Apply at Startup* and *Delete* (which also
-removes the hidden layouts captured for that loadout alone); then
+loadout's layout with the loadout selected), *Apply at Startup* and *Delete…* (which asks first and also removes the hidden
+layouts captured for that loadout alone, naming them); then
 *Preview Loadout…*, *Capture Current…* and *Save Current HUD as Loadout…*. The
 snap-layout picker and the raw layout editor / `layouts.json` items live under
 **Advanced**. The wheel's rings read *Apply* / *Clear + Apply* and loadout wedges show

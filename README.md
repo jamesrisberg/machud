@@ -370,6 +370,7 @@ MACHUD_SOCKET=/tmp/machud-try.sock scripts/machud quit
 | `MACHUD_DOCKS_FILE` | Where the tool dock publishes its frames |
 | `MACHUD_APP` | The binary the `machud` CLI runs |
 | `MACHUD_FIRST_RUN` | `1`: an isolated copy shows the onboarding at launch too |
+| `MACHUD_APPLY_STARTUP` | `1`: an isolated copy applies `startupLoadout` at launch, re-applies the active loadout when displays change, and launches the `apps.autoLaunch` siblings (with their placement), as the real one does |
 | `MACHUD_INSTALL_SKIP_GATEKEEPER` | `1`: installs skip the `spctl` check so a dev-signed zip installs. Test-only |
 | `MACHUD_VOICE_SOCKET` | The voice host's socket. An isolated copy without it uses `<MACHUD_SOCKET>-voice.sock` (else `machud-voice.sock` beside `MACHUD_CONFIG`) |
 | `MACHUD_VOICE_NO_MIC` | `1`: the voice host simulates capture and never opens the microphone |
@@ -388,7 +389,10 @@ The voice host inherits MacHUD's environment, so `MACHUD_CONFIG`, `MACHUD_NO_HOT
 (`com.jrisberg.machud.voice.isolated`, unless `MACHUD_VOICE_KEYCHAIN_SERVICE` is set).
 
 Setting `MACHUD_SOCKET` or `MACHUD_CONFIG` marks the instance isolated: it does not serve
-the contract socket or show permission prompts. Never `pkill MacHUD`: that
+the contract socket or show permission prompts, and it acts on windows and apps only when
+asked (no startup loadout, no re-apply on display changes, no `autoLaunch`). What it is
+asked to do still happens for real: `apply`, `capture`, `clear`, `park` and the rest move
+the user's own windows through Accessibility. Never `pkill MacHUD`: that
 kills the real one; quit an isolated copy through its own socket.
 
 ## Architecture

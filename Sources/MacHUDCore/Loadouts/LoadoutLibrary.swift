@@ -224,6 +224,15 @@ final class LoadoutLibrary {
         return result
     }
 
+    /// What to ask before deleting `name`: the question and, when it owns layouts, which
+    /// ones go with it. The settings tab and the status menu both ask this.
+    nonisolated static func deleteQuestion(_ name: String, ownedLayouts: [String]) -> (title: String, detail: String?) {
+        let title = "Delete “\(name)”?"
+        guard !ownedLayouts.isEmpty else { return (title, nil) }
+        let what = ownedLayouts.count == 1 ? "the layout" : "the \(ownedLayouts.count) layouts"
+        return (title, "Also removes \(what) captured for it: \(ownedLayouts.joined(separator: ", ")).")
+    }
+
     static let actions = ["list", "rename", "duplicate", "delete", "startup"]
 
     /// `loadouts [list]|rename name= to=|duplicate name= [to=]|delete name=|startup [name=]`.
