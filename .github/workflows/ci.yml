@@ -1,6 +1,6 @@
-# CI for a MacHUD app repo: installed as .github/workflows/ci.yml by hud-new-app.sh.
-# Package.swift depends on ../hudkit, so HUDKit is checked out next to the app. Works
-# unchanged in every app repo (the repo name comes from the event).
+# CI for a MacHUD app repo, from hudkit/scripts/hud-ci.yml. Package.swift depends on
+# ../hudkit (with its Kits) and ../speakfree (the voice host's dictation), so both are checked
+# out next to the app: SpeakFree at the fork's integration/machud branch.
 name: ci
 on:
   push:
@@ -16,6 +16,11 @@ jobs:
         with:
           repository: ${{ github.repository_owner }}/hudkit
           path: hudkit
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/speakfree
+          ref: integration/machud
+          path: speakfree
       - run: swift --version
       - run: swift test
         working-directory: ${{ github.event.repository.name }}
