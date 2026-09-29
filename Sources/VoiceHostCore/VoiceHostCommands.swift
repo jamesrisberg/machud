@@ -4,7 +4,7 @@ import VoiceKit
 
 /// The `machud-voice` socket's verbs: `hello`, `state`, `settings get|set settings=<json>`,
 /// `action name=<click|ask|dictate|stop|cancel|approve|deny|dismiss|mute|unmute|open-session> [id=]`,
-/// `action name=say text=`, `brain status`, `models status|download id=kokoro|parakeet`,
+/// `action name=say text=`, `brain status`, `models status|download id=kokoro|parakeet|<wake id>`,
 /// `history status`, `secret set|clear name=grok [value=]` (values are written, never read
 /// back) and `quit`.
 /// `subscribe` is `HUDSocketServer`'s own; `publish(_:on:)` feeds it `state` events and
@@ -61,20 +61,24 @@ final class VoiceHostCommands {
         server.publish("state", payload: ["state": jsonObject(state)])
     }
 
-    /// Pushes `{"event":"models","kokoro":{…},"parakeet":{…}}` to subscribers.
-    static func publishModels(_ models: [String: VoiceModelProviding], on server: HUDSocketServer) {
-        server.publish("models", payload: modelsPayload(models.mapValues(\.status)))
+    /// Pushes `{"event":"models","kokoro":{…},"parakeet":{…},"wake":[…]}` to subscribers.
+    static func publishModels(_ models: [String: VoiceModelProviding], wake: [WakePhraseModel],
+                              on server: HUDSocketServer) {
+        server.publish("models", payload: modelsPayload(models.mapValues(\.status), wake: wake))
     }
 
-    /// `{<id>: {installed, downloading, progress, bytes, id?, error?}}` for each model.
-    static func modelsPayload(_ statuses: [String: VoiceModelStatus]) -> [String: Any] {
-        statuses.mapValues { status in
+    /// `{<id>: {installed, downloading, progress, bytes, id?, error?}}` for each model, and
+    /// `wake`: the wake phrases there are models for, each with its model's state and licence.
+    static func modelsPayload(_ statuses: [String: VoiceModelStatus], wake: [WakePhraseModel] = []) -> [String: Any] {
+        var payload: [String: Any] = statuses.mapValues { status in
             var model: [String: Any] = ["installed": status.installed, "downloading": status.downloading,
                                         "progress": status.progress, "bytes": status.bytes]
             if let id = status.id { model["id"] = id }
             if let error = status.error { model["error"] = error }
             return model
         }
+        payload["wake"] = wake.map(\.json)
+        return payload
     }
 
     func handle(_ command: String, _ args: [String: String]) -> [String: Any] {
@@ -110,8 +114,10 @@ final class VoiceHostCommands {
         case "set":
             guard let text = args["settings"], let data = text.data(using: .utf8),
                   (try? JSONSerialization.jsonObject(with: data)) is [String: Any],
-                  let settings = try? JSONDecoder().decode(VoiceHostSettings.self, from: data)
+                  let decoded = try? JSONDecoder().decode(VoiceHostSettings.self, from: data)
             else { return ["ok": false, "error": "settings= must be a JSON object"] }
+            // Turning the wake word on with a phrase no model detects saves one that has a model.
+            let settings = controller.resolvingWakePhrase(decoded)
             do {
                 try store.save(settings)
             } catch {
@@ -184,23 +190,27 @@ final class VoiceHostCommands {
         return reply
     }
 
-    /// `models status` and `models download id=<kokoro|parakeet>`; both reply with every
-    /// model's status.
+    /// `models status` and `models download id=<kokoro|parakeet|wake id>`; both reply with
+    /// every model's status. A wake model is named by its id (`hey-jarvis`) or its manifest id.
     private func modelsCommand(_ args: [String: String]) -> [String: Any] {
-        guard !models.isEmpty else { return ["ok": false, "error": "models are not available in this voice host"] }
+        let wake = controller.wakeModels
+        guard !models.isEmpty || !wake.isEmpty else {
+            return ["ok": false, "error": "models are not available in this voice host"]
+        }
         switch args["action"] ?? args["_"] ?? "status" {
         case "status":
             break
         case "download":
-            let ids = Self.modelIDs.filter { models[$0] != nil }
-            guard let id = args["id"], let model = models[id] else {
+            let ids = Self.modelIDs.filter { models[$0] != nil } + wake.map(\.id)
+            let id = args["id"] ?? ""
+            guard let model = models[id] ?? wake.first(where: { $0.id == id || $0.manifestID == id })?.store else {
                 return ["ok": false, "error": "models download needs id=, one of \(ids.joined(separator: ", "))"]
             }
             if !model.status.installed, !model.status.downloading { model.download() }
         case let other:
             return ["ok": false, "error": "models takes status or download, not \(other)"]
         }
-        return ["ok": true].merging(Self.modelsPayload(models.mapValues(\.status))) { $1 }
+        return ["ok": true].merging(Self.modelsPayload(models.mapValues(\.status), wake: wake)) { $1 }
     }
 
     /// `history status`: where finished dictations are kept, as the setting resolves on this

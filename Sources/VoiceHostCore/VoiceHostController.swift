@@ -23,6 +23,10 @@ import VoiceKit
 ///
 /// Each finished take's words go to MacHUD's text feed (`feedTranscripts`), and each finished
 /// agent reply too with `feedAgentReplies`; the history setting is handed to the dictation.
+///
+/// The wake word listens only for a phrase whose model is installed (`wakeModels`). While it is
+/// on and cannot listen, `wakeProblem` says why, and turning it on shows that under the orb;
+/// a model installed later arms it at once (`wakeModelsChanged`).
 @MainActor
 public final class VoiceHostController: VoiceHostActing {
     public private(set) var state = VoiceHostState() {
@@ -59,6 +63,7 @@ public final class VoiceHostController: VoiceHostActing {
     static let noSession = "There is no agent session to open"
     static let takeRecording = "A take is recording"
     static let noSpeech = "Speech is not available"
+    static let wakeUnavailable = "The wake word needs the microphone, which this voice host does not use."
     /// Progress lines kept on the card.
     static let progressLimit = 4
 
@@ -67,6 +72,8 @@ public final class VoiceHostController: VoiceHostActing {
     private let brain: BrainDriving?
     private let speaker: ReplySpeaking?
     private let wake: WakeDriving?
+    /// The wake phrases there are models for, in the order they are offered.
+    let wakeModels: [WakePhraseModel]
     private let brainStateRoot: URL
     private let sessions: SessionOpening?
     private let feed: TextFeeding?
@@ -135,11 +142,14 @@ public final class VoiceHostController: VoiceHostActing {
     private var brainHealth: BrainHealth = .stopped
     /// The chosen runtime's problem on this Mac, for the settings last applied.
     private var runtimeProblem: String?
+    /// Why the running wake listener stopped by itself; cleared when it starts again.
+    private var wakeListenerProblem: String?
 
     /// - Parameters:
     ///   - keys: nil without an fn event tap (`MACHUD_NO_HOTKEYS`).
     ///   - brain: nil when the brain can never run (`MACHUD_VOICE_NO_BRAIN`).
     ///   - wake: nil without a microphone for it.
+    ///   - wakeModels: the wake phrases there are models for, and their files.
     ///   - brainStateRoot: the folder per-workspace brain state directories go under.
     ///   - sessions: MacHUD's session broker; nil leaves `openSession` unavailable.
     ///   - feed: MacHUD's text-feed broker; nil sends nothing.
@@ -147,19 +157,20 @@ public final class VoiceHostController: VoiceHostActing {
     ///   - sessionKeyOf: a snapshot's session key.
     ///   - homeDirectory: the brain's workspace while `brain.workspacePath` is empty.
     init(settings: VoiceHostSettings, dictation: DictationDriving, keys: VoiceKeySource?,
-         brain: BrainDriving?, speaker: ReplySpeaking?, wake: WakeDriving?, brainStateRoot: URL,
-         sessions: SessionOpening? = nil, feed: TextFeeding? = nil,
+         brain: BrainDriving?, speaker: ReplySpeaking?, wake: WakeDriving?, wakeModels: [WakePhraseModel] = [],
+         brainStateRoot: URL, sessions: SessionOpening? = nil, feed: TextFeeding? = nil,
          detectRuntimes: @escaping (BrainSettings) -> [BrainRuntimeDetection] = { BrainRuntimes.detect($0) },
          sessionKeyOf: @escaping (AgentSessionSnapshot) -> String? = { $0.sessionKey },
          homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
          now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
          schedule: @escaping VoiceScheduler = mainQueueScheduler) {
-        self.settings = settings
+        self.settings = settings.resolvingWakePhrase(available: wakeModels.map(\.phrase))
         self.dictation = dictation
         self.keys = keys
         self.brain = brain
         self.speaker = speaker
         self.wake = wake
+        self.wakeModels = wakeModels
         self.brainStateRoot = brainStateRoot
         self.sessions = sessions
         self.feed = feed
@@ -193,11 +204,20 @@ public final class VoiceHostController: VoiceHostActing {
             if take == nil { restartWake() }
         }
         wake?.onListeningChanged = { [weak self] in self?.state.wakeListening = $0 }
+        wake?.onProblem = { [weak self] problem in
+            guard let self else { return }
+            wakeListenerProblem = problem
+            refreshWakeProblem()
+        }
         apply(settings)
     }
 
-    /// Applies new settings: keys, wake word, brain, voice and history follow at once.
+    /// Applies new settings: keys, wake word, brain, voice and history follow at once. A wake
+    /// phrase no model detects resolves to the first one that has a model (see
+    /// `VoiceHostSettings.resolvingWakePhrase`).
     func apply(_ settings: VoiceHostSettings) {
+        let wakeTurnedOn = settings.voice.wakeWordEnabled && !self.settings.voice.wakeWordEnabled
+        let settings = resolvingWakePhrase(settings)
         self.settings = settings
         dictation.setHistory(settings.history)
         if appliedVoice != settings.voice {
@@ -208,6 +228,20 @@ public final class VoiceHostController: VoiceHostActing {
         refreshWake()
         refreshBrain()
         refreshBrainProblem()
+        // Turning the wake word on when it cannot listen says why at once, under the orb.
+        if wakeTurnedOn, let problem = state.wakeProblem { showNotice(problem) }
+    }
+
+    /// `settings` with a wake phrase there is a model for, while the wake word is on.
+    func resolvingWakePhrase(_ settings: VoiceHostSettings) -> VoiceHostSettings {
+        settings.resolvingWakePhrase(available: wakeModels.map(\.phrase))
+    }
+
+    /// A wake model was installed, removed or changed its download: listen as soon as the
+    /// phrase's model is in place, and keep `wakeProblem` current.
+    func wakeModelsChanged() {
+        refreshWake()
+        refreshWakeProblem()
     }
 
     func setHiddenForFullScreen(_ hidden: Bool) {
@@ -671,15 +705,49 @@ public final class VoiceHostController: VoiceHostActing {
                    onRelease: { [weak self] in self?.keyReleased() })
     }
 
-    /// The wake word listens while voice is on, not muted and no take is recording.
+    /// The wake word is wanted while voice is on and not muted.
+    private var wakeWanted: Bool { settings.enabled && !state.muted && settings.voice.wakeWordEnabled }
+
+    /// The model for the chosen phrase, when there is one.
+    private var wakeModel: WakePhraseModel? {
+        wakeModels.first { $0.matches(phrase: settings.voice.wakePhrase) }
+    }
+
+    /// The wake word listens while it is wanted, its phrase's model is installed and no take is
+    /// recording.
     private func refreshWake() {
+        defer { refreshWakeProblem() }
         guard let wake else { return }
-        let wanted = settings.enabled && !state.muted && settings.voice.wakeWordEnabled && take == nil
-            ? settings.voice : nil
+        let wanted = wakeWanted && take == nil && wakeModel?.store.status.installed == true ? settings.voice : nil
         guard wanted != runningWake else { return }
         if runningWake != nil { wake.stop() }
         runningWake = wanted
+        wakeListenerProblem = nil
         if let wanted { wake.start(wanted) }
+    }
+
+    /// Why the wake word is on and not listening; nil while it is off, muted or able to listen.
+    private func refreshWakeProblem() {
+        let problem: String?
+        if !wakeWanted {
+            problem = nil
+        } else if wake == nil {
+            problem = Self.wakeUnavailable
+        } else if let model = wakeModel {
+            let status = model.store.status
+            if status.installed {
+                problem = wakeListenerProblem
+            } else if status.downloading {
+                problem = "The \(model.phrase) model is downloading."
+            } else if let error = status.error {
+                problem = "The \(model.phrase) model did not download: \(error)"
+            } else {
+                problem = "Download the \(model.phrase) model to use the wake word."
+            }
+        } else {
+            problem = "There is no wake model for “\(settings.voice.wakePhrase)” yet."
+        }
+        if problem != state.wakeProblem { state.wakeProblem = problem }
     }
 
     private func restartWake() {

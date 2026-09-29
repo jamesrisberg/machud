@@ -41,6 +41,7 @@ final class VoiceHost {
     private let brain: BrainConnection?
     private let dictation: DictationDriving
     private let models: [String: VoiceModelProviding]
+    private let wakeModels: [WakePhraseModel]
     private let fullscreen = HUDFullscreenObserver()
     private var terminationSource: DispatchSourceSignal?
 
@@ -61,13 +62,29 @@ final class VoiceHost {
             : SpeakFreeDictation(directory: voiceRoot.appendingPathComponent("Dictation"), historyLocator: history)
         brain = environment.noBrain ? nil : BrainConnection()
         let kokoroDirectory = KokoroModels.directory(in: modelsRoot)
-        models = ["kokoro": KokoroModelStore(directory: kokoroDirectory), "parakeet": ParakeetModelStore()]
+        models = ["kokoro": ManifestModelStore(manifest: KokoroModels.manifest, directory: kokoroDirectory),
+                  "parakeet": ParakeetModelStore()]
+        // Wake models download into the same models folder the listener reads.
+        let wakeModels = WakeModels.all.map { model in
+            WakePhraseModel(model: model, store: ManifestModelStore(manifest: model.manifest,
+                                                                    directory: model.directory(in: modelsRoot)))
+        }
+        self.wakeModels = wakeModels
+        // A wake word already on with a phrase no model detects moves to one that has a model.
+        let loaded = store.load()
+        let settings = loaded.resolvingWakePhrase(available: wakeModels.map(\.phrase))
+        if settings != loaded {
+            do { try store.save(settings) } catch {
+                NSLog("MacHUDVoice: could not save the wake phrase: %@", error.localizedDescription)
+            }
+        }
         controller = VoiceHostController(
-            settings: store.load(), dictation: dictation,
+            settings: settings, dictation: dictation,
             keys: environment.noHotkeys ? nil : FnKeySource(), brain: brain,
             speaker: environment.noSpeech
                 ? SilentSpeaker() : ReplySpeaker(kokoroDirectory: kokoroDirectory, secrets: secrets),
             wake: environment.noMicrophone ? nil : WakeWordListener(modelsRoot: modelsRoot),
+            wakeModels: wakeModels,
             brainStateRoot: support.appendingPathComponent("Brain"),
             sessions: MacHUDSessions(socketPath: environment.machudSocketPath),
             feed: MacHUDFeed(socketPath: environment.machudSocketPath))
@@ -82,9 +99,17 @@ final class VoiceHost {
         for (id, model) in models {
             model.onChange = { [weak self] in
                 guard let self else { return }
-                VoiceHostCommands.publishModels(models, on: server)
+                VoiceHostCommands.publishModels(models, wake: wakeModels, on: server)
                 // Dictation uses a newly installed speech model from the next take.
                 if id == "parakeet", model.status.installed { dictation.prepareEngine() }
+            }
+        }
+        for wake in wakeModels {
+            wake.store.onChange = { [weak self] in
+                guard let self else { return }
+                VoiceHostCommands.publishModels(models, wake: wakeModels, on: server)
+                // The wake word listens as soon as its model is installed.
+                controller.wakeModelsChanged()
             }
         }
         controller.presenter = presenter

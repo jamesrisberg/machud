@@ -106,7 +106,7 @@ enum VoiceCommand: Equatable {
         return .forward("history", ["action": "status"])
     }
 
-    /// `models status` and `models download id=kokoro|parakeet`: the host's downloadable models.
+    /// `models status` and `models download id=kokoro|parakeet|<wake id>`: the host's downloadable models.
     private static func models(_ args: [String: String]) throws -> VoiceCommand {
         let inline = args["action"].flatMap { $0 == "1" ? nil : $0 }
         let op = inline ?? ["download", "status"].first { args[$0] != nil } ?? "status"
@@ -114,7 +114,7 @@ enum VoiceCommand: Equatable {
         case "status":
             return .forward("models", ["action": "status"])
         case "download":
-            guard let id = args["id"], !id.isEmpty else { throw Invalid("voice models download needs id= (kokoro or parakeet)") }
+            guard let id = args["id"], !id.isEmpty else { throw Invalid("voice models download needs id= (kokoro, parakeet, or a wake phrase such as hey-jarvis)") }
             return .forward("models", ["action": "download", "id": id])
         default:
             throw Invalid("voice models takes status or download, not \(op)")

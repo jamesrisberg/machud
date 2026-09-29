@@ -121,7 +121,7 @@ struct VoiceModelStatus: Equatable, Sendable {
     var id: String?
 }
 
-/// A downloadable model's files (the Kokoro reply voice, the Parakeet speech model).
+/// A downloadable model's files (the Kokoro reply voice, the Parakeet speech model, a wake model).
 @MainActor
 protocol VoiceModelProviding: AnyObject {
     var status: VoiceModelStatus { get }
@@ -131,11 +131,71 @@ protocol VoiceModelProviding: AnyObject {
     func download()
 }
 
+/// A wake phrase the host can listen for: the model that detects it and that model's files.
+/// Only phrases with a model are offered; the model is downloaded when the user asks.
+@MainActor
+struct WakePhraseModel {
+    /// The socket's id for it (`hey-jarvis`), from the phrase.
+    let id: String
+    let phrase: String
+    /// VoiceKit's manifest id (`openwakeword-hey-jarvis-v0.1`); `models download` takes it too.
+    let manifestID: String
+    /// The model's licence as its manifest states it.
+    let licence: String
+    /// The terms in a few words, shown beside the phrase.
+    let note: String
+    /// False: the model is downloaded on request, never bundled.
+    let redistributable: Bool
+    let store: VoiceModelProviding
+
+    init(model: WakeModel, store: VoiceModelProviding) {
+        self.init(id: Self.id(for: model.phrase), phrase: model.phrase, manifestID: model.manifest.id,
+                  licence: model.manifest.licence, redistributable: model.manifest.redistributable, store: store)
+    }
+
+    init(id: String, phrase: String, manifestID: String, licence: String, redistributable: Bool,
+         store: VoiceModelProviding) {
+        self.id = id
+        self.phrase = phrase
+        self.manifestID = manifestID
+        self.licence = licence
+        self.redistributable = redistributable
+        note = redistributable
+            ? "Downloaded when you ask."
+            : "Personal, non-commercial use only. Downloaded when you ask, never bundled with MacHUD."
+        self.store = store
+    }
+
+    /// "Hey Jarvis" → `hey-jarvis`.
+    static func id(for phrase: String) -> String {
+        TriggerPhrase.normalize(phrase).replacingOccurrences(of: " ", with: "-")
+    }
+
+    /// `models status`'s entry for it.
+    var json: [String: Any] {
+        let status = store.status
+        var entry: [String: Any] = [
+            "id": id, "phrase": phrase, "manifestId": manifestID, "licence": licence, "note": note,
+            "redistributable": redistributable, "installed": status.installed,
+            "downloading": status.downloading, "progress": status.progress, "bytes": status.bytes,
+        ]
+        if let error = status.error { entry["error"] = error }
+        return entry
+    }
+
+    func matches(phrase other: String) -> Bool {
+        TriggerPhrase.normalize(other) == TriggerPhrase.normalize(phrase)
+    }
+}
+
 /// The wake word listener.
 @MainActor
 protocol WakeDriving: AnyObject {
     var onWake: (() -> Void)? { get set }
     var onListeningChanged: ((Bool) -> Void)? { get set }
+    /// Listening stopped by itself (the microphone refused, the model failed), in words for the
+    /// user; nil when a start clears it.
+    var onProblem: ((String?) -> Void)? { get set }
     /// Start (or restart) listening for `settings.wakePhrase`.
     func start(_ settings: VoiceSettings)
     func stop()
