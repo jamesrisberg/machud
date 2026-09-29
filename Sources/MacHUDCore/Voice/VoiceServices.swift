@@ -26,6 +26,10 @@ final class VoiceServices: NSObject {
         // Only connecting and disconnecting matter to the tabs; the menu reads the latest
         // state when it opens.
         connection.onConnectionChange = { [weak self] in self?.settingsModel.hostAvailabilityChanged() }
+        connection.onStateChange = { [weak self] in
+            guard let self else { return }
+            self.settingsModel.hostStateChanged(self.connection.state)
+        }
         statusChanged(supervisor.status)
     }
 
