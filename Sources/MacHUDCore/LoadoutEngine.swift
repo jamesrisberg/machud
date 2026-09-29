@@ -225,6 +225,10 @@ final class LoadoutEngine {
     /// has the last word on a sibling panel that is in both.
     func apply(_ loadout: Loadout, clear: Bool, screen: NSScreen? = nil, completion: @escaping (ApplyReport) -> Void) {
         activeLoadout = loadout.name
+        let completion: (ApplyReport) -> Void = { [weak self] report in
+            completion(report)
+            self?.onApplied?(report)
+        }
         if clear { minimizedByClear = [] }
         guard let hud = loadout.hud, let hudEngine else {
             applyAcrossScreens(loadout, clear: clear, screen: screen, completion: completion)
@@ -243,6 +247,10 @@ final class LoadoutEngine {
             applyAcrossScreens(loadout, clear: clear, screen: screen, completion: applyHUD)
         }
     }
+
+    /// Called after every apply finishes, however it was started (wheel, menu, socket,
+    /// startup, a display change): the onboarding's radial practice waits for it.
+    var onApplied: ((ApplyReport) -> Void)?
 
     /// Captures and applies loadouts' `hud` part; set by the app once the tool dock exists.
     var hudEngine: HUDLoadoutEngine?
