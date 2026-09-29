@@ -23,6 +23,9 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   on the agent it was started with. While a switch is waiting, the Brain tab says so, and
   `machud voice brain status` shows the agent actually running (`activeRuntime`) next to the one
   chosen.
+- When MacHUD starts, the agent starts once, knowing every HUD app that announces itself in the
+  first seconds, instead of starting and then restarting (which took about a minute with
+  mclaude).
 - The agent can use MacHUD itself: apply and capture loadouts, show and hide panels, run the HUD
   apps' actions, move the tool dock and more, through MacHUD's own tools instead of trying to
   drive the screen. It is told which HUD apps and loadouts you have. On by default; turn it off,

@@ -26,6 +26,7 @@ final class BrainToolsTests: XCTestCase {
             brainStateRoot: URL(fileURLWithPath: "/tmp/voice-tests/Brain"),
             machudTools: tools ?? server, machudStatus: status,
             detectRuntimes: FakeRuntimes.detect(), schedule: { _, _ in })
+        controller.hostContextSettle = .init(interval: 0.001, reads: 8)
         controller.start()
         return controller
     }
