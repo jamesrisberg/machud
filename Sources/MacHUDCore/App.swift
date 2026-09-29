@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var toolDock: ToolDock!
     private var sessions: SessionsBroker!
     private var voice: VoiceServices!
+    private var onboarding: OnboardingServices!
     private var startup: StartupLoadout?
     private var trustTimer: Timer?
 
@@ -67,6 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         machud.registerControl(control)
         installCatalog()
         installVoice()
+        installOnboarding()
         installMenuBar()
         installToolDock()
         installMenuHost()
@@ -97,6 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 })
             }
         }
+        statusMenu.hudSections.append { [weak onboarding] in onboarding.map { [$0.menuItem()] } ?? [] }
         statusMenu.hudSections.append { [weak menuBar] in menuBar?.menuItems() ?? [] }
         statusMenu.hudSections.append { [weak voice] in voice.map { [$0.menuItem()] } ?? [] }
         statusMenu.hudSections.append { [weak panels] in
@@ -144,8 +147,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if !Env.dragMonitor {
             NSLog("MacHUD: isolated instance, not watching window drags (MACHUD_DRAG=1 to enable)")
-        // An isolated dev/test instance never raises the system prompt; it just waits.
-        } else if Env.isIsolated ? Accessibility.isTrusted : Accessibility.requestTrust() {
+        // An isolated dev/test instance never raises the system prompt; it just waits. Neither
+        // does a launch that shows the onboarding: its Permissions step asks.
+        } else if Env.isIsolated || onboarding.wantsLaunch ? Accessibility.isTrusted : Accessibility.requestTrust() {
             monitor.start()
         } else {
             // Wait for the user to grant access in System Settings, then start.
@@ -285,8 +289,6 @@ extension AppDelegate {
         menuBar = manager
     }
 
-    /// The tool dock: registered as the `tooldock` panel, with its socket verbs, following
-    /// layouts.json edits, the discovered apps and what is parked.
     /// The app catalog, the installer (`catalog`, `apps install`) and the Apps tab.
     fileprivate func installCatalog() {
         let appCatalog = AppCatalog { [weak store] in store?.config.catalog ?? CatalogConfig() }
@@ -303,9 +305,6 @@ extension AppDelegate {
         }
         catalog.registerControl(control)
         appCatalog.start()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak catalog] in
-            MainActor.assumeIsolated { _ = catalog?.firstRunIfNeeded() }
-        }
     }
 
     /// The built-in voice host: MacHUD runs it as a child process (`VoiceHostSupervisor`),
@@ -320,6 +319,27 @@ extension AppDelegate {
         services.start()
     }
 
+    /// First-run onboarding: the full-screen overlay at launch until it is finished or skipped,
+    /// Setup Guide… in the menu, and the `onboarding` verb.
+    fileprivate func installOnboarding() {
+        let model = OnboardingModel(voice: voice, apps: catalog.tab, permissions: LiveOnboardingPermissions())
+        model.tour = OnboardingTour(radialWheel: store.hotkeys.loadoutMenu?.display ?? "the wheel hotkey",
+                                    toolDock: store.hotkeys.dock?.display ?? "the dock hotkey")
+        let services = OnboardingServices(model: model, presenter: OnboardingWindowController())
+        services.prepareApps = { [weak catalog] in
+            catalog?.preselectBundled()
+            catalog?.reloadTab()
+        }
+        services.registerControl(control)
+        onboarding = services
+        // After the catalog and the voice host have had a moment to come up.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak services] in
+            MainActor.assumeIsolated { _ = services?.showIfNeeded() }
+        }
+    }
+
+    /// The tool dock: registered as the `tooldock` panel, with its socket verbs, following
+    /// layouts.json edits, the discovered apps and what is parked.
     fileprivate func installToolDock() {
         let dock = ToolDock(registry: panels, externals: externals, config: { [weak store] in
             store?.toolDock ?? ToolDockConfig()
