@@ -13,7 +13,7 @@ public enum VoiceHostMain {
     /// the user's input back through the `VoiceHostActing` it is given.
     @MainActor
     public static func run(makePresenter: @escaping @MainActor (VoiceHostActing) -> VoiceHostPresenting) -> Never {
-        // SpeakFree's developer marker would keep every recording; the voice host keeps none.
+        // SpeakFree's developer marker would keep every recording; retention follows the history setting.
         setenv("SPEAKFREE_DEV_MODE", "0", 1)
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
@@ -40,7 +40,7 @@ final class VoiceHost {
     private let commands: VoiceHostCommands
     private let brain: BrainConnection?
     private let dictation: DictationDriving
-    private let models: VoiceModelProviding
+    private let models: [String: VoiceModelProviding]
     private let fullscreen = HUDFullscreenObserver()
     private var terminationSource: DispatchSourceSignal?
 
@@ -53,12 +53,15 @@ final class VoiceHost {
         let secrets = KeychainVoiceSecretStore(service: environment.keychainService)
         let store = VoiceHostSettingsStore(directory: environment.configDirectory)
 
+        let history = DictationHistoryLocator.live(
+            machudFolder: environment.historyDirectory ?? voiceRoot.appendingPathComponent("History", isDirectory: true),
+            speakFreeConfigDirectory: environment.speakFreeConfigDirectory)
         dictation = environment.noMicrophone
             ? SimulatedDictation()
-            : SpeakFreeDictation(directory: voiceRoot.appendingPathComponent("Dictation"))
+            : SpeakFreeDictation(directory: voiceRoot.appendingPathComponent("Dictation"), historyLocator: history)
         brain = environment.noBrain ? nil : BrainConnection()
         let kokoroDirectory = KokoroModels.directory(in: modelsRoot)
-        models = KokoroModelStore(directory: kokoroDirectory)
+        models = ["kokoro": KokoroModelStore(directory: kokoroDirectory), "parakeet": ParakeetModelStore()]
         controller = VoiceHostController(
             settings: store.load(), dictation: dictation,
             keys: environment.noHotkeys ? nil : FnKeySource(), brain: brain,
@@ -66,18 +69,23 @@ final class VoiceHost {
                 ? SilentSpeaker() : ReplySpeaker(kokoroDirectory: kokoroDirectory, secrets: secrets),
             wake: environment.noMicrophone ? nil : WakeWordListener(modelsRoot: modelsRoot),
             brainStateRoot: support.appendingPathComponent("Brain"),
-            sessions: MacHUDSessions(socketPath: environment.machudSocketPath))
+            sessions: MacHUDSessions(socketPath: environment.machudSocketPath),
+            feed: MacHUDFeed(socketPath: environment.machudSocketPath))
         server = HUDSocketServer(path: environment.socketPath, label: "machud-voice")
         commands = VoiceHostCommands(controller: controller, store: store, secrets: secrets,
-                                     version: Self.version(), models: models)
+                                     version: Self.version(), models: models, history: history)
     }
 
     func start(presenter: VoiceHostPresenting) {
         let server = self.server
         controller.onStateChange = { VoiceHostCommands.publish($0, on: server) }
-        models.onChange = { [weak self] in
-            guard let self else { return }
-            VoiceHostCommands.publishModels(models.status, on: server)
+        for (id, model) in models {
+            model.onChange = { [weak self] in
+                guard let self else { return }
+                VoiceHostCommands.publishModels(models, on: server)
+                // Dictation uses a newly installed speech model from the next take.
+                if id == "parakeet", model.status.installed { dictation.prepareEngine() }
+            }
         }
         controller.presenter = presenter
         commands.onQuit = { [weak self] in self?.shutDown() }
