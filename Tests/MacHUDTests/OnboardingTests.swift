@@ -127,6 +127,16 @@ final class OnboardingTests: XCTestCase {
         XCTAssertNil(BrainStatus(reply: ["ok": true, "available": true, "problem": ""])?.problem)
     }
 
+    /// Every field `VoiceHostCommands.brain` and `BrainRuntimeDetection.json` send.
+    func testBrainStatusParsesTheHostsFullReply() throws {
+        let status = try XCTUnwrap(BrainStatus(reply: [
+            "ok": true, "available": false, "problem": "Choose a workspace folder for the agent.", "workspace": "",
+            "runtimes": [["id": "codex", "name": "Codex", "installed": true, "path": "/bin/codex"],
+                         ["id": "hermes", "name": "Hermes", "installed": true, "apiServer": false],
+        XCTAssertEqual(status.runtime("codex")?.path, "/bin/codex")
+        XCTAssertEqual(status.problem, "Choose a workspace folder for the agent.")
+    }
+
     func testLiveStateReadsTheHostState() {
         XCTAssertFalse(VoiceLiveState(state: nil).connected)
         XCTAssertEqual(VoiceLiveState(state: nil).headline(keyMode: "hold"), "Voice is not running.")
@@ -301,7 +311,10 @@ final class OnboardingTests: XCTestCase {
     }
 
     func testBrainStepWithAnOlderHostFallsBackToTheStateProblem() {
+        // A host from before `brain status`: no `brain` command and no `brainProblem` in its state.
         brainReply = nil
+        host.server.register("state") { _, done in done(["ok": true, "state": ["phase": ["name": "idle"], "muted": false,
+                                                                               "brainAvailable": false]]) }
         let model = makeModel()
         connect()
         model.chooseFolder = { done in done(URL(fileURLWithPath: "/w")) }
@@ -312,6 +325,32 @@ final class OnboardingTests: XCTestCase {
         host.server.publish("state", payload: ["state": ["phase": ["name": "idle"], "brainAvailable": false,
                                                          "brainProblem": "The brain companion failed to start"]])
         XCTAssertTrue(spin(until: { model.brainProblem == "The brain companion failed to start" }))
+    }
+
+    /// The normal path against the shared fake's `brain` handler, which answers with the voice
+    /// host's real `brain status` fields (`VoiceHostCommands.brain`).
+    func testBrainStepReadsTheHostsBrainStatus() {
+        // A fresh fake without this suite's scripted `brain` handler.
+        host.server.stop()
+        host = FakeVoiceHost(path: dir.appendingPathComponent("v.sock").path)
+        XCTAssertTrue(host.server.start())
+        host.brainProblem = "Codex is not installed"
+        let model = makeModel()
+        connect()
+        model.go(to: .brain)
+        XCTAssertTrue(spin(until: { model.brain != nil }))
+        XCTAssertEqual(host.brainRequests.last, ["action": "status"])
+        XCTAssertEqual(model.runtimeInstalled("codex"), true)
+        XCTAssertEqual(model.runtimePath("codex"), "/bin/codex")
+        XCTAssertEqual(model.runtimeInstalled("claude"), false)
+        model.chooseFolder = { done in done(URL(fileURLWithPath: "/w")) }
+        model.chooseWorkspace()
+        XCTAssertTrue(spin(until: { model.workspace == "/w" }))
+        XCTAssertEqual(model.brainProblem, "Codex is not installed")
+        host.brainProblem = nil
+        host.server.publish("state", payload: ["state": host.state])
+        XCTAssertTrue(spin(until: { model.brainReady }))
+        XCTAssertNil(model.brainProblem)
     }
 
     func testBrainWhileVoiceIsDownSaysSo() {
