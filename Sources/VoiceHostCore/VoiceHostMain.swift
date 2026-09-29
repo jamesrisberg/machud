@@ -143,7 +143,13 @@ final class VoiceHost {
     private func handleTermination() {
         signal(SIGTERM, SIG_IGN)
         let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-        source.setEventHandler { [weak self] in MainActor.assumeIsolated { self?.shutDown() } }
+        source.setEventHandler { [weak self] in
+            // Explicitly Void: `shutDown` returns Never, which Swift 6.3 cannot infer against.
+            MainActor.assumeIsolated { () -> Void in
+                guard let self else { return }
+                self.shutDown()
+            }
+        }
         source.resume()
         terminationSource = source
     }
@@ -159,7 +165,12 @@ final class VoiceHost {
         Thread.detachNewThread {
             var buffer = [UInt8](repeating: 0, count: 256)
             while read(STDIN_FILENO, &buffer, buffer.count) > 0 {}
-            DispatchQueue.main.async { MainActor.assumeIsolated { self.shutDown() } }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { () -> Void in
+                    let host = self
+                    host.shutDown()
+                }
+            }
         }
     }
 
