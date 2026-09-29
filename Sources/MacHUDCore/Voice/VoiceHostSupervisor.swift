@@ -46,6 +46,12 @@ final class VoiceHostSupervisor {
     /// reads or overwrites the user's Grok key.
     static let isolatedKeychainService = "com.jrisberg.machud.voice.isolated"
 
+    /// Where an isolated instance's host keeps downloaded models: beside its own socket, so a
+    /// test never reads, verifies or writes the real models folder.
+    static func isolatedModelsDirectory(socketPath: String) -> String {
+        (socketPath as NSString).deletingPathExtension + "-models"
+    }
+
     /// A run at least this long counts as healthy and resets the backoff.
     static let stableRun: TimeInterval = 20
     /// Quick exits in a row before giving up.
@@ -118,16 +124,21 @@ final class VoiceHostSupervisor {
     }
 
     /// The environment the helper runs with. A host started by an isolated MacHUD never touches
-    /// what the real one owns: it runs with no microphone, no brain and no orb on screen unless
-    /// `MACHUD_VOICE_LIVE=1`, and keeps secrets under its own Keychain service unless
-    /// `MACHUD_VOICE_KEYCHAIN_SERVICE` names one.
+    /// what the real one owns: it runs with no microphone, no brain, no orb on screen, no sound
+    /// and its own models folder unless `MACHUD_VOICE_LIVE=1`, and keeps secrets under its own
+    /// Keychain service unless `MACHUD_VOICE_KEYCHAIN_SERVICE` names one.
     func childEnvironment() -> [String: String] {
         var env = environment
         env["MACHUD_VOICE_PARENT_PIPE"] = "1"
         env["MACHUD_VOICE_SOCKET"] = socketPath
         if isolated {
             if env["MACHUD_VOICE_LIVE"] != "1" {
-                for key in ["MACHUD_VOICE_NO_MIC", "MACHUD_VOICE_NO_BRAIN", "MACHUD_VOICE_HEADLESS"] { env[key] = "1" }
+                for key in ["MACHUD_VOICE_NO_MIC", "MACHUD_VOICE_NO_BRAIN", "MACHUD_VOICE_HEADLESS", "MACHUD_VOICE_NO_SPEECH"] {
+                    env[key] = "1"
+                }
+                if (env["MACHUD_VOICE_MODELS_DIR"] ?? "").isEmpty {
+                    env["MACHUD_VOICE_MODELS_DIR"] = Self.isolatedModelsDirectory(socketPath: socketPath)
+                }
             }
             if (env["MACHUD_VOICE_KEYCHAIN_SERVICE"] ?? "").isEmpty {
                 env["MACHUD_VOICE_KEYCHAIN_SERVICE"] = Self.isolatedKeychainService

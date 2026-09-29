@@ -3,8 +3,8 @@ import SwiftUI
 
 /// The Voice and Brain tabs of the settings window. Everything goes through the voice host's
 /// socket (`settings get`, `settings set` with the whole object, `secret set|clear`,
-/// `brain status`, and its `state` events for the brain's problem); while the host is down the
-/// tabs say why and edit nothing.
+/// `brain status`, `action say` for Test Voice, `models status|download` for Kokoro, and its
+/// `state` and `models` events); while the host is down the tabs say why and edit nothing.
 @MainActor
 final class VoiceSettingsModel: ObservableObject {
     static let voiceTabID = "voice"
@@ -34,6 +34,44 @@ final class VoiceSettingsModel: ObservableObject {
     @Published private(set) var brainProblem: String?
     /// The runtimes the host found on this Mac (`brain status`), in its order.
     @Published private(set) var runtimes: [BrainRuntimeInfo] = []
+    /// The folder the agent works in, as the host resolved it (`brain status`): the chosen one,
+    /// else the home folder.
+    @Published private(set) var workspace: String?
+    /// No folder is chosen, so `workspace` is the home folder.
+    @Published private(set) var workspaceIsDefault = false
+    /// The Kokoro voice's files (`models status` and `models` events); nil until known.
+    @Published private(set) var kokoro: ModelStatus?
+
+    /// A downloadable model as the host reports it.
+    struct ModelStatus: Equatable {
+        var installed: Bool
+        var downloading: Bool
+        var progress: Double
+        var bytes: Int64
+        var error: String?
+
+        init(installed: Bool, downloading: Bool, progress: Double, bytes: Int64, error: String?) {
+            self.installed = installed
+            self.downloading = downloading
+            self.progress = progress
+            self.bytes = bytes
+            self.error = error
+        }
+
+        init?(_ json: Any?) {
+            guard let json = json as? [String: Any] else { return nil }
+            installed = json["installed"] as? Bool ?? false
+            downloading = json["downloading"] as? Bool ?? false
+            progress = (json["progress"] as? NSNumber)?.doubleValue ?? 0
+            bytes = (json["bytes"] as? NSNumber)?.int64Value ?? 0
+            error = json["error"] as? String
+        }
+
+        var size: String { ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) }
+    }
+
+    /// What Test Voice says.
+    static let voiceSample = "Hi, this is how my replies will sound."
     weak var services: VoiceServices?
 
     /// One runtime from `brain status`.
@@ -65,6 +103,7 @@ final class VoiceSettingsModel: ObservableObject {
                 self.status = .ready
                 self.hostStateChanged(services.connection.state)
                 self.loadBrainStatus()
+                self.loadModels()
             } else {
                 self.status = .unavailable(services.connection.isConnected
                     ? reply["error"] as? String ?? "settings get failed" : "The voice host is starting.")
@@ -108,6 +147,42 @@ final class VoiceSettingsModel: ObservableObject {
                                         installed: entry["installed"] as? Bool ?? false, path: entry["path"] as? String)
             }
             if runtimes != self.runtimes { self.runtimes = runtimes }
+            let workspace = reply["workspace"] as? String
+            if workspace != self.workspace { self.workspace = workspace }
+            let isDefault = reply["workspaceDefault"] as? Bool ?? false
+            if isDefault != self.workspaceIsDefault { self.workspaceIsDefault = isDefault }
+        }
+    }
+
+    /// `models status`: whether Kokoro is installed or downloading.
+    func loadModels(completion: (() -> Void)? = nil) {
+        guard let services else { completion?(); return }
+        services.perform(.forward("models", ["action": "status"])) { [weak self] reply in
+            defer { completion?() }
+            guard reply["ok"] as? Bool == true else { return }
+            self?.modelsChanged(reply)
+        }
+    }
+
+    /// A `models status` reply or `models` event.
+    func modelsChanged(_ reply: [String: Any]) {
+        guard let kokoro = ModelStatus(reply["kokoro"]), kokoro != self.kokoro else { return }
+        self.kokoro = kokoro
+    }
+
+    /// Downloads the Kokoro voice; progress arrives as `models` events.
+    func downloadKokoro() {
+        services?.perform(.forward("models", ["action": "download", "id": "kokoro"])) { [weak self] reply in
+            guard let self else { return }
+            if reply["ok"] as? Bool == true { self.modelsChanged(reply) } else { self.lastError = reply["error"] as? String ?? "download failed" }
+        }
+    }
+
+    /// Says a sample with the reply voice as chosen now, whether or not replies are spoken.
+    func testVoice() {
+        services?.perform(.forward("action", ["name": "say", "text": Self.voiceSample])) { [weak self] reply in
+            guard let self else { return }
+            self.lastError = reply["ok"] as? Bool == true ? nil : reply["error"] as? String ?? "could not speak"
         }
     }
 
@@ -180,6 +255,8 @@ final class VoiceSettingsModel: ObservableObject {
         var d: [String: Any] = ["status": status.text]
         if canEdit { d["settings"] = settings }
         if let brainProblem { d["brainProblem"] = brainProblem }
+        if let workspace { d["workspace"] = workspace }
+        if let kokoro { d["kokoro"] = ["installed": kokoro.installed, "downloading": kokoro.downloading] }
         if let lastError { d["lastError"] = lastError }
         return d
     }
@@ -218,6 +295,10 @@ struct VoiceTabView: View {
                             options: [("kokoro", "Kokoro (on this Mac)"), ("system", "System voice"), ("grok", "Grok")])
                 VoiceToggle(model: model, title: "Speak replies", path: "voice.speakReplies",
                             help: "Off shows replies as text only.")
+                LabeledContent("Try it") {
+                    Button("Test Voice") { model.testVoice() }
+                }
+                KokoroRow(model: model)
                 LabeledContent("Grok API key") {
                     HStack {
                         SecureField("Grok API key", text: $grokKey, prompt: Text("xai-…")).labelsHidden()
@@ -248,8 +329,10 @@ struct BrainTabView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 VoiceText(model: model, title: "Workspace", path: "brain.workspacePath", isPath: true, foldersOnly: true,
-                          prompt: "Choose a folder")
-                Text("The folder the agent works in. The brain needs one before it can start.")
+                          prompt: "Home folder")
+                Text(model.workspaceIsDefault
+                     ? "The agent works in your home folder\(model.workspace.map { " (\($0))" } ?? "") until you choose another."
+                     : "The folder the agent works in. Clear it to use your home folder.")
                     .font(.caption).foregroundStyle(.secondary)
                 VoiceText(model: model, title: "Assistant name", path: "brain.assistantName")
                 VoiceText(model: model, title: "Port", path: "brainPort", isNumber: true)
@@ -263,6 +346,33 @@ struct BrainTabView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+/// The Kokoro voice: installed, downloading with progress, or a Download button with its size.
+struct KokoroRow: View {
+    @ObservedObject var model: VoiceSettingsModel
+
+    var body: some View {
+        LabeledContent("Kokoro voice") {
+            if let kokoro = model.kokoro {
+                if kokoro.installed {
+                    Label("Installed", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                } else if kokoro.downloading {
+                    ProgressView(value: kokoro.progress) { Text("Downloading \(Int(kokoro.progress * 100))%") }
+                        .frame(maxWidth: 200)
+                } else {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Button("Download (\(kokoro.size))") { model.downloadKokoro() }
+                        if let error = kokoro.error { Text(error).font(.caption).foregroundStyle(.red) }
+                    }
+                }
+            } else {
+                Text("Unknown").foregroundStyle(.secondary)
+            }
+        }
+        Text("Kokoro speaks on this Mac. Until it is downloaded, replies use the system voice.")
+            .font(.caption).foregroundStyle(.secondary)
     }
 }
 

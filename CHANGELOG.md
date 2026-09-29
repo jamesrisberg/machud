@@ -45,12 +45,16 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   line; `machud voice settings set voice.speakReplies=true` changes one setting, and
   `machud voice secret set name=grok` asks for the key without showing it.
 - MacHUD asks for the microphone, which the voice host uses under MacHUD's permission.
-- When the agent can't take a request, the orb says why (for example "Choose a workspace folder
-  for the agent." or "Codex is not installed.") instead of recording it first, and the Brain
-  tab shows the same reason, or Ready.
-- The Brain tab picks the workspace with a folder picker and says it is required; the agent
-  never starts in a folder you didn't choose. The runtime list marks runtimes that aren't
-  installed and offers mclaude once it is, noting that its session also appears in MechaHUD.
+- When the agent can't take a request, the orb says why (for example "Codex is not installed.")
+  instead of recording it first, and the Brain tab shows the same reason, or Ready.
+- The agent works in your home folder until you choose another: the Brain tab shows which
+  folder it uses and picks another with a folder picker. The runtime list marks runtimes that
+  aren't installed and offers mclaude once it is, noting that its session also appears in
+  MechaHUD.
+- The Voice tab has Test Voice, which says a sample with the reply voice you picked, and a
+  Download button for the Kokoro voice with its progress; replies use Kokoro as soon as it is
+  installed. `machud voice action say text=…` speaks any text, and `machud voice models` shows or
+  starts (`download id=kokoro`) the download.
 - When the agent's session is one other apps show too (mclaude), the reply card has an
   "Open in <app>" button that shows it there.
 - The resting orb breathes softly and floats a few points below its spot, so it reads as alive

@@ -40,12 +40,15 @@ protocol DictationDriving: AnyObject {
     func insert(_ text: String)
 }
 
-/// The fn key's gestures (`KeyGestureRecognizer` intents).
+/// The fn key's gestures (`KeyGestureRecognizer` intents), recognized with the configuration
+/// the controller times its own gesture window with.
 @MainActor
 protocol VoiceKeySource: AnyObject {
-    func start(mode: KeyGestureRecognizer.Mode, alternateEnabled: Bool,
+    /// - Parameter onRelease: the key came up (reported before the recognizer handles it).
+    func start(mode: KeyGestureRecognizer.Mode, configuration: KeyGestureRecognizer.Configuration,
                isSessionActive: @escaping () -> Bool,
-               onIntent: @escaping (KeyGestureRecognizer.Intent) -> Void)
+               onIntent: @escaping (KeyGestureRecognizer.Intent) -> Void,
+               onRelease: @escaping () -> Void)
     func stop()
 }
 
@@ -91,6 +94,28 @@ protocol ReplySpeaking: AnyObject {
     func append(_ text: String)
     func finish()
     func stop()
+}
+
+/// A downloadable model's state, as `models status` reports it.
+struct VoiceModelStatus: Equatable, Sendable {
+    var installed: Bool
+    var downloading: Bool
+    /// 0...1 while downloading; 1 once installed.
+    var progress: Double
+    /// The whole download's size.
+    var bytes: Int64
+    /// Why the last download failed, in words for the user.
+    var error: String?
+}
+
+/// The Kokoro reply voice's model files.
+@MainActor
+protocol VoiceModelProviding: AnyObject {
+    var status: VoiceModelStatus { get }
+    /// After every change of `status`.
+    var onChange: (() -> Void)? { get set }
+    /// Downloads and verifies the files; a download under way continues.
+    func download()
 }
 
 /// The wake word listener.

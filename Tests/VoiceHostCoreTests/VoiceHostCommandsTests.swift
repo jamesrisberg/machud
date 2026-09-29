@@ -135,7 +135,7 @@ final class VoiceHostCommandsTests: XCTestCase {
         XCTAssertEqual(reply["ok"] as? Bool, true)
         XCTAssertEqual(reply["available"] as? Bool, false)
         XCTAssertEqual(reply["problem"] as? String, "Choose a workspace folder for the agent.")
-        XCTAssertEqual(reply["workspace"] as? String, "")
+        XCTAssertEqual(reply["workspace"] as? String, FileManager.default.homeDirectoryForCurrentUser.path)
         XCTAssertEqual(reply["runtime"] as? String, "codex")
         let runtimes = try XCTUnwrap(reply["runtimes"] as? [[String: Any]])
         XCTAssertEqual(runtimes.map { $0["id"] as? String }, ["codex", "claude", "hermes", "mclaude"])

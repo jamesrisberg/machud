@@ -26,11 +26,16 @@ public struct VoiceHostState: Codable, Equatable, Sendable {
     public var wakeListening: Bool
     /// The user muted the voice host: no fn gestures, no wake word, no spoken replies.
     public var muted: Bool
+    /// An fn press began a take and the gesture is not decided yet: a second press could still
+    /// move it to the agent. True from the press until the double-tap window lapses, the press
+    /// outlasts a tap, the second press arrives, or the take ends. The orb shows a neutral
+    /// armed look meanwhile, so it never morphs into the waveform only to turn back.
+    public var gesturePending: Bool
 
     public init(phase: VoicePhase = .idle, inputLevel: Double = 0, partialTranscript: String = "",
                 card: VoiceCard? = nil, hiddenForFullScreen: Bool = false, brainAvailable: Bool = false,
                 brainProblem: String? = nil, sessionKey: String? = nil, sessionProvider: String? = nil,
-                wakeListening: Bool = false, muted: Bool = false) {
+                wakeListening: Bool = false, muted: Bool = false, gesturePending: Bool = false) {
         self.phase = phase
         self.inputLevel = inputLevel
         self.partialTranscript = partialTranscript
@@ -42,6 +47,7 @@ public struct VoiceHostState: Codable, Equatable, Sendable {
         self.sessionProvider = sessionProvider
         self.wakeListening = wakeListening
         self.muted = muted
+        self.gesturePending = gesturePending
     }
 }
 
