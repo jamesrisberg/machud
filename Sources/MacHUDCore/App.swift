@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var voice: VoiceServices!
     private var onboarding: OnboardingServices!
     private var startup: StartupLoadout?
+    private var library: LoadoutLibrary!
     private var trustTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -31,6 +32,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store = LayoutStore()
         panels = PanelRegistry()
         engine = LoadoutEngine(store: store, panels: panels)
+        library = LoadoutLibrary(store: store)
+        library.onEdit = { [weak engine] edit, result in engine?.loadoutEdited(edit, result) }
         monitor = DragMonitor(store: store)
         statusMenu = StatusMenu(store: store)
         editor = LayoutEditorController(store: store)
@@ -142,6 +145,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.monitor.suspended = true
             self.editor.open(loadout: name)
         }
+        loadoutMenu.library = library
+        installLoadoutsTab(loadoutMenu)
         scheduleStartupLoadout()
 
         if CommandLine.arguments.contains("--edit") {
@@ -214,11 +219,9 @@ extension AppDelegate {
                   "layouts": store!.layouts.map { ["name": $0.name, "hidden": $0.hidden ?? false, "regions": $0.regions.map { r in
                     ["id": r.id ?? "", "name": r.name ?? "", "x": r.x, "y": r.y, "w": r.w, "h": r.h] }] }])
         }
-        control.register("loadouts") { [store] _, done in
-            done(["ok": true, "loadouts": store!.loadouts.map { l -> [String: Any] in
-                let data = (try? JSONEncoder().encode(l)) ?? Data()
-                return (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? ["name": l.name]
-            }])
+        control.register("loadouts") { [weak self] args, done in
+            guard let self else { done(["ok": false, "error": "app gone"]); return }
+            done(self.library.handle(args))
         }
         control.register("select-layout") { [store] args, done in
             guard let name = args["name"], let i = store!.layouts.firstIndex(where: { $0.name == name }) else {
@@ -226,7 +229,19 @@ extension AppDelegate {
             }
             store!.select(index: i); done(["ok": true])
         }
-        control.register("edit") { [weak self] _, done in self?.statusMenu.openEditor?(); done(["ok": true]) }
+        // `edit` opens the editor; `loadout=<name>` on that loadout's layout, `new=1` on a blank one.
+        control.register("edit") { [weak self] args, done in
+            guard let self else { done(["ok": false, "error": "app gone"]); return }
+            if let name = args["loadout"] {
+                guard self.store.loadout(named: name) != nil else { done(["ok": false, "error": "no such loadout"]); return }
+                LoadoutMenu.shared?.editLoadout?(name)
+            } else if ["1", "true", "yes"].contains((args["new"] ?? "0").lowercased()) {
+                LoadoutMenu.shared?.openNewLayout?()
+            } else {
+                self.statusMenu.openEditor?()
+            }
+            done(["ok": true])
+        }
         control.register("apply") { [weak self] args, done in
             guard let self, let name = args["loadout"], let loadout = self.store.loadout(named: name) else {
                 done(["ok": false, "error": "no such loadout"]); return
@@ -290,6 +305,37 @@ extension AppDelegate {
             MainActor.assumeIsolated { manager?.configure(store.menuBar, hotkeys: store.config.hotkeys) }
         }
         menuBar = manager
+    }
+
+    /// The settings window's Loadouts tab: reads the store, edits through the library, and
+    /// applies, previews, captures and edits through the loadout menu's own entry points.
+    fileprivate func installLoadoutsTab(_ menu: LoadoutMenu) {
+        let tab = LoadoutsTabModel(services: .init(
+            config: { [weak store] in store?.config ?? .defaults },
+            displays: { LoadoutSketch.Display.attached() },
+            activeLoadout: { [weak engine] in engine?.activeLoadout },
+            perform: { [weak library] edit in
+                guard let library else { throw LoadoutEditError.noSuchLoadout("") }
+                return try library.perform(edit)
+            },
+            apply: { [weak menu, weak store] name in
+                guard let loadout = store?.loadout(named: name) else { return }
+                menu?.apply(loadout, clear: false)
+            },
+            preview: { [weak menu, weak store] name in
+                guard let loadout = store?.loadout(named: name) else { return }
+                menu?.preview(loadout)
+            },
+            edit: { [weak menu] name in menu?.editLoadout?(name) },
+            capture: { [weak menu] in menu?.captureCurrent() },
+            drawNew: { [weak menu] in menu?.openNewLayout?() }))
+        machud.settingsWindow.model.loadouts = tab
+        let previous = store.onChange
+        store.onChange = { [weak tab] in
+            previous?()
+            MainActor.assumeIsolated { tab?.reload() }
+        }
+        tab.reload()
     }
 
     /// The app catalog, the installer (`catalog`, `apps install`) and the Apps tab.

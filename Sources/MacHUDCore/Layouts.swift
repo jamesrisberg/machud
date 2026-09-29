@@ -465,12 +465,6 @@ final class LayoutStore {
         save(c)
     }
 
-    func removeLoadout(named name: String) {
-        var c = config
-        c.loadouts = (c.loadouts ?? []).filter { $0.name != name }
-        save(c)
-    }
-
     var activeLayout: Layout? {
         guard !layouts.isEmpty else { return nil }
         return layouts[min(activeIndex, layouts.count - 1)]
