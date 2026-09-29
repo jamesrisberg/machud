@@ -13,11 +13,11 @@ final class OrbSceneTests: XCTestCase {
 
     // MARK: Phase mapping
 
-    func testIdleIsAPlainRestingOrb() {
+    func testIdleIsARestingOrbThatBreathesAndFloats() {
         let s = scene(VoiceHostState())
         XCTAssertEqual(s.form, .orb)
         XCTAssertEqual(s.tint, .resting)
-        XCTAssertEqual(s.motion, .none)
+        XCTAssertEqual(s.motion, .idle)
         XCTAssertFalse(s.hidden)
         XCTAssertNil(s.card)
         XCTAssertNil(s.errorMessage)
@@ -159,6 +159,18 @@ final class OrbSceneTests: XCTestCase {
         tracker.ingest(VoiceHostState(phase: .idle, card: nil), now: t0)
         XCTAssertNil(tracker.scene(now: t0).card)
         XCTAssertNil(tracker.nextDeadline(now: t0))
+    }
+
+    // MARK: Open session
+
+    func testTheCardOffersTheSessionWhenThereIsOne() {
+        let working = VoiceHostState(phase: .working, card: card, sessionKey: "claude:abc")
+        XCTAssertEqual(scene(working).sessionLink, "Open Session")
+        var named = working
+        named.sessionProvider = "MechaHUD"
+        XCTAssertEqual(scene(named).sessionLink, "Open in MechaHUD")
+        XCTAssertNil(scene(VoiceHostState(phase: .working, card: card)).sessionLink)
+        XCTAssertNil(scene(VoiceHostState(sessionKey: "claude:abc")).sessionLink, "no card, no button")
     }
 
     // MARK: Text

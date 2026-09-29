@@ -47,6 +47,9 @@ public struct VoiceHostEnvironment: Equatable {
     /// `$MACHUD_VOICE_KEYCHAIN_SERVICE`, else `com.jrisberg.machud.voice`: the Keychain service
     /// every secret is read from and written to (an isolated instance never sees the real key).
     public var keychainService: String
+    /// MacHUD's control socket, where `sessions open` goes: `$MACHUD_SOCKET`, else
+    /// `/tmp/machud-<uid>.sock`.
+    public var machudSocketPath: String
 
     public init(environment: [String: String] = ProcessInfo.processInfo.environment) {
         func flag(_ name: String) -> Bool { environment[name] == "1" }
@@ -70,6 +73,11 @@ public struct VoiceHostEnvironment: Equatable {
             keychainService = service
         } else {
             keychainService = VoiceHostMain.secretsService
+        }
+        if let socket = environment["MACHUD_SOCKET"], !socket.isEmpty {
+            machudSocketPath = (socket as NSString).expandingTildeInPath
+        } else {
+            machudSocketPath = "/tmp/machud-\(getuid()).sock"
         }
     }
 }

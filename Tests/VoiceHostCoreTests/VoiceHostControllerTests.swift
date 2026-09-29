@@ -13,6 +13,8 @@ final class VoiceHostControllerTests: XCTestCase {
     private var wake: FakeWake!
     private var presenter: RecordingPresenter!
     private var clock: ManualClock!
+    private var sessions: FakeSessions!
+    private var missingRuntimes: Set<String> = []
     private let brainRoot = URL(fileURLWithPath: "/tmp/voice-tests/Brain")
 
     override func setUp() async throws {
@@ -23,14 +25,19 @@ final class VoiceHostControllerTests: XCTestCase {
         wake = FakeWake()
         presenter = RecordingPresenter()
         clock = ManualClock()
+        sessions = FakeSessions()
+        missingRuntimes = []
     }
 
     private func makeController(_ settings: VoiceHostSettings = VoiceHostSettings(),
                                 brain: BrainDriving?? = nil) -> VoiceHostController {
         let clock = self.clock!
+        let fakeBrain = self.brain!
         let controller = VoiceHostController(
             settings: settings, dictation: dictation, keys: keys,
             brain: brain ?? self.brain, speaker: speaker, wake: wake, brainStateRoot: brainRoot,
+            sessions: sessions, detectRuntimes: FakeRuntimes.detect(missing: missingRuntimes),
+            sessionKeyOf: { _ in fakeBrain.sessionKey },
             now: { clock.now }, schedule: { clock.schedule($0, $1) })
         controller.presenter = presenter
         controller.start()
@@ -259,10 +266,177 @@ final class VoiceHostControllerTests: XCTestCase {
 
     func testAvailabilityIsReflected() {
         let controller = makeController()
-        brain.onAvailabilityChanged?(true)
+        brain.onHealthChanged?(.ready)
         XCTAssertTrue(controller.state.brainAvailable)
-        brain.onAvailabilityChanged?(false)
+        XCTAssertNil(controller.state.brainProblem)
+        brain.onHealthChanged?(.connecting)
         XCTAssertFalse(controller.state.brainAvailable)
+        XCTAssertEqual(controller.state.brainProblem, "Connecting to the brain…")
+    }
+
+    // MARK: Brain problem
+
+    private static let noWorkspace = "Choose a workspace folder for the agent."
+
+    func testTheCompanionsReasonIsTheProblem() {
+        let controller = makeController()
+        brain.onHealthChanged?(.unavailable(Self.noWorkspace))
+        XCTAssertFalse(controller.state.brainAvailable)
+        XCTAssertEqual(controller.state.brainProblem, Self.noWorkspace)
+        brain.onHealthChanged?(.failed("exit 1"))
+        XCTAssertEqual(controller.state.brainProblem, "The brain stopped after repeated failures: exit 1")
+        brain.onHealthChanged?(.restarting("exit 1"))
+        XCTAssertEqual(controller.state.brainProblem, "The brain is restarting: exit 1")
+        brain.onHealthChanged?(.ready)
+        XCTAssertNil(controller.state.brainProblem)
+    }
+
+    func testAnUnavailableBrainRefusesAgentTakesWithItsReason() {
+        let controller = makeController()
+        brain.onHealthChanged?(.unavailable(Self.noWorkspace))
+        controller.perform(.orbClicked)
+        XCTAssertTrue(dictation.starts.isEmpty)
+        XCTAssertEqual(controller.state.phase, .failed(Self.noWorkspace))
+        XCTAssertNil(controller.refusal(for: .dictation))
+    }
+
+    func testAStartingBrainStillTakesTheTake() {
+        let controller = makeController()
+        brain.onHealthChanged?(.starting)
+        XCTAssertEqual(controller.state.brainProblem, "The brain is starting.")
+        controller.perform(.orbClicked)
+        XCTAssertEqual(dictation.starts, [.caller])
+    }
+
+    func testAMissingRuntimeIsTheProblem() {
+        missingRuntimes = ["codex"]
+        let controller = makeController()
+        brain.onHealthChanged?(.ready)
+        XCTAssertFalse(controller.state.brainAvailable)
+        XCTAssertEqual(controller.state.brainProblem, "Codex is not installed.")
+        controller.perform(.start(.agent))
+        XCTAssertTrue(dictation.starts.isEmpty)
+        XCTAssertEqual(controller.state.phase, .failed("Codex is not installed."))
+    }
+
+    func testAMissingRuntimeThatIsNotChosenIsNoProblem() {
+        missingRuntimes = ["claude", "mclaude"]
+        let controller = makeController()
+        brain.onHealthChanged?(.ready)
+        XCTAssertNil(controller.state.brainProblem)
+    }
+
+    func testSettingsProblems() {
+        var settings = VoiceHostSettings()
+        settings.brainEnabled = false
+        let controller = makeController(settings)
+        XCTAssertEqual(controller.state.brainProblem, "The brain is off")
+        settings.enabled = false
+        controller.apply(settings)
+        XCTAssertEqual(controller.state.brainProblem, "Voice is off")
+        settings.enabled = true
+        settings.brainEnabled = true
+        controller.apply(settings)
+        XCTAssertEqual(controller.state.brainProblem, "The brain is starting.")
+    }
+
+    func testNoBrainIsAProblem() {
+        let controller = makeController(brain: .some(nil))
+        XCTAssertEqual(controller.state.brainProblem, "The brain is off")
+    }
+
+    func testFnAlternateWithAnUnavailableBrainPastesAndSaysWhy() {
+        let controller = makeController()
+        brain.onHealthChanged?(.unavailable(Self.noWorkspace))
+        keys.send(.begin(.primary))
+        keys.send(.retarget(.alternate))
+        XCTAssertTrue(dictation.retargets.isEmpty)
+        keys.send(.end)
+        dictation.finish("hello")
+        XCTAssertEqual(controller.state.phase, .failed("Choose a workspace folder for the agent — pasted instead"))
+    }
+
+    func testSubmitToABrainThatIsNotUpSaysWhy() async {
+        brain.submitError = AgentSessionError.server(503, "not ready")
+        let controller = makeController()
+        brain.onHealthChanged?(.connecting)
+        await startTurn(controller)
+        XCTAssertEqual(controller.state.phase, .failed("Connecting to the brain…"))
+    }
+
+    // MARK: Sessions
+
+    func testSnapshotsCarryTheSessionKeyAndItsProvider() async {
+        let controller = makeController()
+        await startTurn(controller)
+        brain.sessionKey = "claude:abc"
+        brain.push(status: "running")
+        XCTAssertEqual(controller.state.sessionKey, "claude:abc")
+        await controller.providerLookup?.value
+        XCTAssertEqual(controller.state.sessionProvider, "SessionsApp")
+    }
+
+    func testNoSessionKeyWithoutOne() async {
+        let controller = makeController()
+        await startTurn(controller)
+        brain.push(status: "running")
+        XCTAssertNil(controller.state.sessionKey)
+        XCTAssertNil(controller.providerLookup)
+    }
+
+    func testTheSessionKeyGoesWithTheBrain() async {
+        let controller = makeController()
+        await startTurn(controller)
+        brain.sessionKey = "claude:abc"
+        brain.push(status: "running")
+        brain.onStopped?()
+        XCTAssertNil(controller.state.sessionKey)
+    }
+
+    func testOpenSessionAsksMacHUD() async {
+        let controller = makeController()
+        await startTurn(controller)
+        brain.sessionKey = "claude:abc"
+        brain.push(status: "idle", output: "Done.")
+        sessions.result = .success("Sessions")
+        controller.perform(.openSession)
+        await settled(controller)
+        XCTAssertEqual(sessions.opened, ["claude:abc"])
+        XCTAssertEqual(controller.state.sessionProvider, "Sessions")
+        XCTAssertEqual(controller.state.phase, .idle)
+    }
+
+    func testOpenSessionFailureShowsBriefly() async {
+        let controller = makeController()
+        await startTurn(controller)
+        brain.sessionKey = "claude:abc"
+        brain.push(status: "idle", output: "Done.")
+        sessions.result = .failure(SessionOpenError(message: "No app shows agent sessions"))
+        controller.perform(.openSession)
+        await settled(controller)
+        XCTAssertEqual(controller.state.phase, .failed("No app shows agent sessions"))
+        clock.advance(to: 3)
+        XCTAssertEqual(controller.state.phase, .idle)
+    }
+
+    func testOpenSessionFailureDuringATurnGoesOnTheCard() async {
+        let controller = makeController()
+        await startTurn(controller)
+        brain.sessionKey = "claude:abc"
+        brain.push(status: "running", output: "Working")
+        sessions.result = .failure(SessionOpenError(message: "No app shows agent sessions"))
+        controller.perform(.openSession)
+        await settled(controller)
+        XCTAssertEqual(controller.state.phase, .working)
+        XCTAssertEqual(controller.state.card?.progress.last, "No app shows agent sessions")
+    }
+
+    func testOpenSessionWithoutASessionSaysSo() async {
+        let controller = makeController()
+        controller.perform(.openSession)
+        await settled(controller)
+        XCTAssertTrue(sessions.opened.isEmpty)
+        XCTAssertEqual(controller.state.phase, .failed(VoiceHostController.noSession))
     }
 
     private func startTurn(_ controller: VoiceHostController, _ text: String = "list my files") async {

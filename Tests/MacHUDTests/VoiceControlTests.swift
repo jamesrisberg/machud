@@ -17,6 +17,9 @@ final class FakeVoiceHost {
                   "grok": ["voice": "ara"]],
     ]
     var muted = false
+    var brainProblem: String? = "Choose a workspace folder for the agent."
+    var mclaudeInstalled = false
+    var brainRequests: [[String: String]] = []
     var actions: [[String: String]] = []
     var secrets: [String: String] = [:]
     var settingsSets = 0
@@ -48,6 +51,18 @@ final class FakeVoiceHost {
             done(["ok": true])
             self.server.publish("state", payload: ["state": self.state])
         }
+        server.register("brain") { [unowned self] args, done in
+            self.brainRequests.append(args)
+            var reply: [String: Any] = [
+                "ok": true, "available": self.brainProblem == nil, "workspace": "",
+                "runtimes": [["id": "codex", "name": "Codex", "installed": true, "path": "/bin/codex"],
+                             ["id": "claude", "name": "Claude", "installed": false],
+                             ["id": "hermes", "name": "Hermes", "installed": false],
+                             ["id": "mclaude", "name": "mclaude", "installed": self.mclaudeInstalled]],
+            ]
+            if let problem = self.brainProblem { reply["problem"] = problem }
+            done(reply)
+        }
         server.register("secret") { [unowned self] args, done in
             guard let name = args["name"] else { done(["ok": false, "error": "secret needs name="]); return }
             if args["action"] == "set" { self.secrets[name] = args["value"] } else { self.secrets[name] = nil }
@@ -56,7 +71,11 @@ final class FakeVoiceHost {
     }
 
     var settingsGets = 0
-    var state: [String: Any] { ["phase": ["name": "idle"], "muted": muted, "brainAvailable": false] }
+    var state: [String: Any] {
+        var state: [String: Any] = ["phase": ["name": "idle"], "muted": muted, "brainAvailable": brainProblem == nil]
+        if let brainProblem { state["brainProblem"] = brainProblem }
+        return state
+    }
 }
 
 @MainActor
@@ -117,6 +136,10 @@ final class VoiceControlTests: XCTestCase {
         XCTAssertEqual(try parse(["secret", "set", "name=grok", "value=k"]),
                        .forward("secret", ["action": "set", "name": "grok", "value": "k"]))
         XCTAssertEqual(try parse(["secret", "clear", "name=grok"]), .forward("secret", ["action": "clear", "name": "grok"]))
+        XCTAssertEqual(try parse(["brain"]), .forward("brain", ["action": "status"]))
+        XCTAssertEqual(try parse(["brain", "status"]), .forward("brain", ["action": "status"]))
+        XCTAssertEqual(try parse(["action", "open-session"]), .forward("action", ["name": "open-session"]))
+        XCTAssertEqual(try parse(["action", "name=open-session"]), .forward("action", ["name": "open-session"]))
     }
 
     func testRejectsBadRequests() {
@@ -131,6 +154,7 @@ final class VoiceControlTests: XCTestCase {
         fails(["settings", "set", "settings=[1]"], "not an object")
         fails(["secret", "set", "name=grok"], "no value")
         fails(["secret", "set", "value=k"], "no name")
+        fails(["brain", "action=restart"], "brain only reports status")
     }
 
     func testMergeFollowsTheStoredTypes() throws {
@@ -309,5 +333,54 @@ final class VoiceControlTests: XCTestCase {
         guard case .unavailable(let message) = model.status else { return XCTFail("\(model.status)") }
         XCTAssertFalse(message.isEmpty)
         XCTAssertFalse(model.canEdit)
+    }
+
+    // MARK: - Brain
+
+    func testBrainStatusIsForwarded() {
+        supervisor.start()
+        let reply = run(["brain", "status"])
+        XCTAssertEqual(reply["ok"] as? Bool, true)
+        XCTAssertEqual(reply["problem"] as? String, "Choose a workspace folder for the agent.")
+        XCTAssertEqual((reply["runtimes"] as? [[String: Any]])?.count, 4)
+        XCTAssertEqual(host.brainRequests.last?["action"], "status")
+    }
+
+    func testTheBrainTabShowsTheProblemAndFollowsIt() {
+        supervisor.start()
+        let model = voice.settingsModel
+        XCTAssertTrue(spin(until: { model.status == .ready }))
+        XCTAssertTrue(spin(until: { model.brainProblem == "Choose a workspace folder for the agent." }))
+        XCTAssertTrue(spin(until: { model.runtimes.count == 4 }))
+        host.brainProblem = nil
+        host.server.publish("state", payload: ["state": host.state])
+        XCTAssertTrue(spin(until: { model.brainProblem == nil }))
+        XCTAssertEqual(model.json["brainProblem"] as? String, nil)
+    }
+
+    func testMclaudeIsOfferedOnceItIsFound() {
+        supervisor.start()
+        let model = voice.settingsModel
+        XCTAssertTrue(spin(until: { model.runtimes.count == 4 }))
+        XCTAssertEqual(model.runtimeOptions.map(\.value), ["codex", "claude", "hermes"])
+        XCTAssertEqual(model.runtimeOptions.map(\.title), ["Codex", "Claude (not installed)", "Hermes (not installed)"])
+        host.mclaudeInstalled = true
+        var loaded = false
+        model.loadBrainStatus { loaded = true }
+        XCTAssertTrue(spin(until: { loaded }))
+        XCTAssertEqual(model.runtimeOptions.map(\.value), ["codex", "claude", "hermes", "mclaude"])
+    }
+
+    func testStatusFollowsTheHostFromStoppedToStartingToReady() {
+        host.server.stop()
+        supervisor.start()
+        supervisor.stop()
+        let model = voice.settingsModel
+        XCTAssertEqual(model.status, .unavailable("The voice host is stopped."))
+        supervisor.start()
+        XCTAssertEqual(model.status, .unavailable("The voice host is starting."), "not stuck on stopped")
+        host = FakeVoiceHost(path: path)
+        XCTAssertTrue(host.server.start())
+        XCTAssertTrue(spin(until: { model.status == .ready }, timeout: 10))
     }
 }

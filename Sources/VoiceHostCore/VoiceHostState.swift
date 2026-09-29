@@ -12,8 +12,16 @@ public struct VoiceHostState: Codable, Equatable, Sendable {
     public var card: VoiceCard?
     /// The frontmost app is full screen on the orb's screen; the orb hides, the gestures still work.
     public var hiddenForFullScreen: Bool
-    /// The brain service is running and reachable.
+    /// The brain service is running, reachable and able to take a turn.
     public var brainAvailable: Bool
+    /// Why the brain cannot take a turn, in words for the user ("Choose a workspace folder for
+    /// the agent.", "Codex is not installed."); nil once it can.
+    public var brainProblem: String?
+    /// The brain's current session, when its runtime drives one other apps also show
+    /// (mechaclaude's key, `claude:<sessionId>`); `openSession` asks MacHUD to show it.
+    public var sessionKey: String?
+    /// The app MacHUD opens agent sessions in (the `agent-sessions` provider), once known.
+    public var sessionProvider: String?
     /// The wake word is armed and listening.
     public var wakeListening: Bool
     /// The user muted the voice host: no fn gestures, no wake word, no spoken replies.
@@ -21,6 +29,7 @@ public struct VoiceHostState: Codable, Equatable, Sendable {
 
     public init(phase: VoicePhase = .idle, inputLevel: Double = 0, partialTranscript: String = "",
                 card: VoiceCard? = nil, hiddenForFullScreen: Bool = false, brainAvailable: Bool = false,
+                brainProblem: String? = nil, sessionKey: String? = nil, sessionProvider: String? = nil,
                 wakeListening: Bool = false, muted: Bool = false) {
         self.phase = phase
         self.inputLevel = inputLevel
@@ -28,6 +37,9 @@ public struct VoiceHostState: Codable, Equatable, Sendable {
         self.card = card
         self.hiddenForFullScreen = hiddenForFullScreen
         self.brainAvailable = brainAvailable
+        self.brainProblem = brainProblem
+        self.sessionKey = sessionKey
+        self.sessionProvider = sessionProvider
         self.wakeListening = wakeListening
         self.muted = muted
     }
@@ -147,6 +159,8 @@ public enum VoiceHostAction: Codable, Equatable, Sendable {
     case deny(id: String)
     case dismissCard
     case setMuted(Bool)
+    /// Show the brain's current session (`sessionKey`) in the app MacHUD opens sessions in.
+    case openSession
 }
 
 /// The UI's way back into the controller.

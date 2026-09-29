@@ -38,6 +38,46 @@ final class OrbAnimatorTests: XCTestCase {
         XCTAssertTrue(animator.isSettled(for: scene(.orb)))
         XCTAssertFalse(animator.isSettled(for: scene(.orb, .spin)))
         XCTAssertFalse(animator.isSettled(for: scene(.orb, .pulse)))
+        XCTAssertFalse(animator.isSettled(for: scene(.orb, .idle)))
+    }
+
+    // MARK: Resting float
+
+    func testTheFloatEasesInWhileResting() {
+        var animator = OrbAnimator()
+        for _ in 0..<(60 * 3) { animator.advance(dt: 1.0 / 60, scene: scene(.orb, .idle), level: 0, reduceMotion: false) }
+        XCTAssertEqual(animator.float, 1)
+        XCTAssertGreaterThan(animator.bobOffset, 0)
+        XCTAssertLessThanOrEqual(animator.bobOffset, OrbLayout.bobAmplitude)
+    }
+
+    func testTheFloatEasesOutWhenSomethingElseTakesOver() {
+        var animator = OrbAnimator(float: 1)
+        for _ in 0..<100 { animator.advance(dt: 1.0 / 60, scene: scene(.orb, .idle), level: 0, reduceMotion: false) }
+        let offset = animator.bobOffset
+        XCTAssertGreaterThan(offset, 0)
+        animator.advance(dt: 1.0 / 60, scene: scene(.orb, .pulse), level: 0, reduceMotion: false)
+        XCTAssertLessThan(animator.float, 1)
+        XCTAssertGreaterThan(animator.float, 0.5, "eases, never jumps")
+        for _ in 0..<(60 * 3) { animator.advance(dt: 1.0 / 60, scene: scene(.orb, .pulse), level: 0, reduceMotion: false) }
+        XCTAssertEqual(animator.float, 0)
+        XCTAssertEqual(animator.bobOffset, 0)
+    }
+
+    func testTheFloatStopsForACardOrWhenMuted() {
+        var withCard = scene(.orb, .idle)
+        withCard.card = VoiceCard(prompt: "hi")
+        XCTAssertEqual(OrbAnimator.floatTarget(for: withCard, reduceMotion: false), 0)
+        XCTAssertEqual(OrbAnimator.floatTarget(for: scene(.orb, .none), reduceMotion: false), 0, "muted rests still")
+        XCTAssertEqual(OrbAnimator.floatTarget(for: scene(.orb, .idle), reduceMotion: false), 1)
+    }
+
+    func testReduceMotionHasNoFloat() {
+        var animator = OrbAnimator(float: 1)
+        animator.advance(dt: 1.0 / 60, scene: scene(.orb, .idle), level: 0, reduceMotion: true)
+        XCTAssertEqual(animator.float, 0)
+        XCTAssertEqual(animator.bobOffset, 0)
+        XCTAssertTrue(animator.isSettled(for: scene(.orb, .idle), reduceMotion: true))
     }
 
     func testLevelAttacksFastAndReleasesSlowly() {

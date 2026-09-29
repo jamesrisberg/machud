@@ -23,6 +23,8 @@ enum OrbMotion: Equatable {
     case spin
     /// A slow glow.
     case breathe
+    /// Resting: a soft halo breathing slowly and a gentle float below the rest position.
+    case idle
 }
 
 /// What the orb and card show for one moment: the state mapped through the presenter's
@@ -38,10 +40,12 @@ struct OrbScene: Equatable {
     var card: VoiceCard?
     /// A failure message shown under the orb.
     var errorMessage: String?
+    /// The card's "Open in …" button title, when the brain's session can be shown elsewhere.
+    var sessionLink: String?
     var muted = false
 
     init(hidden: Bool, form: OrbForm, tint: OrbTint, motion: OrbMotion, accessibilityStatus: String,
-         card: VoiceCard? = nil, errorMessage: String? = nil, muted: Bool = false) {
+         card: VoiceCard? = nil, errorMessage: String? = nil, sessionLink: String? = nil, muted: Bool = false) {
         self.hidden = hidden
         self.form = form
         self.tint = tint
@@ -49,6 +53,7 @@ struct OrbScene: Equatable {
         self.accessibilityStatus = accessibilityStatus
         self.card = card
         self.errorMessage = errorMessage
+        self.sessionLink = sessionLink
         self.muted = muted
     }
 }
@@ -110,7 +115,14 @@ struct OrbSceneTracker {
             return scene
         }
         scene.card = showsCard(phase: phase, now: now) ? state.card : nil
+        if scene.card != nil, state.sessionKey != nil { scene.sessionLink = Self.sessionLink(provider: state.sessionProvider) }
         return scene
+    }
+
+    /// "Open in <app>", or a plain title until MacHUD has named the app.
+    static func sessionLink(provider: String?) -> String {
+        guard let provider, !provider.isEmpty else { return "Open Session" }
+        return "Open in \(provider)"
     }
 
     /// The next moment the scene changes without a new state (a failure or linger expiring,
@@ -153,7 +165,7 @@ struct OrbSceneTracker {
             OrbScene(hidden: false, form: form, tint: tint, motion: motion, accessibilityStatus: status)
         }
         switch phase {
-        case .idle: return muted ? s(.orb, .muted, .none, "Muted") : s(.orb, .resting, .none, "Ready")
+        case .idle: return muted ? s(.orb, .muted, .none, "Muted") : s(.orb, .resting, .idle, "Ready")
         case .listening(.dictation): return s(.waveform, .dictation, .bars, "Dictating")
         case .transcribing(.dictation): return s(.waveform, .dictation, .spinner, "Transcribing")
         case .listening(.agent): return s(.orb, .agent, .pulse, "Listening")

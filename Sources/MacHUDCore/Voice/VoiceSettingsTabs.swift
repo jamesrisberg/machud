@@ -2,8 +2,9 @@ import AppKit
 import SwiftUI
 
 /// The Voice and Brain tabs of the settings window. Everything goes through the voice host's
-/// socket (`settings get`, `settings set` with the whole object, `secret set|clear`); while the
-/// host is down the tabs say why and edit nothing.
+/// socket (`settings get`, `settings set` with the whole object, `secret set|clear`,
+/// `brain status`, and its `state` events for the brain's problem); while the host is down the
+/// tabs say why and edit nothing.
 @MainActor
 final class VoiceSettingsModel: ObservableObject {
     static let voiceTabID = "voice"
@@ -29,7 +30,22 @@ final class VoiceSettingsModel: ObservableObject {
     @Published var lastError: String?
     /// What happened to the last key saved or removed.
     @Published var secretNote: String?
+    /// Why the brain cannot take a turn (the host's `brainProblem`); nil once it can.
+    @Published private(set) var brainProblem: String?
+    /// The runtimes the host found on this Mac (`brain status`), in its order.
+    @Published private(set) var runtimes: [BrainRuntimeInfo] = []
     weak var services: VoiceServices?
+
+    /// One runtime from `brain status`.
+    struct BrainRuntimeInfo: Equatable {
+        var id: String
+        var name: String
+        var installed: Bool
+        var path: String?
+    }
+
+    /// Runtimes the picker always lists; mclaude joins them once it is found (or chosen).
+    static let baseRuntimes = [("codex", "Codex"), ("claude", "Claude"), ("hermes", "Hermes")]
 
     var canEdit: Bool { status == .ready }
     /// Voice is switched off: the tabs offer to turn it on.
@@ -47,6 +63,8 @@ final class VoiceSettingsModel: ObservableObject {
             if reply["ok"] as? Bool == true, let settings = reply["settings"] as? [String: Any] {
                 self.settings = settings
                 self.status = .ready
+                self.hostStateChanged(services.connection.state)
+                self.loadBrainStatus()
             } else {
                 self.status = .unavailable(services.connection.isConnected
                     ? reply["error"] as? String ?? "settings get failed" : "The voice host is starting.")
@@ -55,13 +73,55 @@ final class VoiceSettingsModel: ObservableObject {
         }
     }
 
-    /// The host came up or went away.
+    /// The host came up or went away, or the supervisor's status changed. Until the host is
+    /// connected the status follows the supervisor, so a host that has started but not yet
+    /// answered reads as starting, never as the stopped it was before.
     func hostAvailabilityChanged() {
         guard let services else { return }
         if services.connection.isConnected {
             load()
-        } else if status == .ready || !services.supervisor.isRunning {
+        } else {
             status = .unavailable(services.supervisor.isRunning ? "The voice host is starting." : services.supervisor.status.text)
+            brainProblem = nil
+        }
+    }
+
+    /// A `state` from the host: keeps the brain's problem current. Called for every state event,
+    /// so it publishes only a change.
+    func hostStateChanged(_ state: [String: Any]?) {
+        let problem = state?["brainProblem"] as? String
+        guard problem != brainProblem else { return }
+        brainProblem = problem
+        // The runtime found, or the workspace, may be what changed.
+        if status == .ready { loadBrainStatus() }
+    }
+
+    /// `brain status`: which runtimes are installed.
+    func loadBrainStatus(completion: (() -> Void)? = nil) {
+        guard let services else { completion?(); return }
+        services.perform(.forward("brain", ["action": "status"])) { [weak self] reply in
+            defer { completion?() }
+            guard let self, reply["ok"] as? Bool == true, let list = reply["runtimes"] as? [[String: Any]] else { return }
+            let runtimes = list.compactMap { entry -> BrainRuntimeInfo? in
+                guard let id = entry["id"] as? String else { return nil }
+                return BrainRuntimeInfo(id: id, name: entry["name"] as? String ?? id,
+                                        installed: entry["installed"] as? Bool ?? false, path: entry["path"] as? String)
+            }
+            if runtimes != self.runtimes { self.runtimes = runtimes }
+        }
+    }
+
+    /// The runtime picker's choices: Codex, Claude and Hermes, plus mclaude when it is installed
+    /// or already chosen; a runtime the host did not find says so.
+    var runtimeOptions: [(value: String, title: String)] {
+        let chosen = string("brain.runtime")
+        var options = Self.baseRuntimes
+        if runtimes.contains(where: { $0.id == "mclaude" && $0.installed }) || chosen == "mclaude" {
+            options.append(("mclaude", "mclaude"))
+        }
+        return options.map { id, name in
+            let found = runtimes.first { $0.id == id }
+            return (id, found?.installed == false ? "\(name) (not installed)" : name)
         }
     }
 
@@ -119,6 +179,7 @@ final class VoiceSettingsModel: ObservableObject {
     var json: [String: Any] {
         var d: [String: Any] = ["status": status.text]
         if canEdit { d["settings"] = settings }
+        if let brainProblem { d["brainProblem"] = brainProblem }
         if let lastError { d["lastError"] = lastError }
         return d
     }
@@ -178,11 +239,18 @@ struct BrainTabView: View {
     var body: some View {
         VoiceTabFrame(model: model) {
             Section("Brain") {
+                BrainProblemRow(problem: model.brainProblem)
                 VoiceToggle(model: model, title: "Brain on", path: "brainEnabled",
                             help: "Off leaves dictation only.")
-                VoicePicker(model: model, title: "Runtime", path: "brain.runtime",
-                            options: [("codex", "Codex"), ("claude", "Claude"), ("hermes", "Hermes")])
-                VoiceText(model: model, title: "Workspace", path: "brain.workspacePath", isPath: true)
+                VoicePicker(model: model, title: "Runtime", path: "brain.runtime", options: model.runtimeOptions)
+                if model.runtimeOptions.contains(where: { $0.value == "mclaude" }) {
+                    Text("mclaude runs a Claude Code session that also appears in MechaHUD, so you can pick up the same conversation there.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                VoiceText(model: model, title: "Workspace", path: "brain.workspacePath", isPath: true, foldersOnly: true,
+                          prompt: "Choose a folder")
+                Text("The folder the agent works in. The brain needs one before it can start.")
+                    .font(.caption).foregroundStyle(.secondary)
                 VoiceText(model: model, title: "Assistant name", path: "brain.assistantName")
                 VoiceText(model: model, title: "Port", path: "brainPort", isNumber: true)
             }
@@ -194,6 +262,23 @@ struct BrainTabView: View {
                 Text("Empty paths are looked up on PATH and the usual install folders.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+        }
+    }
+}
+
+/// Whether the brain can take a turn, and why not.
+struct BrainProblemRow: View {
+    let problem: String?
+
+    var body: some View {
+        if let problem {
+            Label(problem, systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .accessibilityLabel("Brain: \(problem)")
+        } else {
+            Label("Ready", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .accessibilityLabel("Brain ready")
         }
     }
 }
@@ -263,12 +348,15 @@ struct VoiceText: View {
     let path: String
     var isPath = false
     var isNumber = false
+    /// The Choose… panel picks folders only.
+    var foldersOnly = false
+    var prompt: String?
     @State private var draft = ""
 
     var body: some View {
         LabeledContent(title) {
             HStack {
-                TextField(title, text: $draft).labelsHidden().onSubmit { commit(draft) }
+                TextField(title, text: $draft, prompt: prompt.map { Text($0) }).labelsHidden().onSubmit { commit(draft) }
                 if isPath { Button("Choose…") { choose() } }
             }
         }
@@ -288,7 +376,8 @@ struct VoiceText: View {
     private func choose() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
-        panel.canChooseFiles = true
+        panel.canChooseFiles = !foldersOnly
+        panel.canCreateDirectories = foldersOnly
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
         draft = url.path

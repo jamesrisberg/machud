@@ -33,6 +33,20 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   line; `machud voice settings set voice.speakReplies=true` changes one setting, and
   `machud voice secret set name=grok` asks for the key without showing it.
 - MacHUD asks for the microphone, which the voice host uses under MacHUD's permission.
+- When the agent can't take a request, the orb says why (for example "Choose a workspace folder
+  for the agent." or "Codex is not installed.") instead of recording it first, and the Brain
+  tab shows the same reason, or Ready.
+- The Brain tab picks the workspace with a folder picker and says it is required; the agent
+  never starts in a folder you didn't choose. The runtime list marks runtimes that aren't
+  installed and offers mclaude once it is, noting that its session also appears in MechaHUD.
+- When the agent's session is one other apps show too (mclaude), the reply card has an
+  "Open in <app>" button that shows it there.
+- The resting orb breathes softly and floats a few points below its spot, so it reads as alive
+  and ready; it stays still when muted and under Reduce Motion.
+- The reply card grows out of the orb and folds back into it, instead of sliding in from the
+  side; with Reduce Motion it fades in place.
+- `machud voice brain status` shows whether the agent is ready, why not, and which runtimes
+  are installed.
 
 ## [0.1.0] — 2026-09-27
 
