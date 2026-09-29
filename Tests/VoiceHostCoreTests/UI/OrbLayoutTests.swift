@@ -85,13 +85,118 @@ final class OrbLayoutTests: XCTestCase {
         XCTAssertEqual(frame.midX, plain.screenFrame.midX)
     }
 
-    func testCollapsedCardFrameKeepsTheTopEdge() {
-        let full = OrbLayout.cardFrame(size: CGSize(width: 340, height: 200), geometry: notched)
-        let collapsed = OrbLayout.collapsed(full)
-        XCTAssertEqual(collapsed.maxY, full.maxY)
-        XCTAssertEqual(collapsed.midX, full.midX)
-        XCTAssertLessThan(collapsed.height, full.height)
-        XCTAssertLessThan(collapsed.width, full.width)
+    // MARK: Resting float
+
+    func testTheFloatOnlyDriftsDownWithinItsAmplitude() {
+        var lowest: CGFloat = 0
+        for step in 0...720 {
+            let offset = OrbLayout.bob(phase: Double(step) / 100)
+            XCTAssertGreaterThanOrEqual(offset, 0, "never up into the notch or menu bar")
+            XCTAssertLessThanOrEqual(offset, OrbLayout.bobAmplitude + 1e-9)
+            lowest = max(lowest, offset)
+        }
+        XCTAssertEqual(lowest, OrbLayout.bobAmplitude, accuracy: 0.01)
+        XCTAssertEqual(OrbLayout.bob(phase: 0), 0)
+        XCTAssertEqual(OrbLayout.bob(phase: OrbLayout.bobPeriod / 2), OrbLayout.bobAmplitude, accuracy: 1e-9)
+        XCTAssertEqual(OrbLayout.bob(phase: OrbLayout.bobPeriod), 0, accuracy: 1e-9)
+        XCTAssertLessThanOrEqual(OrbLayout.bobAmplitude, 4, "subtle: a few points")
+        XCTAssertTrue((3...4).contains(OrbLayout.bobPeriod), "slow: 3-4 s a cycle")
+    }
+
+    func testTheOrbWindowHasRoomForTheFloat() {
+        let size = OrbLayout.windowSize(stretch: 0, geometry: notched)
+        XCTAssertGreaterThanOrEqual(size.height, OrbLayout.orbTopGap + OrbLayout.orbDiameter + OrbLayout.bobAmplitude)
+        XCTAssertEqual(OrbLayout.bobRoom(stretch: 1), 0)
+    }
+
+    func testTheOrbFrameIsTheRestingOrbAndFloatsDown() {
+        let rest = OrbLayout.orbFrame(geometry: notched)
+        XCTAssertEqual(rest.midX, 756)
+        XCTAssertEqual(rest.maxY, 950 - OrbLayout.orbTopGap)
+        XCTAssertEqual(rest.size, CGSize(width: OrbLayout.orbDiameter, height: OrbLayout.orbDiameter))
+        XCTAssertEqual(OrbLayout.orbFrame(geometry: notched, bob: 3).maxY, rest.maxY - 3)
+    }
+
+    func testTheBreathStaysInRange() {
+        for step in 0...600 {
+            XCTAssertTrue((0...1).contains(OrbLayout.breath(phase: Double(step) / 100)))
+        }
+    }
+
+    // MARK: Card grow
+
+    private var card: CGRect { OrbLayout.cardFrame(size: CGSize(width: 340, height: 200), geometry: notched) }
+    private var orb: CGRect { OrbLayout.orbFrame(geometry: notched) }
+
+    func testTheGrowStartsAsTheOrbAndEndsAsTheCard() {
+        let start = OrbLayout.growShape(progress: 0, orb: orb, card: card)
+        XCTAssertEqual(start.rect, orb)
+        XCTAssertEqual(start.radius, OrbLayout.orbDiameter / 2, "a circle")
+        let end = OrbLayout.growShape(progress: 1, orb: orb, card: card)
+        XCTAssertEqual(end.rect, card)
+        XCTAssertEqual(end.radius, OrbLayout.cardCornerRadius)
+    }
+
+    func testTheGrowOpensDownAndOutwardAroundTheOrb() {
+        var last = OrbLayout.growShape(progress: 0, orb: orb, card: card)
+        for step in 1...20 {
+            let shape = OrbLayout.growShape(progress: CGFloat(step) / 20, orb: orb, card: card)
+            XCTAssertGreaterThanOrEqual(shape.rect.width, last.rect.width)
+            XCTAssertGreaterThanOrEqual(shape.rect.height, last.rect.height)
+            XCTAssertLessThanOrEqual(shape.rect.maxY, last.rect.maxY, "the top edge only moves down")
+            XCTAssertEqual(shape.rect.midX, 756, accuracy: 0.001, "no sideways slide")
+            XCTAssertLessThanOrEqual(shape.radius, min(shape.rect.width, shape.rect.height) / 2 + 0.001)
+            last = shape
+        }
+    }
+
+    func testTheCollapseEndsOnTheOrb() {
+        var grow = CardGrow()
+        grow.target = 1
+        grow.advance(dt: 1, reduceMotion: false)
+        XCTAssertEqual(grow.progress, 1)
+        grow.target = 0
+        grow.advance(dt: OrbLayout.cardCloseDuration / 2, reduceMotion: false)
+        XCTAssertEqual(grow.progress, 0.5, accuracy: 0.001)
+        grow.advance(dt: OrbLayout.cardCloseDuration, reduceMotion: false)
+        XCTAssertEqual(grow.progress, 0)
+        XCTAssertEqual(OrbLayout.growShape(progress: grow.progress, orb: orb, card: card).rect, orb)
+    }
+
+    func testTheGrowTakesItsDurationAndReverses() {
+        var grow = CardGrow()
+        grow.target = 1
+        grow.advance(dt: OrbLayout.cardOpenDuration / 2, reduceMotion: false)
+        XCTAssertEqual(grow.progress, 0.5, accuracy: 0.001)
+        XCTAssertFalse(grow.isSettled)
+        grow.target = 0
+        grow.advance(dt: 0.01, reduceMotion: false)
+        XCTAssertLessThan(grow.progress, 0.5, "folds back from where it is")
+    }
+
+    func testReduceMotionDoesNotGrow() {
+        var grow = CardGrow()
+        grow.target = 1
+        grow.advance(dt: 0.001, reduceMotion: true)
+        XCTAssertEqual(grow.progress, 1)
+    }
+
+    func testTheWindowCoversTheOrbOnlyWhileTheShapeTravels() {
+        XCTAssertEqual(OrbLayout.growWindowFrame(progress: 1, orb: orb, card: card), card)
+        let traveling = OrbLayout.growWindowFrame(progress: 0.4, orb: orb, card: card)
+        XCTAssertTrue(traveling.contains(orb) && traveling.contains(card))
+    }
+
+    func testTheContentFadesInOnceTheShapeIsMostlyOpen() {
+        XCTAssertEqual(OrbLayout.contentAlpha(progress: 0), 0)
+        XCTAssertEqual(OrbLayout.contentAlpha(progress: 0.5), 0)
+        XCTAssertGreaterThan(OrbLayout.contentAlpha(progress: 0.8), 0)
+        XCTAssertEqual(OrbLayout.contentAlpha(progress: 1), 1)
+    }
+
+    func testTheMessagePillKeepsItsRoundEnds() {
+        let pill = CGRect(x: 600, y: 800, width: 180, height: 26)
+        XCTAssertEqual(OrbLayout.growShape(progress: 1, orb: orb, card: pill).radius, 13)
     }
 
     func testBarsFitInsideTheWaveformBody() {

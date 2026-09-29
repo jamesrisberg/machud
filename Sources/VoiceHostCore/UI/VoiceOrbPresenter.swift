@@ -2,8 +2,9 @@ import AppKit
 import HUDKit
 
 /// The notch orb: a small plain orb centered just under the notch (hanging from the menu bar
-/// on a screen without one), always visible, that stretches into SpeakFree's waveform body
-/// while dictating, pulses while the agent listens, and grows a reply card downward.
+/// on a screen without one), always visible, that breathes and floats gently while it rests,
+/// stretches into SpeakFree's waveform body while dictating, pulses while the agent listens,
+/// and grows its reply card out of itself (and folds it back in).
 ///
 /// Renders purely from `VoiceHostState`; user input goes back through `VoiceHostActing`.
 /// Two borderless non-activating panels at `HUDPanelWindow.notchAnchorLevel`, one for the orb
@@ -27,7 +28,9 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
     private let orbView: OrbView
     private let cardWindow: HUDPanelWindow
     private let cardView = OrbCardView(frame: .zero)
+    /// The card window is on screen (open, growing, or folding back into the orb).
     private var cardShown = false
+    private var cardGrow = CardGrow()
     private var visible = false
 
     private var displayTimer: Timer?
@@ -104,42 +107,53 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
         }
     }
 
+    /// The card grows out of the orb and folds back into it, driven by `cardGrow` from the
+    /// display timer. The window frame is never animated: it jumps to cover the orb and the
+    /// card while the shape travels, and to the card alone once it is open, and the card view
+    /// keeps its content in the card's place throughout. Under Reduce Motion the card fades in
+    /// and out where it stands.
     private func applyCard() {
         let wantsCard = visible && (scene.card != nil || scene.errorMessage != nil)
-        if wantsCard, cardView.card != scene.card || cardView.errorMessage != scene.errorMessage {
-            cardView.update(card: scene.card, errorMessage: scene.errorMessage)
+        if wantsCard, cardView.card != scene.card || cardView.errorMessage != scene.errorMessage
+            || cardView.sessionLink != scene.sessionLink {
+            cardView.update(card: scene.card, errorMessage: scene.errorMessage, sessionLink: scene.sessionLink)
         }
         // A message alone is informational; clicks go through to the window underneath.
         cardWindow.ignoresMouseEvents = scene.card == nil
-        let target = OrbLayout.cardFrame(size: cardView.fittingCardSize, geometry: geometry)
+        cardGrow.target = wantsCard ? 1 : 0
         if wantsCard && !cardShown {
             cardShown = true
-            cardWindow.setFrame(reduceMotion ? target : OrbLayout.collapsed(target), display: false)
-            cardWindow.alphaValue = 0
+            cardWindow.alphaValue = reduceMotion ? 0 : 1
+            layoutCard()
             cardWindow.orderFrontRegardless()
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.22
-                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                cardWindow.animator().setFrame(target, display: true)
-                cardWindow.animator().alphaValue = 1
-            }
-        } else if wantsCard {
-            if cardWindow.frame != target { cardWindow.setFrame(target, display: true) }
-        } else if cardShown {
+            // Same level: the orb stays above the card where the growing shape passes under it.
+            if visible { orbWindow.orderFrontRegardless() }
+            if reduceMotion { fade(cardWindow, to: 1) }
+        } else if !wantsCard, cardShown, reduceMotion {
             cardShown = false
             cardHovered = false
-            let collapsed = OrbLayout.collapsed(cardWindow.frame)
-            NSAnimationContext.runAnimationGroup({ context in
-                context.duration = 0.18
-                if !reduceMotion { cardWindow.animator().setFrame(collapsed, display: true) }
-                cardWindow.animator().alphaValue = 0
-            }, completionHandler: { [weak self] in
-                MainActor.assumeIsolated {
-                    guard let self, !self.cardShown else { return }
-                    self.cardWindow.orderOut(nil)
-                }
-            })
+            fade(cardWindow, to: 0) { [weak self] in
+                guard let self, !self.cardShown else { return }
+                self.cardWindow.orderOut(nil)
+            }
         }
+        layoutCard()
+    }
+
+    /// Places the card window and shape for the grow's progress; puts the window away once the
+    /// card has folded back into the orb.
+    private func layoutCard() {
+        guard cardShown else { return }
+        if !reduceMotion, cardGrow.target == 0, cardGrow.progress == 0 {
+            cardShown = false
+            cardHovered = false
+            cardWindow.orderOut(nil)
+            return
+        }
+        let card = OrbLayout.cardFrame(size: cardView.fittingCardSize, geometry: geometry)
+        let orb = OrbLayout.orbFrame(geometry: geometry, bob: animator.bobOffset)
+        let frame = cardView.layoutGrow(progress: reduceMotion ? 1 : cardGrow.progress, card: card, orb: orb)
+        if cardWindow.frame != frame { cardWindow.setFrame(frame, display: true) }
     }
 
     private func layoutOrb() {
@@ -161,10 +175,26 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
 
     // MARK: Timers
 
+    private var isSettled: Bool {
+        animator.isSettled(for: scene, reduceMotion: reduceMotion) && (cardGrow.isSettled || reduceMotion)
+    }
+
+    /// 60 frames a second while something moves quickly; the resting breath and float alone
+    /// are slow enough for 24, which keeps an always-visible orb cheap.
+    private var frameInterval: TimeInterval {
+        let restingOnly = scene.motion == .idle && cardGrow.isSettled
+            && animator.stretch == OrbAnimator.target(for: scene)
+        return restingOnly ? 1.0 / 24 : 1.0 / 60
+    }
+
     private func startDisplayTimerIfNeeded() {
-        guard displayTimer == nil, visible, !animator.isSettled(for: scene, reduceMotion: reduceMotion) else { return }
+        if let timer = displayTimer, timer.timeInterval != frameInterval {
+            timer.invalidate()
+            displayTimer = nil
+        }
+        guard displayTimer == nil, visible || cardShown, !isSettled else { return }
         lastTick = Date()
-        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: frameInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -176,10 +206,16 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
         let dt = min(now.timeIntervalSince(lastTick), 0.1)
         lastTick = now
         animator.advance(dt: dt, scene: scene, level: tracker.state.inputLevel, reduceMotion: reduceMotion)
+        cardGrow.advance(dt: dt, reduceMotion: reduceMotion)
         layoutOrb()
-        if !visible || animator.isSettled(for: scene, reduceMotion: reduceMotion) {
+        layoutCard()
+        if !(visible || cardShown) || isSettled {
             displayTimer?.invalidate()
             displayTimer = nil
+        } else if displayTimer?.timeInterval != frameInterval {
+            displayTimer?.invalidate()
+            displayTimer = nil
+            startDisplayTimerIfNeeded()
         }
     }
 
@@ -206,6 +242,7 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
         cardView.onApprove = { [weak self] id in self?.actions?.perform(.approve(id: id)) }
         cardView.onDeny = { [weak self] id in self?.actions?.perform(.deny(id: id)) }
         cardView.onClose = { [weak self] in self?.actions?.perform(.dismissCard) }
+        cardView.onOpenSession = { [weak self] in self?.actions?.perform(.openSession) }
         cardView.onHover = { [weak self] hovering in
             self?.cardHovered = hovering
             self?.hoverChanged()
