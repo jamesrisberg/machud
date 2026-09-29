@@ -84,6 +84,9 @@ final class OnboardingTests: XCTestCase {
     private var models: [String: Any]? = ["installed": false, "downloading": false, "progress": 0, "bytes": 330_000_000]
     private var modelRequests: [[String: String]] = []
     private var speechModel: [String: Any] = ["installed": false, "downloading": false, "progress": 0, "bytes": 600_000_000]
+    private var wakeModel: [String: Any] = ["id": "hey-jarvis", "phrase": "Hey Jarvis", "installed": false, "downloading": false,
+                                            "progress": 0, "bytes": 3_685_906,
+                                            "note": "Personal, non-commercial use only. Downloaded when you ask, never bundled with MacHUD."]
     /// What the fake host answers to `brain status`; nil answers as an older host would.
     private var brainReply: [String: Any]? = ["ok": true, "available": false, "problem": "Choose a workspace folder for the agent.",
                                               "workspace": "", "runtimes": [
@@ -126,12 +129,14 @@ final class OnboardingTests: XCTestCase {
             guard var kokoro = self.models else { done(["ok": false, "error": "unknown command models"]); return }
             if args["action"] == "download", args["id"] == "parakeet" {
                 self.speechModel["downloading"] = true
+            } else if args["action"] == "download", args["id"] == "hey-jarvis" {
+                self.wakeModel["downloading"] = true
             } else if args["action"] == "download" {
                 kokoro["downloading"] = true
                 kokoro["progress"] = 0.1
                 self.models = kokoro
             }
-            done(["ok": true, "kokoro": kokoro, "parakeet": self.speechModel])
+            done(["ok": true, "kokoro": kokoro, "parakeet": self.speechModel, "wake": [self.wakeModel]])
         }
     }
 
@@ -596,6 +601,33 @@ final class OnboardingTests: XCTestCase {
         let voice = model.json["voice"] as? [String: Any]
         XCTAssertEqual((voice?["history"] as? [String: Any])?["mode"] as? String, "off")
         XCTAssertEqual((voice?["speechModel"] as? [String: Any])?["downloading"] as? Bool, true)
+    }
+
+    func testVoiceStepOffersTheWakeWordOffByDefaultWithItsModel() {
+        let model = makeModel()
+        connect()
+        model.go(to: .voice)
+        XCTAssertTrue(spin(until: { model.wakePhrase != nil }))
+        XCTAssertFalse(model.wakeWordOn, "off by default")
+        XCTAssertEqual(model.wakePhrases.map(\.phrase), ["Hey Jarvis"], "only phrases with a model")
+        XCTAssertEqual(model.wakePhrase?.model.installed, false)
+        XCTAssertNil(model.wakeProblem)
+
+        model.downloadWakeModel()
+        XCTAssertTrue(spin(until: { model.wakePhrase?.model.downloading == true }))
+        XCTAssertTrue(modelRequests.contains { $0["action"] == "download" && $0["id"] == "hey-jarvis" })
+
+        model.setWakeWord(on: true)
+        XCTAssertTrue(spin(until: { (self.host.settings["voice"] as? [String: Any])?["wakeWordEnabled"] as? Bool == true }))
+        XCTAssertEqual((host.settings["voice"] as? [String: Any])?["wakePhrase"] as? String, "Hey Jarvis",
+                       "the phrase shown is the one saved")
+        host.server.publish("state", payload: ["state": ["phase": ["name": "idle"], "muted": false, "brainAvailable": false,
+                                                         "wakeProblem": "The Hey Jarvis model is downloading."]])
+        XCTAssertTrue(spin(until: { model.wakeProblem == "The Hey Jarvis model is downloading." }))
+        let wake = (model.json["voice"] as? [String: Any])?["wake"] as? [String: Any]
+        XCTAssertEqual(wake?["on"] as? Bool, true)
+        XCTAssertEqual(wake?["phrase"] as? String, "Hey Jarvis")
+        XCTAssertEqual(wake?["problem"] as? String, "The Hey Jarvis model is downloading.")
     }
 
     // MARK: - Brain

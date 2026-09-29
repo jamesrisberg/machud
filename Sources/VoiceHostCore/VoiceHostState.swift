@@ -24,6 +24,9 @@ public struct VoiceHostState: Codable, Equatable, Sendable {
     public var sessionProvider: String?
     /// The wake word is armed and listening.
     public var wakeListening: Bool
+    /// Why the wake word is on but not listening, in words for the user ("Download the Hey
+    /// Jarvis model to use the wake word."); nil while it listens, and while it is off or muted.
+    public var wakeProblem: String?
     /// The user muted the voice host: no fn gestures, no wake word, no spoken replies.
     public var muted: Bool
     /// An fn press began a take and the gesture is not decided yet: a second press could still
@@ -35,7 +38,8 @@ public struct VoiceHostState: Codable, Equatable, Sendable {
     public init(phase: VoicePhase = .idle, inputLevel: Double = 0, partialTranscript: String = "",
                 card: VoiceCard? = nil, hiddenForFullScreen: Bool = false, brainAvailable: Bool = false,
                 brainProblem: String? = nil, sessionKey: String? = nil, sessionProvider: String? = nil,
-                wakeListening: Bool = false, muted: Bool = false, gesturePending: Bool = false) {
+                wakeListening: Bool = false, wakeProblem: String? = nil, muted: Bool = false,
+                gesturePending: Bool = false) {
         self.phase = phase
         self.inputLevel = inputLevel
         self.partialTranscript = partialTranscript
@@ -46,6 +50,7 @@ public struct VoiceHostState: Codable, Equatable, Sendable {
         self.sessionKey = sessionKey
         self.sessionProvider = sessionProvider
         self.wakeListening = wakeListening
+        self.wakeProblem = wakeProblem
         self.muted = muted
         self.gesturePending = gesturePending
     }

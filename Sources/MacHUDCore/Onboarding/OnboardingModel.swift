@@ -54,6 +54,8 @@ final class OnboardingModel: ObservableObject {
     /// The Parakeet speech model's download state (`models status`); nil when the host does not say.
     @Published private(set) var parakeet: ModelDownloadStatus?
     @Published private(set) var parakeetNote: String?
+    /// Why the last wake model download did not start.
+    @Published private(set) var wakeNote: String?
     @Published private(set) var dockEnabled = true
     @Published private(set) var dockPosition: HUDDockPosition = .bottom
     @Published private(set) var dockScreen: String?
@@ -244,7 +246,7 @@ final class OnboardingModel: ObservableObject {
         refreshToolDock()
         if step == .brain, ticks % 3 == 0 { refreshBrainStatus() }
         if step == .brain, kokoro?.downloading == true || ticks % 3 == 0 { refreshModels() }
-        if step == .voice, parakeet?.downloading == true || ticks % 3 == 0 { refreshModels() }
+        if step == .voice, parakeet?.downloading == true || wakeDownloading || ticks % 3 == 0 { refreshModels() }
     }
 
     // MARK: - Permissions
@@ -283,6 +285,32 @@ final class OnboardingModel: ObservableObject {
     }
 
     func setKeyMode(_ mode: String) { voiceSettings.set("keyMode", mode) }
+
+    // MARK: - Wake word
+
+    /// The wake word is on (off until the user turns it on).
+    var wakeWordOn: Bool { voiceOn && voiceSettings.bool("voice.wakeWordEnabled") }
+    /// The phrase it listens for, from the phrases there are models for.
+    var wakePhrase: VoiceSettingsModel.WakePhrase? { voiceSettings.wakePhrase }
+    var wakePhrases: [VoiceSettingsModel.WakePhrase] { voiceSettings.wakePhrases }
+    /// Why the wake word is on and not listening.
+    var wakeProblem: String? { wakeWordOn ? voiceSettings.wakeProblem : nil }
+    private var wakeDownloading: Bool { voiceSettings.wakePhrases.contains { $0.model.downloading } }
+
+    /// Turning it on saves the phrase shown, so the host listens for the phrase the user saw.
+    func setWakeWord(on: Bool) {
+        var changes: [String: Any] = ["voice.wakeWordEnabled": on]
+        if on, let phrase = wakePhrase?.phrase { changes["voice.wakePhrase"] = phrase }
+        applyVoice(changes)
+    }
+
+    func setWakePhrase(_ phrase: String) { applyVoice(["voice.wakePhrase": phrase]) }
+
+    /// Starts the chosen phrase's model download; progress comes from `refreshModels` on the tick.
+    func downloadWakeModel() {
+        guard let id = wakePhrase?.id else { return }
+        download(id, note: \.wakeNote, voiceOff: "Turn voice on first: the voice host downloads the wake model.")
+    }
     func setAgentGesture(_ on: Bool) { voiceSettings.set("agentGesture", on) }
 
     private func voiceStateChanged() {
@@ -382,6 +410,8 @@ final class OnboardingModel: ObservableObject {
             let parakeet = ModelDownloadStatus(reply: reply, model: "parakeet")
             if parakeet != self.parakeet { self.parakeet = parakeet }
             if parakeet == nil, self.parakeetNote == nil { self.parakeetNote = reply["error"] as? String }
+            // The wake phrases live in the Voice tab's model, which the wake row reads.
+            if reply["ok"] as? Bool == true { self.voiceSettings.modelsChanged(reply) }
         }
     }
 
@@ -419,8 +449,20 @@ final class OnboardingModel: ObservableObject {
     func setHistoryMode(_ mode: String) { voiceSettings.setHistory(mode: mode) }
     func setShareHistory(_ share: Bool) { voiceSettings.setHistory(shareWithSpeakFree: share) }
 
+    /// Voice settings in one `settings set`; a failure shows beside the wake word.
+    private func applyVoice(_ changes: [String: Any]) {
+        guard voiceSettings.canEdit else {
+            wakeNote = "Turn voice on first: the wake word listens in the voice host."
+            return
+        }
+        wakeNote = nil
+        apply(changes, note: \.wakeNote)
+    }
+
     /// Several settings in one `settings set`, so they never race each other.
-    func apply(_ changes: [String: Any]) {
+    func apply(_ changes: [String: Any]) { apply(changes, note: \.brainNote) }
+
+    private func apply(_ changes: [String: Any], note: ReferenceWritableKeyPath<OnboardingModel, String?>) {
         guard voiceSettings.canEdit, let voice else {
             brainNote = "Turn voice on first: the brain's settings live in the voice host."
             return
@@ -431,7 +473,7 @@ final class OnboardingModel: ObservableObject {
         }
         voice.sendSettings(updated) { [weak self] reply in
             guard let self else { return }
-            self.brainNote = reply["ok"] as? Bool == true ? nil : reply["error"] as? String ?? "settings set failed"
+            self[keyPath: note] = reply["ok"] as? Bool == true ? nil : reply["error"] as? String ?? "settings set failed"
             self.voiceSettings.load { self.refreshBrainStatus() }
         }
     }
@@ -528,6 +570,13 @@ final class OnboardingModel: ObservableObject {
         var voice: [String: Any] = ["status": voiceSettings.status.text, "on": voiceOn, "keyMode": keyMode,
                                     "phase": live.phase, "connected": live.connected,
                                     "speechModel": parakeet.map { $0.json as Any } ?? NSNull()]
+        var wake: [String: Any] = ["on": wakeWordOn,
+                                   "phrases": wakePhrases.map { ["id": $0.id, "phrase": $0.phrase,
+                                                                 "installed": $0.model.installed,
+                                                                 "downloading": $0.model.downloading] }]
+        if let phrase = wakePhrase { wake["phrase"] = phrase.phrase }
+        if let wakeProblem { wake["problem"] = wakeProblem }
+        voice["wake"] = wake
         if let history {
             voice["history"] = ["mode": history.mode, "shareWithSpeakFree": history.shareWithSpeakFree,
                                 "speakFreeInstalled": history.speakFreeInstalled, "folder": history.folder]

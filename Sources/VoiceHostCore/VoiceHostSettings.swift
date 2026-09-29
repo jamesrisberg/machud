@@ -65,3 +65,18 @@ public struct VoiceHostSettings: Codable, Equatable, Sendable {
         feedAgentReplies = (try? c.decode(Bool.self, forKey: .feedAgentReplies)) ?? d.feedAgentReplies
     }
 }
+
+extension VoiceHostSettings {
+    /// These settings with a wake phrase that can be listened for: while the wake word is on, a
+    /// phrase no model detects (the default "Hey Computer") becomes the first of `phrases`, the
+    /// phrases with a model. While it is off the phrase is left as it is, and with no phrases
+    /// nothing changes.
+    func resolvingWakePhrase(available phrases: [String]) -> VoiceHostSettings {
+        guard voice.wakeWordEnabled, let first = phrases.first else { return self }
+        let chosen = TriggerPhrase.normalize(voice.wakePhrase)
+        guard !phrases.contains(where: { TriggerPhrase.normalize($0) == chosen }) else { return self }
+        var resolved = self
+        resolved.voice.wakePhrase = first
+        return resolved
+    }
+}
