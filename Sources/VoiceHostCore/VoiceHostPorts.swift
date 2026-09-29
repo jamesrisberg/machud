@@ -86,7 +86,8 @@ protocol BrainDriving: AnyObject {
     var onSnapshot: ((AgentSessionSnapshot) -> Void)? { get set }
     /// The companion stopped or is restarting: any turn it was running is gone.
     var onStopped: (() -> Void)? { get set }
-    /// Run the companion as configured; nil stops it.
+    /// Run the companion as configured; nil stops it. A change of runtime alone reaches the
+    /// running companion without a restart.
     func configure(_ configuration: BrainServiceConfiguration?)
     func submit(_ text: String, requestId: String) async throws
     func approve(id: String, allow: Bool) async throws
@@ -226,4 +227,10 @@ typealias VoiceScheduler = (TimeInterval, @escaping @Sendable @MainActor () -> V
 
 let mainQueueScheduler: VoiceScheduler = { delay, work in
     DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated { work() } }
+}
+
+/// MacHUD's installed apps and loadouts, for the brain's host context.
+protocol MacHUDStatusReading: Sendable {
+    /// Nil when MacHUD does not answer.
+    func snapshot() async -> MacHUDSnapshot?
 }

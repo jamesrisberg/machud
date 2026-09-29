@@ -41,6 +41,10 @@ final class VoiceSettingsModel: ObservableObject {
     @Published private(set) var workspace: String?
     /// No folder is chosen, so `workspace` is the home folder.
     @Published private(set) var workspaceIsDefault = false
+    /// The runtime the brain companion runs (the host's `activeRuntime`); nil while none is connected.
+    @Published private(set) var activeRuntime: String?
+    /// `machud-mcp` ships beside the voice host (`brain status`'s `machudTools.available`).
+    @Published private(set) var machudToolsAvailable = true
     /// The Kokoro voice's files (`models status` and `models` events); nil until known.
     @Published private(set) var kokoro: ModelStatus?
     /// The Parakeet speech model dictation needs (`models status` and `models` events); nil until known.
@@ -205,6 +209,8 @@ final class VoiceSettingsModel: ObservableObject {
     func hostStateChanged(_ state: [String: Any]?) {
         let wakeProblem = state?["wakeProblem"] as? String
         if wakeProblem != self.wakeProblem { self.wakeProblem = wakeProblem }
+        let activeRuntime = state?["activeRuntime"] as? String
+        if activeRuntime != self.activeRuntime { self.activeRuntime = activeRuntime }
         let problem = state?["brainProblem"] as? String
         guard problem != brainProblem else { return }
         brainProblem = problem
@@ -228,6 +234,8 @@ final class VoiceSettingsModel: ObservableObject {
             if workspace != self.workspace { self.workspace = workspace }
             let isDefault = reply["workspaceDefault"] as? Bool ?? false
             if isDefault != self.workspaceIsDefault { self.workspaceIsDefault = isDefault }
+            let toolsAvailable = (reply["machudTools"] as? [String: Any])?["available"] as? Bool ?? true
+            if toolsAvailable != self.machudToolsAvailable { self.machudToolsAvailable = toolsAvailable }
         }
     }
 
@@ -303,6 +311,14 @@ final class VoiceSettingsModel: ObservableObject {
             guard let self else { return }
             self.lastError = reply["ok"] as? Bool == true ? nil : reply["error"] as? String ?? "could not speak"
         }
+    }
+
+    /// While the companion still runs another runtime than the one chosen: which, in words.
+    var runtimeSwitchNote: String? {
+        let chosen = string("brain.runtime")
+        guard let active = activeRuntime, !chosen.isEmpty, active != chosen else { return nil }
+        let name = { (id: String) in Self.baseRuntimes.first { $0.0 == id }?.1 ?? id }
+        return "The brain is still running \(name(active)); it switches to \(name(chosen)) when it is between turns."
     }
 
     /// The runtime picker's choices: Codex, Claude and Hermes, plus mclaude when it is installed
@@ -461,6 +477,9 @@ struct BrainTabView: View {
                 VoiceToggle(model: model, title: "Brain on", path: "brainEnabled",
                             help: "Off leaves dictation only.")
                 VoicePicker(model: model, title: "Runtime", path: "brain.runtime", options: model.runtimeOptions)
+                if let note = model.runtimeSwitchNote {
+                    Text(note).font(.caption).foregroundStyle(.orange)
+                }
                 if model.runtimeOptions.contains(where: { $0.value == "mclaude" }) {
                     Text("mclaude runs a Claude Code session that also appears in MechaHUD, so you can pick up the same conversation there.")
                         .font(.caption).foregroundStyle(.secondary)
@@ -473,6 +492,15 @@ struct BrainTabView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 VoiceText(model: model, title: "Assistant name", path: "brain.assistantName")
                 VoiceText(model: model, title: "Port", path: "brainPort", isNumber: true)
+            }
+            Section("MacHUD tools") {
+                VoiceToggle(model: model, title: "Let the brain use MacHUD", path: "brain.machudTools",
+                            help: model.machudToolsAvailable
+                                ? "The agent can apply loadouts, show panels, run app actions and more, and is told which apps and loadouts you have."
+                                : "The MacHUD tool server is missing from this build, so the agent gets no MacHUD tools.")
+                VoiceToggle(model: model, title: "Ask before each MacHUD action", path: "brain.machudToolsRequireApproval",
+                            help: "Off, MacHUD actions run without asking. The agent's other actions ask as they always do.")
+                    .disabled(!model.bool("brain.machudTools"))
             }
             Section("Runtimes") {
                 VoiceText(model: model, title: "node", path: "brain.nodePath", isPath: true)

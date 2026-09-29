@@ -17,6 +17,17 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   apps perform app=<app> verb=<verb> [key=value ...]` runs one of an app's own actions, launching
   it if needed.
 
+### Brain: MacHUD tools, and switching the agent works
+- Changing the agent (Codex, Claude, mclaude, Hermes) in the Brain tab now takes effect: the
+  running agent switches, without a restart, as soon as it is between turns. Before, it stayed
+  on the agent it was started with. While a switch is waiting, the Brain tab says so, and
+  `machud voice brain status` shows the agent actually running (`activeRuntime`) next to the one
+  chosen.
+- The agent can use MacHUD itself: apply and capture loadouts, show and hide panels, run the HUD
+  apps' actions, move the tool dock and more, through MacHUD's own tools instead of trying to
+  drive the screen. It is told which HUD apps and loadouts you have. On by default; turn it off,
+  or have each MacHUD action ask first, in the Brain tab's MacHUD tools section.
+
 ### Voice: the wake word works
 - The wake word never triggered: its default phrase, "Hey Computer", has no model yet, nothing
   downloaded one, and the wake word stayed off without saying so. The phrase is now chosen from
