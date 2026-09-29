@@ -4,16 +4,10 @@ import HUDKit
 /// it on a panel and serves `sessions providers` / `sessions open id=`, so a client (the voice
 /// host) can ask "who shows agent sessions" instead of naming an app. See
 /// `../hudkit/docs/CONTRACT.md` § Agent sessions.
-///
-/// TODO: machud builds against hudkit's `main` through `../hudkit` path dependency, which does
-/// not yet carry lane M's `HUDAgentSessions.capability` constant (wave-voice-3 lane C). Once
-/// that hudkit branch merges, replace the literal below with it.
 @MainActor
 final class SessionsBroker {
-    /// The manifest capability a panel lists to offer agent sessions (`HUDAgentSessions.capability`
-    /// once the hudkit constant is available here; see the TODO above).
-    static let capability = "agent-sessions"
-    private static let openSessionAction = "open-session"
+    /// The manifest capability a panel lists to offer agent sessions.
+    static let capability = HUDAgentSessions.capability
 
     let externals: ExternalPanels
 
@@ -55,7 +49,7 @@ final class SessionsBroker {
     /// `{"ok": false, "error": "No app shows agent sessions"}` when none is discovered.
     func open(id sessionKey: String, done: @escaping ([String: Any]) -> Void) {
         guard let app = target() else { done(["ok": false, "error": "No app shows agent sessions"]); return }
-        externals.supervisor.send(app.id, command: "action", args: ["name": Self.openSessionAction, "id": sessionKey]) { result in
+        externals.supervisor.send(app.id, command: "action", args: HUDAgentSessions.openSessionArgs(id: sessionKey)) { result in
             switch result {
             case .success(let reply):
                 done((reply["ok"] as? Bool) == false ? reply : ["ok": true, "app": app.id])
