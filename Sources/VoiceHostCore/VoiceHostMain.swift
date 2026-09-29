@@ -61,7 +61,8 @@ final class VoiceHost {
             keys: environment.noHotkeys ? nil : FnKeySource(), brain: brain,
             speaker: ReplySpeaker(kokoroDirectory: KokoroModels.directory(in: modelsRoot), secrets: secrets),
             wake: environment.noMicrophone ? nil : WakeWordListener(modelsRoot: modelsRoot),
-            brainStateRoot: support.appendingPathComponent("Brain"))
+            brainStateRoot: support.appendingPathComponent("Brain"),
+            sessions: MacHUDSessions(socketPath: environment.machudSocketPath))
         server = HUDSocketServer(path: environment.socketPath, label: "machud-voice")
         commands = VoiceHostCommands(controller: controller, store: store, secrets: secrets,
                                      version: Self.version())

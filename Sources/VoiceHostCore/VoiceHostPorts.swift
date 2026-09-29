@@ -49,11 +49,26 @@ protocol VoiceKeySource: AnyObject {
     func stop()
 }
 
+/// The brain companion as the voice host sees it.
+enum BrainHealth: Equatable {
+    case stopped
+    case starting
+    /// Running; the client is not connected yet.
+    case connecting
+    /// Running with a connected client: turns can go to it.
+    case ready
+    /// Cannot start as configured (no workspace, no Node.js); the reason is user-facing.
+    case unavailable(String)
+    /// It exited and is being started again.
+    case restarting(String)
+    /// It kept failing and was given up on until the configuration changes.
+    case failed(String)
+}
+
 /// The brain process and the client for it.
 @MainActor
 protocol BrainDriving: AnyObject {
-    /// True once a client is connected to a running companion.
-    var onAvailabilityChanged: ((Bool) -> Void)? { get set }
+    var onHealthChanged: ((BrainHealth) -> Void)? { get set }
     var onSnapshot: ((AgentSessionSnapshot) -> Void)? { get set }
     /// The companion stopped or is restarting: any turn it was running is gone.
     var onStopped: (() -> Void)? { get set }
@@ -86,6 +101,19 @@ protocol WakeDriving: AnyObject {
     /// Start (or restart) listening for `settings.wakePhrase`.
     func start(_ settings: VoiceSettings)
     func stop()
+}
+
+/// MacHUD's `agent-sessions` broker (`sessions` on MacHUD's control socket).
+protocol SessionOpening: Sendable {
+    /// Shows the session in the first running provider (MacHUD launches one if none runs);
+    /// the provider app's name, or why not.
+    func open(id: String) async -> Result<String, SessionOpenError>
+    /// The app sessions open in: the first running provider, else the first installed one.
+    func providerName() async -> String?
+}
+
+struct SessionOpenError: Error, Equatable {
+    let message: String
 }
 
 /// Runs work on the main actor after a delay (a manual clock in tests).

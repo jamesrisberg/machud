@@ -16,6 +16,10 @@ import VoiceKit
 /// One turn at a time: the companion refuses a second one, so while the brain works an agent
 /// take is refused, and a take moved to the agent then (or while the brain is off) is typed at
 /// the cursor instead.
+///
+/// `brainProblem` says why the brain cannot take a turn (settings, the chosen runtime's tool, or
+/// the companion's own reason). A problem the user has to fix first refuses an agent take up
+/// front with that reason; one that passes on its own (starting, restarting) does not.
 @MainActor
 public final class VoiceHostController: VoiceHostActing {
     public private(set) var state = VoiceHostState() {
@@ -33,8 +37,10 @@ public final class VoiceHostController: VoiceHostActing {
     /// Every state change, after the presenter (the socket's `state` event).
     public var onStateChange: ((VoiceHostState) -> Void)?
 
-    /// The latest brain request, approval or cancel in flight (tests await it).
+    /// The latest brain request, approval, cancel or session open in flight (tests await it).
     var pendingWork: Task<Void, Never>?
+    /// The latest lookup of the app sessions open in (tests await it).
+    var providerLookup: Task<Void, Never>?
 
     /// How long a failure shows before the orb rests again.
     static let failureDisplay: TimeInterval = 3
@@ -45,6 +51,9 @@ public final class VoiceHostController: VoiceHostActing {
     static let voiceOff = "Voice is off"
     static let voiceMuted = "Voice is muted"
     static let modelMissing = "Speech model not installed"
+    static let brainStarting = "The brain is starting."
+    static let brainConnecting = "Connecting to the brain…"
+    static let noSession = "There is no agent session to open"
     /// Progress lines kept on the card.
     static let progressLimit = 4
 
@@ -54,6 +63,9 @@ public final class VoiceHostController: VoiceHostActing {
     private let speaker: ReplySpeaking?
     private let wake: WakeDriving?
     private let brainStateRoot: URL
+    private let sessions: SessionOpening?
+    private let detectRuntimes: (BrainSettings) -> [BrainRuntimeDetection]
+    private let sessionKeyOf: (AgentSessionSnapshot) -> String?
     private let now: () -> TimeInterval
     private let schedule: VoiceScheduler
 
@@ -102,14 +114,23 @@ public final class VoiceHostController: VoiceHostActing {
     /// The notice of the take being transcribed.
     private var pendingNotice: String?
     private var started = false
+    private var brainHealth: BrainHealth = .stopped
+    /// The chosen runtime's problem on this Mac, for the settings last applied.
+    private var runtimeProblem: String?
 
     /// - Parameters:
     ///   - keys: nil without an fn event tap (`MACHUD_NO_HOTKEYS`).
     ///   - brain: nil when the brain can never run (`MACHUD_VOICE_NO_BRAIN`).
     ///   - wake: nil without a microphone for it.
     ///   - brainStateRoot: the folder per-workspace brain state directories go under.
+    ///   - sessions: MacHUD's session broker; nil leaves `openSession` unavailable.
+    ///   - detectRuntimes: which runtimes are installed, for the settings given.
+    ///   - sessionKeyOf: a snapshot's session key (see `BrainSettingsFields.sessionKey`).
     init(settings: VoiceHostSettings, dictation: DictationDriving, keys: VoiceKeySource?,
          brain: BrainDriving?, speaker: ReplySpeaking?, wake: WakeDriving?, brainStateRoot: URL,
+         sessions: SessionOpening? = nil,
+         detectRuntimes: @escaping (BrainSettings) -> [BrainRuntimeDetection] = { BrainRuntimes.detect($0) },
+         sessionKeyOf: @escaping (AgentSessionSnapshot) -> String? = { BrainSettingsFields.sessionKey($0) },
          now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
          schedule: @escaping VoiceScheduler = mainQueueScheduler) {
         self.settings = settings
@@ -119,6 +140,9 @@ public final class VoiceHostController: VoiceHostActing {
         self.speaker = speaker
         self.wake = wake
         self.brainStateRoot = brainStateRoot
+        self.sessions = sessions
+        self.detectRuntimes = detectRuntimes
+        self.sessionKeyOf = sessionKeyOf
         self.now = now
         self.schedule = schedule
     }
@@ -128,9 +152,10 @@ public final class VoiceHostController: VoiceHostActing {
         guard !started else { return }
         started = true
         dictation.onUpdate = { [weak self] id, update in self?.handle(update, take: id) }
-        brain?.onAvailabilityChanged = { [weak self] available in
+        brain?.onHealthChanged = { [weak self] health in
             guard let self else { return }
-            state.brainAvailable = available && brainEnabled
+            brainHealth = health
+            refreshBrainProblem()
         }
         brain?.onSnapshot = { [weak self] in self?.handle($0) }
         brain?.onStopped = { [weak self] in self?.brainLost() }
@@ -158,6 +183,7 @@ public final class VoiceHostController: VoiceHostActing {
         refreshKeys()
         refreshWake()
         refreshBrain()
+        refreshBrainProblem()
     }
 
     func setHiddenForFullScreen(_ hidden: Bool) {
@@ -198,6 +224,8 @@ public final class VoiceHostController: VoiceHostActing {
             }
             refreshKeys()
             refreshWake()
+        case .openSession:
+            openSession()
         }
     }
 
@@ -242,6 +270,7 @@ public final class VoiceHostController: VoiceHostActing {
     private func brainLost() {
         lastSnapshot = nil
         submitting = nil
+        setSessionKey(nil)
         guard turn != nil else { return }
         turn = nil
         speaker?.stop()
@@ -264,6 +293,7 @@ public final class VoiceHostController: VoiceHostActing {
         turn?.speaks = false
         if !settings.enabled { return fail(Self.voiceOff) }
         if mode == .agent, !brainEnabled { return fail(Self.brainOff) }
+        if mode == .agent, let problem = blockingBrainProblem { return fail(problem) }
         if mode == .agent, agentBusy { return fail(Self.agentBusy) }
         guard take == nil, !dictation.isCapturing else { return }
         take = Take(id: nil, mode: mode, endpointer: handsFree ? SilenceEndpointer() : nil, fromKeys: fromKeys)
@@ -291,6 +321,8 @@ public final class VoiceHostController: VoiceHostActing {
             // The agent cannot take it: keep the words at the cursor and say why at the end.
             if !brainEnabled {
                 take?.pastedNotice = Self.brainOffPasted
+            } else if let problem = blockingBrainProblem {
+                take?.pastedNotice = Self.pasted(problem)
             } else if agentBusy {
                 take?.pastedNotice = Self.agentBusyPasted
             } else {
@@ -401,6 +433,7 @@ public final class VoiceHostController: VoiceHostActing {
         }
         // The brain went off, or another turn started, while this take was recording.
         guard brainEnabled, let brain else { return paste(prompt, notice: Self.brainOffPasted) }
+        if let problem = blockingBrainProblem { return paste(prompt, notice: Self.pasted(problem)) }
         guard !agentBusy else { return paste(prompt, notice: Self.agentBusyPasted) }
         stopSpeech()
         let requestId = UUID().uuidString
@@ -412,7 +445,8 @@ public final class VoiceHostController: VoiceHostActing {
             } catch {
                 guard let self, submitting == requestId else { return }
                 submitting = nil
-                fail(error.localizedDescription)
+                // A brain that is not up says why better than the client's error does.
+                fail(state.brainAvailable ? error.localizedDescription : state.brainProblem ?? error.localizedDescription)
             }
         }
     }
@@ -441,6 +475,7 @@ public final class VoiceHostController: VoiceHostActing {
 
     private func handle(_ snapshot: AgentSessionSnapshot) {
         lastSnapshot = snapshot
+        setSessionKey(sessionKeyOf(snapshot))
         guard var turn, snapshot.requestId == turn.requestId else { return }
         var next = state
         if !turn.cardDismissed {
@@ -554,12 +589,115 @@ public final class VoiceHostController: VoiceHostActing {
                     forWorkspace: settings.brain.workspacePath, under: brainStateRoot).path,
                 port: settings.brainPort)
             : nil
-        if !brainEnabled { state.brainAvailable = false }
+        runtimeProblem = brainEnabled
+            ? BrainRuntimes.problem(runtime: settings.brain.runtime.rawValue, brain: settings.brain,
+                                    detections: detectRuntimes(settings.brain))
+            : nil
         guard let brain, appliedBrain != .some(wanted) else { return }
         appliedBrain = .some(wanted)
         brain.configure(wanted)
         // Turned off: the companion's turn ends with its process. (A restart reports through
         // `onStopped`.)
         if wanted == nil { brainLost() }
+    }
+
+    // MARK: - Brain problem
+
+    /// What `brain status` reports about each runtime, for the current settings.
+    func runtimeDetections() -> [BrainRuntimeDetection] { detectRuntimes(settings.brain) }
+
+    /// Re-reads the chosen runtime's tool (after an install) and updates the problem.
+    func refreshRuntimeDetection() {
+        refreshBrain()
+        refreshBrainProblem()
+    }
+
+    /// A problem the user has to fix before a turn can go to the brain.
+    private var blockingBrainProblem: String? {
+        guard brainEnabled else { return nil }
+        switch brainHealth {
+        case .unavailable(let reason): return reason
+        case .failed: return Self.problem(for: brainHealth)
+        default: return runtimeProblem
+        }
+    }
+
+    private func refreshBrainProblem() {
+        let problem: String?
+        if brain == nil {
+            problem = Self.brainOff
+        } else if !settings.enabled {
+            problem = Self.voiceOff
+        } else if !settings.brainEnabled {
+            problem = Self.brainOff
+        } else {
+            problem = blockingBrainProblem ?? Self.problem(for: brainHealth)
+        }
+        var next = state
+        next.brainProblem = problem
+        next.brainAvailable = problem == nil
+        state = next
+    }
+
+    /// The companion's own state in words; nil when it is ready.
+    static func problem(for health: BrainHealth) -> String? {
+        switch health {
+        case .ready: return nil
+        case .stopped, .starting: return brainStarting
+        case .connecting: return brainConnecting
+        case .unavailable(let reason): return reason
+        case .restarting(let reason): return "The brain is restarting: \(reason)"
+        case .failed(let reason): return "The brain stopped after repeated failures: \(reason)"
+        }
+    }
+
+    static func pasted(_ problem: String) -> String {
+        let reason = problem.hasSuffix(".") ? String(problem.dropLast()) : problem
+        return "\(reason) — pasted instead"
+    }
+
+    // MARK: - Sessions
+
+    private func setSessionKey(_ key: String?) {
+        guard key != state.sessionKey else { return }
+        state.sessionKey = key
+        guard key != nil, state.sessionProvider == nil, let sessions else { return }
+        providerLookup = Task { [weak self] in
+            let name = await sessions.providerName()
+            guard let self, let name, state.sessionKey != nil else { return }
+            state.sessionProvider = name
+        }
+    }
+
+    private func openSession() {
+        pendingWork = Task { [weak self] in
+            _ = await self?.openSessionNow()
+        }
+    }
+
+    /// Asks MacHUD to show the current session; a failure shows under the orb. Returns the
+    /// provider's name, or why it could not open.
+    func openSessionNow() async -> Result<String, SessionOpenError> {
+        guard let key = state.sessionKey, let sessions else {
+            let error = SessionOpenError(message: Self.noSession)
+            showNotice(error.message)
+            return .failure(error)
+        }
+        let result = await sessions.open(id: key)
+        switch result {
+        case .success(let app): state.sessionProvider = app
+        case .failure(let error): showNotice(error.message)
+        }
+        return result
+    }
+
+    /// A message under the orb that leaves a take or a turn alone: while one runs, the phase
+    /// belongs to it, so the message goes on the card's progress lines instead.
+    private func showNotice(_ message: String) {
+        if take == nil, !agentBusy, !isSpeaking {
+            fail(message)
+        } else if state.card != nil {
+            state.card?.progress = Array(((state.card?.progress ?? []) + [message]).suffix(Self.progressLimit))
+        }
     }
 }

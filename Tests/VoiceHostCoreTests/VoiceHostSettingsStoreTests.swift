@@ -62,6 +62,12 @@ final class VoiceHostSettingsStoreTests: XCTestCase {
                        "com.jrisberg.machud.voice")
     }
 
+    func testMacHUDSocketFollowsMACHUD_SOCKET() {
+        XCTAssertEqual(VoiceHostEnvironment(environment: [:]).machudSocketPath, "/tmp/machud-\(getuid()).sock")
+        XCTAssertEqual(VoiceHostEnvironment(environment: ["MACHUD_SOCKET": "/tmp/test.sock"]).machudSocketPath,
+                       "/tmp/test.sock")
+    }
+
     func testEnvironmentDefaults() {
         let env = VoiceHostEnvironment(environment: [:])
         XCTAssertTrue(env.configDirectory.path.hasSuffix("/.config/machud"))
