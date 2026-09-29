@@ -144,15 +144,18 @@ final class SettingsWindowModel: ObservableObject {
     @Published var apps: AppsTabModel?
     /// The "Voice" and "Brain" tabs, when the voice host is wired up.
     @Published var voice: VoiceSettingsModel?
+    /// The "Loadouts" tab, when the loadout library is wired up.
+    @Published var loadouts: LoadoutsTabModel?
 
     /// Tab ids MacHUD adds beside the per-app tabs.
     var builtInTabIDs: [String] {
-        (voice == nil ? [] : [VoiceSettingsModel.voiceTabID, VoiceSettingsModel.brainTabID])
+        (loadouts == nil ? [] : [LoadoutsTabModel.tabID])
+            + (voice == nil ? [] : [VoiceSettingsModel.voiceTabID, VoiceSettingsModel.brainTabID])
             + (apps == nil ? [] : [AppsTabModel.tabID])
     }
 }
 
-/// The shared settings window (PLAN 3.5): a tab per discovered MacHUD app plus MacHUD's own,
+/// The shared settings window: a tab per discovered MacHUD app plus MacHUD's own,
 /// each rendering the app's settings schema generically. `settings-window show|hide`.
 @MainActor
 final class SettingsWindowController: NSObject, NSWindowDelegate {
@@ -171,6 +174,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     /// once every tab has loaded.
     func show(select: String? = nil, activate: Bool = true, completion: (() -> Void)? = nil) {
         refreshTabs()
+        model.loadouts?.reload()
         onShow?()
         if let select, model.builtInTabIDs.contains(select.lowercased()) { model.selection = select.lowercased() }
         else if let select, let tab = tab(matching: select) { model.selection = tab.id }
@@ -204,6 +208,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     var json: [String: Any] {
         var d: [String: Any] = ["visible": isVisible, "selected": model.selection, "tabs": model.tabs.map(\.json)]
         if let apps = model.apps { d["apps"] = apps.json }
+        if let loadouts = model.loadouts { d["loadouts"] = loadouts.json }
         if let voice = model.voice { d["voice"] = voice.json }
         return d
     }
@@ -226,7 +231,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     private func makeWindow() -> NSWindow {
-        let w = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 620, height: 460),
+        let w = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 760, height: 540),
                          styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
                          backing: .buffered, defer: false)
         w.title = "MacHUD Settings"
@@ -258,8 +263,13 @@ struct SettingsWindowView: View {
 
     var body: some View {
         TabView(selection: $model.selection) {
-            // MacHUD, then its built-in voice host, then the sibling apps.
+            // MacHUD and its loadouts, then its built-in voice host, then the sibling apps.
             ForEach(model.tabs.prefix(1)) { appTab($0) }
+            if let loadouts = model.loadouts {
+                LoadoutsTabView(model: loadouts)
+                    .tabItem { Label("Loadouts", systemImage: "rectangle.3.group") }
+                    .tag(LoadoutsTabModel.tabID)
+            }
             if let voice = model.voice {
                 VoiceTabView(model: voice)
                     .tabItem { Label("Voice", systemImage: "mic") }

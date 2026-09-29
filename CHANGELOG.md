@@ -6,6 +6,20 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 
 ## [Unreleased]
 
+### Loadouts in Settings
+- Settings has a Loadouts tab: every loadout with a small picture of it, its screen, desktop
+  and window counts, and a star on the one applied at startup. Click one to see it large,
+  laid out like your displays, one desktop at a time, with each app's icon and name in its
+  region, parked windows, and where the tool dock and HUD apps go.
+- From there: Apply, Preview on your displays, Edit Layout (the drawing editor on that
+  loadout), Rename, Duplicate, Apply at Startup and Delete (it asks first); New captures your
+  current windows or opens the editor on a blank layout.
+- Deleting a loadout also removes the layouts a capture made just for it, from the menu too;
+  renaming or duplicating one takes those layouts along.
+- The same from the shell: `machud loadouts rename name= to=`, `duplicate name= [to=]`,
+  `delete name=`, `startup [name=]`; `machud edit loadout=<name>` opens the editor on a loadout
+  and `machud edit new=1` on a blank layout.
+
 ### Agent sessions
 - MacHUD can find and open an agent session in whichever app shows it, without naming the app:
   `machud sessions providers` lists the discovered apps that show agent sessions (MechaHUD's

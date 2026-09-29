@@ -151,10 +151,7 @@ final class DragMonitor {
     }
 
     private func regionRect(_ region: Region, on screen: NSScreen) -> CGRect {
-        let gap = store.gap
-        var r = region.frame.cocoaRect(in: screen.visibleFrame.insetBy(dx: gap / 2, dy: gap / 2))
-        r = r.insetBy(dx: gap / 2, dy: gap / 2)
-        return r.integral
+        LoadoutEngine.regionRect(region, visible: screen.visibleFrame, gap: store.gap)
     }
 
     // MARK: Keyboard (Tab cycles layouts, Esc cancels — only while dragging)

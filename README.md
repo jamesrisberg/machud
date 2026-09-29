@@ -306,8 +306,12 @@ One JSON object per line in, one out: `{"command": "ping", "args": {}}` →
 ## Settings
 
 - The **settings window** (status menu › Settings…, or `machud settings-window show`)
-  has a tab for MacHUD, Voice and Brain tabs for the voice host, and one per discovered
-  sibling, rendered from each app's settings schema.
+  has a tab for MacHUD, a Loadouts tab, Voice and Brain tabs for the voice host, and one
+  per discovered sibling, rendered from each app's settings schema.
+- The **Loadouts** tab lists every loadout; selecting one previews it per display and
+  desktop (its apps, parked windows and HUD part), with Apply, Preview, Edit Layout, Rename,
+  Duplicate, Apply at Startup, Delete and New. The same edits from the shell: `machud
+  loadouts rename name=Work to=Studio`, `duplicate`, `delete`, `startup`.
 - Voice settings live with the voice host: the Voice and Brain tabs, or `machud voice
   settings get` and `machud voice settings set voice.speakReplies=true`. See
   [docs/API.md#voice](docs/API.md#voice).
