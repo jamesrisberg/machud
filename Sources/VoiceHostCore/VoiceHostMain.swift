@@ -40,6 +40,7 @@ final class VoiceHost {
     private let commands: VoiceHostCommands
     private let brain: BrainConnection?
     private let dictation: DictationDriving
+    private let models: VoiceModelProviding
     private let fullscreen = HUDFullscreenObserver()
     private var terminationSource: DispatchSourceSignal?
 
@@ -48,7 +49,7 @@ final class VoiceHost {
         let support = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/MacHUD")
         let voiceRoot = support.appendingPathComponent("Voice")
-        let modelsRoot = voiceRoot.appendingPathComponent("Models")
+        let modelsRoot = environment.modelsDirectory ?? voiceRoot.appendingPathComponent("Models")
         let secrets = KeychainVoiceSecretStore(service: environment.keychainService)
         let store = VoiceHostSettingsStore(directory: environment.configDirectory)
 
@@ -56,21 +57,28 @@ final class VoiceHost {
             ? SimulatedDictation()
             : SpeakFreeDictation(directory: voiceRoot.appendingPathComponent("Dictation"))
         brain = environment.noBrain ? nil : BrainConnection()
+        let kokoroDirectory = KokoroModels.directory(in: modelsRoot)
+        models = KokoroModelStore(directory: kokoroDirectory)
         controller = VoiceHostController(
             settings: store.load(), dictation: dictation,
             keys: environment.noHotkeys ? nil : FnKeySource(), brain: brain,
-            speaker: ReplySpeaker(kokoroDirectory: KokoroModels.directory(in: modelsRoot), secrets: secrets),
+            speaker: environment.noSpeech
+                ? SilentSpeaker() : ReplySpeaker(kokoroDirectory: kokoroDirectory, secrets: secrets),
             wake: environment.noMicrophone ? nil : WakeWordListener(modelsRoot: modelsRoot),
             brainStateRoot: support.appendingPathComponent("Brain"),
             sessions: MacHUDSessions(socketPath: environment.machudSocketPath))
         server = HUDSocketServer(path: environment.socketPath, label: "machud-voice")
         commands = VoiceHostCommands(controller: controller, store: store, secrets: secrets,
-                                     version: Self.version())
+                                     version: Self.version(), models: models)
     }
 
     func start(presenter: VoiceHostPresenting) {
         let server = self.server
         controller.onStateChange = { VoiceHostCommands.publish($0, on: server) }
+        models.onChange = { [weak self] in
+            guard let self else { return }
+            VoiceHostCommands.publishModels(models.status, on: server)
+        }
         controller.presenter = presenter
         commands.onQuit = { [weak self] in self?.shutDown() }
         commands.install(on: server)

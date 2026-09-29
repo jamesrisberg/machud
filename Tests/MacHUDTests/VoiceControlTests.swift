@@ -22,6 +22,11 @@ final class FakeVoiceHost {
     var actions: [[String: String]] = []
     var secrets: [String: String] = [:]
     var settingsSets = 0
+    var said: [String] = []
+    var modelRequests: [[String: String]] = []
+    var kokoro: [String: Any] = ["installed": false, "downloading": false, "progress": 0.0, "bytes": 330_000_000]
+    var workspace = "/Users/someone"
+    var workspaceDefault = true
 
     init(path: String) {
         server = HUDSocketServer(path: path, label: "machud.test.voice")
@@ -45,6 +50,10 @@ final class FakeVoiceHost {
         }
         server.register("action") { [unowned self] args, done in
             self.actions.append(args)
+            if args["name"] == "say" {
+                guard let text = args["text"], !text.isEmpty else { done(["ok": false, "error": "say needs text="]); return }
+                self.said.append(text)
+            }
             if args["name"] == "mute" { self.muted = true }
             if args["name"] == "unmute" { self.muted = false }
             done(["ok": true])
@@ -53,13 +62,19 @@ final class FakeVoiceHost {
         server.register("brain") { [unowned self] args, done in
             self.brainRequests.append(args)
             var reply: [String: Any] = [
-                "ok": true, "available": self.brainProblem == nil, "workspace": "",
+                "ok": true, "available": self.brainProblem == nil, "workspace": self.workspace,
+                "workspaceDefault": self.workspaceDefault,
                 "runtimes": [["id": "codex", "name": "Codex", "installed": true, "path": "/bin/codex"],
                              ["id": "claude", "name": "Claude", "installed": false],
                              ["id": "hermes", "name": "Hermes", "installed": false],
             ]
             if let problem = self.brainProblem { reply["problem"] = problem }
             done(reply)
+        }
+        server.register("models") { [unowned self] args, done in
+            self.modelRequests.append(args)
+            if args["action"] == "download" { self.kokoro["downloading"] = true }
+            done(["ok": true, "kokoro": self.kokoro])
         }
         server.register("secret") { [unowned self] args, done in
             guard let name = args["name"] else { done(["ok": false, "error": "secret needs name="]); return }
@@ -138,6 +153,10 @@ final class VoiceControlTests: XCTestCase {
         XCTAssertEqual(try parse(["brain", "status"]), .forward("brain", ["action": "status"]))
         XCTAssertEqual(try parse(["action", "open-session"]), .forward("action", ["name": "open-session"]))
         XCTAssertEqual(try parse(["action", "name=open-session"]), .forward("action", ["name": "open-session"]))
+        XCTAssertEqual(try parse(["action", "say", "text=Hello there"]), .forward("action", ["name": "say", "text": "Hello there"]))
+        XCTAssertEqual(try parse(["models"]), .forward("models", ["action": "status"]))
+        XCTAssertEqual(try parse(["models", "status"]), .forward("models", ["action": "status"]))
+        XCTAssertEqual(try parse(["models", "download", "id=kokoro"]), .forward("models", ["action": "download", "id": "kokoro"]))
     }
 
     func testRejectsBadRequests() {
@@ -153,6 +172,9 @@ final class VoiceControlTests: XCTestCase {
         fails(["secret", "set", "name=grok"], "no value")
         fails(["secret", "set", "value=k"], "no name")
         fails(["brain", "action=restart"], "brain only reports status")
+        fails(["action", "say"], "say needs text")
+        fails(["models", "download"], "download needs id")
+        fails(["models", "action=delete", "id=kokoro"], "models only reports and downloads")
     }
 
     func testMergeFollowsTheStoredTypes() throws {
@@ -377,5 +399,41 @@ final class VoiceControlTests: XCTestCase {
         host = FakeVoiceHost(path: path)
         XCTAssertTrue(host.server.start())
         XCTAssertTrue(spin(until: { model.status == .ready }, timeout: 10))
+    }
+    // MARK: - Previews and models
+
+    func testTestVoiceSaysASampleWithTheReplyVoice() {
+        supervisor.start()
+        let model = voice.settingsModel
+        XCTAssertTrue(spin(until: { model.status == .ready }))
+        model.testVoice()
+        XCTAssertTrue(spin(until: { self.host.said.count == 1 }))
+        XCTAssertEqual(host.said, [VoiceSettingsModel.voiceSample])
+        XCTAssertNil(model.lastError)
+    }
+
+    func testKokoroStatusLoadsDownloadsAndFollowsEvents() {
+        supervisor.start()
+        let model = voice.settingsModel
+        XCTAssertTrue(spin(until: { model.kokoro != nil }))
+        XCTAssertEqual(model.kokoro, VoiceSettingsModel.ModelStatus(installed: false, downloading: false, progress: 0,
+                                                                    bytes: 330_000_000, error: nil))
+        model.downloadKokoro()
+        XCTAssertTrue(spin(until: { model.kokoro?.downloading == true }))
+        XCTAssertEqual(host.modelRequests.last, ["action": "download", "id": "kokoro"])
+        host.server.publish("models", payload: ["kokoro": ["installed": false, "downloading": true, "progress": 0.5,
+                                                           "bytes": 330_000_000]])
+        XCTAssertTrue(spin(until: { model.kokoro?.progress == 0.5 }))
+        host.server.publish("models", payload: ["kokoro": ["installed": true, "downloading": false, "progress": 1.0,
+                                                           "bytes": 330_000_000]])
+        XCTAssertTrue(spin(until: { model.kokoro?.installed == true }))
+    }
+
+    func testTheBrainTabShowsTheResolvedWorkspace() {
+        supervisor.start()
+        let model = voice.settingsModel
+        XCTAssertTrue(spin(until: { model.workspace == "/Users/someone" }))
+        XCTAssertTrue(model.workspaceIsDefault)
+        XCTAssertEqual(model.string("brain.workspacePath"), "", "the stored choice stays empty")
     }
 }
