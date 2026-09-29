@@ -44,6 +44,11 @@ public struct VoiceHostEnvironment: Equatable {
     public var noBrain: Bool
     /// `MACHUD_VOICE_PARENT_PIPE=1`: exit when stdin reaches end-of-file.
     public var parentPipe: Bool
+    /// `MACHUD_VOICE_NO_SPEECH=1`: replies and `say` are silent; nothing is played.
+    public var noSpeech: Bool
+    /// `$MACHUD_VOICE_MODELS_DIR`, else nil for `~/Library/Application Support/MacHUD/Voice/Models`:
+    /// where downloaded models (Kokoro) are kept.
+    public var modelsDirectory: URL?
     /// `$MACHUD_VOICE_KEYCHAIN_SERVICE`, else `com.jrisberg.machud.voice`: the Keychain service
     /// every secret is read from and written to (an isolated instance never sees the real key).
     public var keychainService: String
@@ -69,6 +74,12 @@ public struct VoiceHostEnvironment: Equatable {
         noHotkeys = environment["MACHUD_NO_HOTKEYS"] != nil
         noBrain = flag("MACHUD_VOICE_NO_BRAIN")
         parentPipe = flag("MACHUD_VOICE_PARENT_PIPE")
+        noSpeech = flag("MACHUD_VOICE_NO_SPEECH")
+        if let models = environment["MACHUD_VOICE_MODELS_DIR"], !models.isEmpty {
+            modelsDirectory = URL(fileURLWithPath: (models as NSString).expandingTildeInPath, isDirectory: true)
+        } else {
+            modelsDirectory = nil
+        }
         if let service = environment["MACHUD_VOICE_KEYCHAIN_SERVICE"], !service.isEmpty {
             keychainService = service
         } else {

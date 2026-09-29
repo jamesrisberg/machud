@@ -30,6 +30,7 @@ final class VoiceServices: NSObject {
             guard let self else { return }
             self.settingsModel.hostStateChanged(self.connection.state)
         }
+        connection.onModelsChange = { [weak self] in self?.settingsModel.modelsChanged($0) }
         statusChanged(supervisor.status)
     }
 

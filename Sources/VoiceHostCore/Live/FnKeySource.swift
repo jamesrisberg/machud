@@ -7,18 +7,19 @@ import SpeakFreeLib
 final class FnKeySource: VoiceKeySource {
     private var manager: HotkeyManager?
 
-    func start(mode: KeyGestureRecognizer.Mode, alternateEnabled: Bool,
+    func start(mode: KeyGestureRecognizer.Mode, configuration: KeyGestureRecognizer.Configuration,
                isSessionActive: @escaping () -> Bool,
-               onIntent: @escaping (KeyGestureRecognizer.Intent) -> Void) {
+               onIntent: @escaping (KeyGestureRecognizer.Intent) -> Void,
+               onRelease: @escaping () -> Void) {
         stop()
         let manager = HotkeyManager(keyCode: Config.defaultConfig.hotkey.keyCode)
         manager.start(
-            onKeyDown: {}, onKeyUp: {},
+            onKeyDown: {}, onKeyUp: onRelease,
             // A real key pressed with fn held is a keyboard shortcut: drop the take. The manager
             // has already reset its recognizer.
             onAbort: { onIntent(.discard) },
             gestures: HotkeyManager.Gestures(
-                mode: mode, configuration: KeyGestureRecognizer.Configuration(alternateEnabled: alternateEnabled),
+                mode: mode, configuration: configuration,
                 isSessionActive: isSessionActive, onIntent: onIntent))
         self.manager = manager
     }

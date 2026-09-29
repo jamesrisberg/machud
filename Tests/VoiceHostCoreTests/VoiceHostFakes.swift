@@ -64,25 +64,33 @@ final class FakeKeys: VoiceKeySource {
         var alternateEnabled: Bool
     }
     var starts: [Start] = []
+    var configurations: [KeyGestureRecognizer.Configuration] = []
     var stops = 0
     var isSessionActive: (() -> Bool)?
     var onIntent: ((KeyGestureRecognizer.Intent) -> Void)?
+    var onRelease: (() -> Void)?
     var running: Bool { onIntent != nil }
 
-    func start(mode: KeyGestureRecognizer.Mode, alternateEnabled: Bool,
+    func start(mode: KeyGestureRecognizer.Mode, configuration: KeyGestureRecognizer.Configuration,
                isSessionActive: @escaping () -> Bool,
-               onIntent: @escaping (KeyGestureRecognizer.Intent) -> Void) {
-        starts.append(Start(mode: mode, alternateEnabled: alternateEnabled))
+               onIntent: @escaping (KeyGestureRecognizer.Intent) -> Void,
+               onRelease: @escaping () -> Void) {
+        starts.append(Start(mode: mode, alternateEnabled: configuration.alternateEnabled))
+        configurations.append(configuration)
         self.isSessionActive = isSessionActive
         self.onIntent = onIntent
+        self.onRelease = onRelease
     }
 
     func stop() {
         stops += 1
         onIntent = nil
+        onRelease = nil
     }
 
     func send(_ intent: KeyGestureRecognizer.Intent) { onIntent?(intent) }
+    /// The fn key came up.
+    func release() { onRelease?() }
 }
 
 @MainActor
@@ -161,6 +169,25 @@ final class FakeSpeaker: ReplySpeaking {
     func complete() {
         isSpeaking = false
         onFinished?()
+    }
+}
+
+/// The Kokoro model's store, without a download.
+@MainActor
+final class FakeModels: VoiceModelProviding {
+    var status = VoiceModelStatus(installed: false, downloading: false, progress: 0, bytes: 325_000_000)
+    var onChange: (() -> Void)?
+    var downloads = 0
+
+    func download() {
+        downloads += 1
+        status.downloading = true
+        onChange?()
+    }
+
+    func update(_ change: (inout VoiceModelStatus) -> Void) {
+        change(&status)
+        onChange?()
     }
 }
 

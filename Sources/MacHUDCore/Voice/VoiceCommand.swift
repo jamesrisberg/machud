@@ -13,8 +13,8 @@ enum VoiceCommand: Equatable {
 
     /// The actions `action name=` takes (the host's `VoiceHostAction`s).
     static let actions = ["click", "ask", "dictate", "stop", "cancel", "approve", "deny", "dismiss", "mute", "unmute",
-                          "open-session"]
-    static let subVerbs = ["state", "status", "hello", "action", "settings", "brain", "secret"]
+                          "open-session", "say"]
+    static let subVerbs = ["state", "status", "hello", "action", "settings", "brain", "models", "secret"]
 
     struct Invalid: Error, CustomStringConvertible {
         let description: String
@@ -38,10 +38,12 @@ enum VoiceCommand: Equatable {
             return try settings(args)
         case "brain":
             return try brain(args)
+        case "models":
+            return try models(args)
         case "secret":
             return try secret(args)
         default:
-            throw Invalid("voice takes state, status, action, settings, brain or secret, not \(sub)")
+            throw Invalid("voice takes state, status, action, settings, brain, models or secret, not \(sub)")
         }
     }
 
@@ -58,6 +60,12 @@ enum VoiceCommand: Equatable {
         if name == "approve" || name == "deny" {
             guard let id = args["id"], !id.isEmpty else { throw Invalid("voice action \(name) needs id=") }
             out["id"] = id
+        }
+        if name == "say" {
+            guard let text = args["text"], !text.trimmingCharacters(in: .whitespaces).isEmpty else {
+                throw Invalid("voice action say needs text=")
+            }
+            out["text"] = text
         }
         return .forward("action", out)
     }
@@ -86,6 +94,21 @@ enum VoiceCommand: Equatable {
         let op = inline ?? (args["status"] != nil ? "status" : nil) ?? "status"
         guard op == "status" else { throw Invalid("voice brain takes status, not \(op)") }
         return .forward("brain", ["action": "status"])
+    }
+
+    /// `models status` and `models download id=kokoro`: the host's downloadable models.
+    private static func models(_ args: [String: String]) throws -> VoiceCommand {
+        let inline = args["action"].flatMap { $0 == "1" ? nil : $0 }
+        let op = inline ?? ["download", "status"].first { args[$0] != nil } ?? "status"
+        switch op {
+        case "status":
+            return .forward("models", ["action": "status"])
+        case "download":
+            guard let id = args["id"], !id.isEmpty else { throw Invalid("voice models download needs id= (kokoro)") }
+            return .forward("models", ["action": "download", "id": id])
+        default:
+            throw Invalid("voice models takes status or download, not \(op)")
+        }
     }
 
     private static func secret(_ args: [String: String]) throws -> VoiceCommand {
