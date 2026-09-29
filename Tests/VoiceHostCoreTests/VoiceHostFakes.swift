@@ -354,9 +354,18 @@ final class FakeMacHUDStatus: MacHUDStatusReading, @unchecked Sendable {
 
     var reads: Int { lock.withLock { _reads } }
 
+    /// Answers read in turn before `current`, the last one becoming `current` (apps announcing
+    /// themselves while MacHUD starts).
+    func announce(_ snapshots: [MacHUDSnapshot?]) {
+        lock.withLock { _queue = snapshots }
+    }
+
+    private var _queue: [MacHUDSnapshot?] = []
+
     func snapshot() async -> MacHUDSnapshot? {
         lock.withLock {
             _reads += 1
+            if !_queue.isEmpty { _snapshot = _queue.removeFirst() }
             return _snapshot
         }
     }
