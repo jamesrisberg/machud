@@ -12,6 +12,7 @@ final class VoiceHostPreviewTests: XCTestCase {
     private var brain: FakeBrain!
     private var speaker: FakeSpeaker!
     private var models: FakeModels!
+    private var parakeet: FakeModels!
     private let home = URL(fileURLWithPath: "/Users/someone", isDirectory: true)
 
     override func setUp() async throws {
@@ -20,6 +21,9 @@ final class VoiceHostPreviewTests: XCTestCase {
         brain = FakeBrain()
         speaker = FakeSpeaker()
         models = FakeModels()
+        parakeet = FakeModels()
+        parakeet.status = VoiceModelStatus(installed: false, downloading: false, progress: 0, bytes: 600_000_000,
+                                           id: "parakeet-tdt-0.6b-v2")
     }
 
     override func tearDown() async throws {
@@ -34,7 +38,8 @@ final class VoiceHostPreviewTests: XCTestCase {
             detectRuntimes: FakeRuntimes.detect(), homeDirectory: home, schedule: { _, _ in })
         controller.start()
         let commands = VoiceHostCommands(controller: controller, store: VoiceHostSettingsStore(directory: directory),
-                                         secrets: InMemoryVoiceSecretStore(), version: "dev", models: models)
+                                         secrets: InMemoryVoiceSecretStore(), version: "dev",
+                                         models: ["kokoro": models, "parakeet": parakeet])
         return (controller, commands)
     }
 
@@ -112,8 +117,25 @@ final class VoiceHostPreviewTests: XCTestCase {
         XCTAssertEqual(kokoro["progress"] as? Double, 0)
         XCTAssertEqual(kokoro["bytes"] as? Int64, 325_000_000)
         XCTAssertNil(kokoro["error"])
+        XCTAssertNil(kokoro["id"])
+        let parakeet = try XCTUnwrap(reply["parakeet"] as? [String: Any])
+        XCTAssertEqual(parakeet["installed"] as? Bool, false)
+        XCTAssertEqual(parakeet["id"] as? String, "parakeet-tdt-0.6b-v2")
+        XCTAssertEqual(parakeet["bytes"] as? Int64, 600_000_000)
         XCTAssertTrue(JSONSerialization.isValidJSONObject(reply))
         XCTAssertEqual(commands.handle("models", ["action": "status"])["ok"] as? Bool, true)
+    }
+
+    func testModelsDownloadParakeetStartsOnlyIt() throws {
+        let (_, commands) = make()
+        let reply = commands.handle("models", ["action": "download", "id": "parakeet"])
+        XCTAssertEqual(reply["ok"] as? Bool, true, "\(reply)")
+        XCTAssertEqual(parakeet.downloads, 1)
+        XCTAssertEqual(models.downloads, 0)
+        XCTAssertEqual((reply["parakeet"] as? [String: Any])?["downloading"] as? Bool, true)
+        parakeet.update { $0.installed = true; $0.downloading = false }
+        _ = commands.handle("models", ["action": "download", "id": "parakeet"])
+        XCTAssertEqual(parakeet.downloads, 1, "installed: nothing new starts")
     }
 
     func testModelsDownloadStartsIt() throws {
@@ -142,14 +164,15 @@ final class VoiceHostPreviewTests: XCTestCase {
             settings: VoiceHostSettings(), dictation: dictation, keys: nil, brain: nil, speaker: nil, wake: nil,
             brainStateRoot: directory, detectRuntimes: FakeRuntimes.detect(), schedule: { _, _ in })
         let commands = VoiceHostCommands(controller: controller, store: VoiceHostSettingsStore(directory: directory),
-                                         secrets: InMemoryVoiceSecretStore(), version: "dev", models: nil)
+                                         secrets: InMemoryVoiceSecretStore(), version: "dev")
         XCTAssertEqual(commands.handle("models", [:])["ok"] as? Bool, false)
     }
 
     func testModelsEventPayload() throws {
-        let payload = VoiceHostCommands.modelsPayload(models.status)
+        let payload = VoiceHostCommands.modelsPayload(["kokoro": models.status, "parakeet": parakeet.status])
         let kokoro = try XCTUnwrap(payload["kokoro"] as? [String: Any])
         XCTAssertEqual(kokoro["installed"] as? Bool, false)
+        XCTAssertEqual((payload["parakeet"] as? [String: Any])?["id"] as? String, "parakeet-tdt-0.6b-v2")
     }
 
     // MARK: workspace

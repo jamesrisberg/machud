@@ -4,15 +4,16 @@ import VoiceKit
 
 /// The `machud-voice` socket's verbs: `hello`, `state`, `settings get|set settings=<json>`,
 /// `action name=<click|ask|dictate|stop|cancel|approve|deny|dismiss|mute|unmute|open-session> [id=]`,
-/// `action name=say text=`, `brain status`, `models status|download id=kokoro`,
-/// `secret set|clear name=grok [value=]` (values are written, never read back) and `quit`.
+/// `action name=say text=`, `brain status`, `models status|download id=kokoro|parakeet`,
+/// `history status`, `secret set|clear name=grok [value=]` (values are written, never read
+/// back) and `quit`.
 /// `subscribe` is `HUDSocketServer`'s own; `publish(_:on:)` feeds it `state` events and
 /// `publishModels(_:on:)` its `models` events.
 @MainActor
 final class VoiceHostCommands {
-    static let verbs = ["hello", "state", "settings", "action", "brain", "models", "secret", "quit"]
-    /// Model ids `models download` takes.
-    static let modelIDs = ["kokoro"]
+    static let verbs = ["hello", "state", "settings", "action", "brain", "models", "history", "secret", "quit"]
+    /// Model ids `models` reports and `models download` takes, in order.
+    static let modelIDs = ["kokoro", "parakeet"]
     /// Secret names the socket accepts, and the `VoiceSecretStoring` key each is stored under.
     static let secretKeys = ["grok": VoiceSecrets.grokAPIKey]
 
@@ -20,18 +21,21 @@ final class VoiceHostCommands {
     private let store: VoiceHostSettingsStore
     private let secrets: VoiceSecretStoring
     private let version: String
-    /// The Kokoro reply voice's files; nil where the host cannot fetch models.
-    private let models: VoiceModelProviding?
+    /// The downloadable models by id (`kokoro`, `parakeet`); empty where the host fetches none.
+    private let models: [String: VoiceModelProviding]
+    /// Where dictation history goes; nil where the host keeps none to report.
+    private let history: DictationHistoryLocator?
     /// After a `quit` has been answered.
     var onQuit: () -> Void = {}
 
     init(controller: VoiceHostController, store: VoiceHostSettingsStore, secrets: VoiceSecretStoring,
-         version: String, models: VoiceModelProviding? = nil) {
+         version: String, models: [String: VoiceModelProviding] = [:], history: DictationHistoryLocator? = nil) {
         self.controller = controller
         self.store = store
         self.secrets = secrets
         self.version = version
         self.models = models
+        self.history = history
     }
 
     func install(on server: HUDSocketServer) {
@@ -57,17 +61,20 @@ final class VoiceHostCommands {
         server.publish("state", payload: ["state": jsonObject(state)])
     }
 
-    /// Pushes `{"event":"models","kokoro":{…}}` to subscribers.
-    static func publishModels(_ status: VoiceModelStatus, on server: HUDSocketServer) {
-        server.publish("models", payload: modelsPayload(status))
+    /// Pushes `{"event":"models","kokoro":{…},"parakeet":{…}}` to subscribers.
+    static func publishModels(_ models: [String: VoiceModelProviding], on server: HUDSocketServer) {
+        server.publish("models", payload: modelsPayload(models.mapValues(\.status)))
     }
 
-    /// `{kokoro: {installed, downloading, progress, bytes, error?}}`.
-    static func modelsPayload(_ kokoro: VoiceModelStatus) -> [String: Any] {
-        var model: [String: Any] = ["installed": kokoro.installed, "downloading": kokoro.downloading,
-                                    "progress": kokoro.progress, "bytes": kokoro.bytes]
-        if let error = kokoro.error { model["error"] = error }
-        return ["kokoro": model]
+    /// `{<id>: {installed, downloading, progress, bytes, id?, error?}}` for each model.
+    static func modelsPayload(_ statuses: [String: VoiceModelStatus]) -> [String: Any] {
+        statuses.mapValues { status in
+            var model: [String: Any] = ["installed": status.installed, "downloading": status.downloading,
+                                        "progress": status.progress, "bytes": status.bytes]
+            if let id = status.id { model["id"] = id }
+            if let error = status.error { model["error"] = error }
+            return model
+        }
     }
 
     func handle(_ command: String, _ args: [String: String]) -> [String: Any] {
@@ -85,6 +92,8 @@ final class VoiceHostCommands {
             return brain(args)
         case "models":
             return modelsCommand(args)
+        case "history":
+            return historyCommand(args)
         case "secret":
             return secret(args)
         case "quit":
@@ -175,21 +184,32 @@ final class VoiceHostCommands {
         return reply
     }
 
-    /// `models status` and `models download id=kokoro`; both reply with the status.
+    /// `models status` and `models download id=<kokoro|parakeet>`; both reply with every
+    /// model's status.
     private func modelsCommand(_ args: [String: String]) -> [String: Any] {
-        guard let models else { return ["ok": false, "error": "models are not available in this voice host"] }
+        guard !models.isEmpty else { return ["ok": false, "error": "models are not available in this voice host"] }
         switch args["action"] ?? args["_"] ?? "status" {
         case "status":
             break
         case "download":
-            guard let id = args["id"], Self.modelIDs.contains(id) else {
-                return ["ok": false, "error": "models download needs id=, one of \(Self.modelIDs.joined(separator: ", "))"]
+            let ids = Self.modelIDs.filter { models[$0] != nil }
+            guard let id = args["id"], let model = models[id] else {
+                return ["ok": false, "error": "models download needs id=, one of \(ids.joined(separator: ", "))"]
             }
-            if !models.status.installed, !models.status.downloading { models.download() }
+            if !model.status.installed, !model.status.downloading { model.download() }
         case let other:
             return ["ok": false, "error": "models takes status or download, not \(other)"]
         }
-        return ["ok": true].merging(Self.modelsPayload(models.status)) { $1 }
+        return ["ok": true].merging(Self.modelsPayload(models.mapValues(\.status))) { $1 }
+    }
+
+    /// `history status`: where finished dictations are kept, as the setting resolves on this
+    /// Mac now (SpeakFree installed or not, its own choice while no setting is saved).
+    private func historyCommand(_ args: [String: String]) -> [String: Any] {
+        let sub = args["action"] ?? args["_"] ?? "status"
+        guard sub == "status" else { return ["ok": false, "error": "history takes status, not \(sub)"] }
+        guard let history else { return ["ok": false, "error": "history is not available in this voice host"] }
+        return ["ok": true].merging(history.plan(for: controller.settings.history).json) { $1 }
     }
 
     private func secret(_ args: [String: String]) -> [String: Any] {

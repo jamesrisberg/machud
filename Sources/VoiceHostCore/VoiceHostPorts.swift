@@ -18,8 +18,9 @@ enum DictationUpdate: Equatable {
     case partial(String)
     /// Capture ended; the take is being transcribed.
     case transcribing
-    /// The take's text: typed at the cursor already, or returned for the caller.
-    case finished(text: String, destination: DictationDestination)
+    /// The take's text: typed at the cursor already, or returned for the caller. `transcript`
+    /// is the words as spoken (punctuation and glossary applied, no styling), for the text feed.
+    case finished(text: String, destination: DictationDestination, transcript: String)
     case failed(DictationFailure)
 }
 
@@ -38,6 +39,16 @@ protocol DictationDriving: AnyObject {
     func cancel()
     /// Types `text` at the cursor (a take the agent could not take).
     func insert(_ text: String)
+    /// Finished takes are kept (or not) as `history` says from now on.
+    func setHistory(_ history: DictationHistorySettings?)
+    /// The speech model may have been installed: use it from the next take.
+    func prepareEngine()
+}
+
+extension DictationDriving {
+    /// A capture path that writes no recordings keeps no history.
+    func setHistory(_ history: DictationHistorySettings?) {}
+    func prepareEngine() {}
 }
 
 /// The fn key's gestures (`KeyGestureRecognizer` intents), recognized with the configuration
@@ -106,9 +117,11 @@ struct VoiceModelStatus: Equatable, Sendable {
     var bytes: Int64
     /// Why the last download failed, in words for the user.
     var error: String?
+    /// The model's own id, where one family has several (Parakeet's English or multilingual).
+    var id: String?
 }
 
-/// The Kokoro reply voice's model files.
+/// A downloadable model's files (the Kokoro reply voice, the Parakeet speech model).
 @MainActor
 protocol VoiceModelProviding: AnyObject {
     var status: VoiceModelStatus { get }
@@ -139,6 +152,13 @@ protocol SessionOpening: Sendable {
 
 struct SessionOpenError: Error, Equatable {
     let message: String
+}
+
+/// MacHUD's `text-feed` broker (`feed add` on MacHUD's control socket), which hands text to the
+/// apps that keep a feed (Stash's history). Fire-and-forget: never blocks or fails a take.
+protocol TextFeeding: Sendable {
+    /// `source` is a short label ("Dictation", "Agent").
+    func add(text: String, source: String, title: String?)
 }
 
 /// Runs work on the main actor after a delay (a manual clock in tests).
