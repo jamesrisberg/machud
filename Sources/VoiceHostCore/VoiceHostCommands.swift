@@ -113,9 +113,10 @@ final class VoiceHostCommands {
             return ["ok": true, "settings": Self.jsonObject(controller.settings)]
         case "set":
             guard let text = args["settings"], let data = text.data(using: .utf8),
-                  (try? JSONSerialization.jsonObject(with: data)) is [String: Any],
+                  let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
                   let decoded = try? JSONDecoder().decode(VoiceHostSettings.self, from: data)
             else { return ["ok": false, "error": "settings= must be a JSON object"] }
+            if let invalid = VoiceHostSettings.invalidChoice(in: object) { return ["ok": false, "error": invalid] }
             // Turning the wake word on with a phrase no model detects saves one that has a model.
             let settings = controller.resolvingWakePhrase(decoded)
             do {

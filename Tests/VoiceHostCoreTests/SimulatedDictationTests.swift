@@ -21,7 +21,7 @@ final class SimulatedDictationTests: XCTestCase {
             time += 0.25
             clock.advance(to: time)
         }
-        XCTAssertEqual(time, 3, "a second of speech, then the 2 s pause at 0.25 s ticks")
+        XCTAssertEqual(time, 3.5, "0.3 s of room, a second of speech, then the 2 s pause at 0.25 s ticks")
         XCTAssertEqual(controller.state.phase, .transcribing(.agent))
         clock.advance(to: time + 0.5)
         await controller.pendingWork?.value
