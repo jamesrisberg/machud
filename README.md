@@ -343,7 +343,9 @@ One JSON object per line in, one out: `{"command": "ping", "args": {}}` →
   Duplicate, Apply at Startup, Delete and New. The same edits from the shell: `machud
   loadouts rename name=Work to=Studio`, `duplicate`, `delete`, `startup`.
 - Voice settings live with the voice host: the Voice and Brain tabs, or `machud voice
-  settings get` and `machud voice settings set voice.speakReplies=true`. See
+  settings get` and `machud voice settings set voice.speakReplies=true`. The Voice tab's
+  Hands-free section sets when a take started by the orb or the wake word is sent: after a
+  pause (Pause before sending, Microphone sensitivity) or only when you tap. See
   [docs/API.md#voice](docs/API.md#voice).
 - MacHUD's own settings over the socket: `machud settings get`, `machud settings set
   gap=12 trigger=option`, `machud settings schema`. Keys: `enabled`, `trigger`

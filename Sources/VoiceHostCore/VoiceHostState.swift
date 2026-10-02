@@ -37,13 +37,15 @@ public struct VoiceHostState: Codable, Equatable, Sendable {
     /// outlasts a tap, the second press arrives, or the take ends. The orb shows a neutral
     /// armed look meanwhile, so it never morphs into the waveform only to turn back.
     public var gesturePending: Bool
+    /// How the latest hands-free take ended, and what the endpointer measured; nil until one has.
+    public var lastTakeEnd: VoiceTakeEnd?
 
     public init(phase: VoicePhase = .idle, inputLevel: Double = 0, partialTranscript: String = "",
                 card: VoiceCard? = nil, hiddenForFullScreen: Bool = false, brainAvailable: Bool = false,
                 brainProblem: String? = nil, sessionKey: String? = nil, sessionProvider: String? = nil,
                 activeRuntime: String? = nil,
                 wakeListening: Bool = false, wakeProblem: String? = nil, muted: Bool = false,
-                gesturePending: Bool = false) {
+                gesturePending: Bool = false, lastTakeEnd: VoiceTakeEnd? = nil) {
         self.phase = phase
         self.inputLevel = inputLevel
         self.partialTranscript = partialTranscript
@@ -58,6 +60,70 @@ public struct VoiceHostState: Codable, Equatable, Sendable {
         self.wakeProblem = wakeProblem
         self.muted = muted
         self.gesturePending = gesturePending
+        self.lastTakeEnd = lastTakeEnd
+    }
+}
+
+/// Why a hands-free take ended, for diagnosing takes that end too soon or too late. Also
+/// logged, one line per take.
+public struct VoiceTakeEnd: Codable, Equatable, Sendable {
+    public enum Reason: String, Codable, Equatable, Sendable {
+        /// The pause after speech (automatic end of turn).
+        case pause
+        /// The take reached the endpointer's maximum length.
+        case maximum
+        /// No speech was heard 10 s into an automatic take: it is thrown away, not sent.
+        case nothingHeard
+        /// A tap: the orb, the fn key or `action stop`.
+        case stop
+        /// Thrown away: `action cancel`, mute, or a change to the fn key setup.
+        case cancelled
+        /// The dictation failed (no speech model, too short to transcribe, an audio error).
+        case failed
+        /// The dictation ended the take by itself.
+        case dictation
+    }
+
+    public var reason: Reason
+    /// The take's length, from its start to its end.
+    public var seconds: TimeInterval
+    /// Quiet measured since the last speech; nil while speech was still going on, or before any.
+    public var quietMs: Int?
+    /// The noise floor and the speech threshold at the end, on SpeakFree's level scale (0...1,
+    /// RMS / 0.15); nil once no level arrived.
+    public var floor: Double?
+    public var threshold: Double?
+    /// The pause the take needed to end on its own, grace included; nil when silence never
+    /// ends it (end of turn "manual").
+    public var pause: TimeInterval?
+    /// The latest words read as an unfinished sentence, so the pause carried the grace.
+    public var grace: Bool
+
+    public init(reason: Reason, seconds: TimeInterval, quietMs: Int? = nil, floor: Double? = nil,
+                threshold: Double? = nil, pause: TimeInterval? = nil, grace: Bool = false) {
+        self.reason = reason
+        self.seconds = seconds
+        self.quietMs = quietMs
+        self.floor = floor
+        self.threshold = threshold
+        self.pause = pause
+        self.grace = grace
+    }
+
+    /// The log line: `pause after 2050 ms quiet (floor 0.021, threshold 0.050, pause 3.5 s with grace), take 6.4 s`.
+    public var summary: String {
+        var details: [String] = []
+        if let floor, let threshold {
+            details.append(String(format: "floor %.3f, threshold %.3f", floor, threshold))
+        }
+        if let pause {
+            details.append(String(format: "pause %.1f s", pause) + (grace ? " with grace" : ""))
+        } else {
+            details.append("ends on a tap")
+        }
+        let quiet = quietMs.map { " after \($0) ms quiet" } ?? ""
+        return "\(reason.rawValue)\(quiet) (\(details.joined(separator: ", "))), take "
+            + String(format: "%.1f s", seconds)
     }
 }
 
