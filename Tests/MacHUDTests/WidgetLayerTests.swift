@@ -296,13 +296,14 @@ final class WidgetLayerTests: XCTestCase {
 
         connector.requests = []
         // The editor's preview is already snapped; the layer puts it there and tells the app.
-        XCTAssertNil(layer.editorMove("W1", to: CGRect(x: 360, y: 705, width: 170, height: 170), grid: .default))
+        XCTAssertEqual(layer.editorWidgetGrid, .default, "the editor previews on the grid widgets are placed on")
+        XCTAssertNil(layer.editorMove("W1", to: CGRect(x: 360, y: 705, width: 170, height: 170)))
         XCTAssertEqual(widgetRequests.last, ["action": "update", "instance": "W1", "frame": "360,705,170,170"])
-        // On a coarser grid the editor shows (24 × 12: 60 pt across).
-        XCTAssertNil(layer.editorMove("W1", to: CGRect(x: 480, y: 705, width: 170, height: 170), grid: GridSize(cols: 24, rows: 12)))
+        XCTAssertNil(layer.editorMove("W1", to: CGRect(x: 480, y: 705, width: 170, height: 170)))
         XCTAssertEqual(stored.instances[0].x, 480.0 / 1440, accuracy: 1e-6)
+        XCTAssertEqual(layer.placements()["W1"]?.frame.minX, 480, "shown where it was dropped")
         _ = call(["action": "add", "type": "clock", "col": "0", "row": "0"])          // W3 top-left
-        XCTAssertEqual(layer.editorMove("W1", to: CGRect(x: 0, y: 705, width: 170, height: 170), grid: .default),
+        XCTAssertEqual(layer.editorMove("W1", to: CGRect(x: 0, y: 705, width: 170, height: 170)),
                        "That spot is taken; moved to the nearest free one")
 
         var note: String?? = .none
@@ -310,6 +311,25 @@ final class WidgetLayerTests: XCTestCase {
         XCTAssertEqual(note, .some(nil))
         XCTAssertEqual(stored.instances.last?.screen, .display(id: "1-2-3", name: "Side"))
         XCTAssertEqual(layer.editorWidgetTypes().first { $0.type == "weather" }?.canAdd, false, "one weather allowed")
+    }
+
+    func testTheLayoutEditorsSaveKeepsWidgetsChangedWhileItWasOpen() throws {
+        startApp()
+        _ = call(["action": "add", "type": "clock"])
+        var atOpen = Config(layouts: [Layout(name: "L", regions: [])], loadouts: [])
+        atOpen.widgets = stored                                  // the editor's copy
+        _ = layer.editorMove("W1", to: CGRect(x: 360, y: 705, width: 170, height: 170))
+        var added: String?? = .none
+        layer.editorAdd(app: appID, type: "weather", size: .small, screenFrame: main.frame) { added = .some($0) }
+        XCTAssertEqual(added, .some(nil))
+        var current = atOpen
+        current.widgets = stored                                 // what the store has now
+        var edited = atOpen
+        edited.layouts[0].regions.append(Region(name: "R", x: 0, y: 0, w: 1, h: 1))
+        let saved = LayoutEditorController.saved(edited, current: current, loadoutsAtOpen: atOpen.loadouts)
+        XCTAssertEqual(saved.widgets, stored, "moved and added widgets survive Save")
+        XCTAssertEqual(saved.widgets?.instances.count, 2)
+        XCTAssertEqual(saved.layouts[0].regions.count, 1, "the editor's own changes are saved")
     }
 
     func testTypesListsEveryWidgetType() throws {
