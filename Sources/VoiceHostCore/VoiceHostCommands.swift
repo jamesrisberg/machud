@@ -6,12 +6,16 @@ import VoiceKit
 /// `action name=<click|ask|dictate|stop|cancel|approve|deny|dismiss|mute|unmute|open-session> [id=]`,
 /// `action name=say text=`, `brain status`, `models status|download id=kokoro|parakeet|<wake id>`,
 /// `history status`, `secret set|clear name=grok [value=]` (values are written, never read
-/// back) and `quit`.
+/// back), `conversation` (the conversation's rows), `send text=` (a typed turn to the agent),
+/// `card peek|pin|expand|close` and `quit`.
 /// `subscribe` is `HUDSocketServer`'s own; `publish(_:on:)` feeds it `state` events and
 /// `publishModels(_:on:)` its `models` events.
 @MainActor
 final class VoiceHostCommands {
-    static let verbs = ["hello", "state", "settings", "action", "brain", "models", "history", "secret", "quit"]
+    static let verbs = ["hello", "state", "settings", "action", "brain", "models", "history", "secret",
+                        "conversation", "send", "card", "quit"]
+    /// `card`'s states and the card mode each sets (`close` also dismisses the card).
+    static let cardModes: [String: VoiceCardMode] = ["peek": .peek, "pin": .pinned, "expand": .expanded, "close": .peek]
     /// Model ids `models` reports and `models download` takes, in order.
     static let modelIDs = ["kokoro", "parakeet"]
     /// Secret names the socket accepts, and the `VoiceSecretStoring` key each is stored under.
@@ -100,6 +104,16 @@ final class VoiceHostCommands {
             return historyCommand(args)
         case "secret":
             return secret(args)
+        case "conversation":
+            return ["ok": true, "threadId": controller.conversation.threadID ?? NSNull(),
+                    "rows": Self.jsonObject(controller.conversation.rows)]
+        case "send":
+            if let refusal = controller.send(typed: args["text"] ?? "") {
+                return ["ok": false, "error": args["text"] == nil ? "send needs text=" : refusal]
+            }
+            return ["ok": true, "state": Self.jsonObject(controller.state)]
+        case "card":
+            return card(args)
         case "quit":
             return ["ok": true]
         default:
@@ -161,6 +175,17 @@ final class VoiceHostCommands {
             return ["ok": false, "error": "unknown action \(name)"]
         }
         controller.perform(action)
+        return ["ok": true, "state": Self.jsonObject(controller.state)]
+    }
+
+    /// `card peek|pin|expand|close`: sets the card's mode; `close` dismisses the card as its close
+    /// button does.
+    private func card(_ args: [String: String]) -> [String: Any] {
+        let name = args["action"] ?? args["_"] ?? ""
+        guard let mode = Self.cardModes[name] else {
+            return ["ok": false, "error": "card takes peek, pin, expand or close"]
+        }
+        controller.perform(name == "close" ? .dismissCard : .setCardMode(mode))
         return ["ok": true, "state": Self.jsonObject(controller.state)]
     }
 

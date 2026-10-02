@@ -86,6 +86,10 @@ final class VoiceHost {
             wake: environment.noMicrophone ? nil : WakeWordListener(modelsRoot: modelsRoot),
             wakeModels: wakeModels,
             brainStateRoot: support.appendingPathComponent("Brain"),
+            // The conversation is the brain's: kept only where a brain can run.
+            conversationStore: environment.noBrain
+                ? nil : ConversationFile(url: environment.conversationFile
+                    ?? voiceRoot.appendingPathComponent("conversation.json")),
             sessions: MacHUDSessions(socketPath: environment.machudSocketPath),
             feed: MacHUDFeed(socketPath: environment.machudSocketPath),
             machudTools: MacHUDToolServer.locate(
@@ -131,9 +135,11 @@ final class VoiceHost {
         handleTermination()
     }
 
-    /// Throws away a take being recorded, stops the socket and the brain, then exits.
+    /// Throws away a take being recorded, saves the conversation, stops the socket and the
+    /// brain, then exits.
     func shutDown() -> Never {
         dictation.cancel()
+        controller.flushConversation()
         server.stop()
         brain?.configure(nil)
         exit(0)

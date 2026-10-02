@@ -16,6 +16,15 @@ final class VoiceHostSettingsTests: XCTestCase {
         XCTAssertTrue(settings.enabled)
     }
 
+    func testRepliesToTypedMessagesAreSilentByDefault() throws {
+        XCTAssertFalse(try JSONDecoder().decode(VoiceHostSettings.self, from: Data("{}".utf8)).speakTypedReplies)
+        var settings = VoiceHostSettings()
+        settings.speakTypedReplies = true
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as? [String: Any])
+        XCTAssertEqual(object["speakTypedReplies"] as? Bool, true)
+        XCTAssertEqual(try JSONDecoder().decode(VoiceHostSettings.self, from: JSONEncoder().encode(settings)), settings)
+    }
+
     func testMacHUDToolsDefaultOnWithoutApproval() throws {
         let settings = try JSONDecoder().decode(VoiceHostSettings.self, from: Data(#"{"brain":{"runtime":"claude"}}"#.utf8))
         XCTAssertTrue(settings.machudTools)

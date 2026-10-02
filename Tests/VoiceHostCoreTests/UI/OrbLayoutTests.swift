@@ -205,4 +205,39 @@ final class OrbLayoutTests: XCTestCase {
         XCTAssertLessThan(barsWidth + 24, OrbLayout.waveformMinWidth)
         XCTAssertLessThan(OrbLayout.barMaxHeight, OrbLayout.waveformHeight)
     }
+
+    // MARK: Conversation
+
+    func testThePinnedConversationHangsWhereTheCardDoes() {
+        let g = notched
+        let card = OrbLayout.cardFrame(size: CGSize(width: OrbLayout.cardWidth, height: 120), geometry: g)
+        let pinned = OrbLayout.pinnedFrame(contentHeight: 300, geometry: g)
+        XCTAssertEqual(pinned.maxY, card.maxY)
+        XCTAssertEqual(pinned.midX, g.screenFrame.midX, accuracy: 0.5)
+        XCTAssertEqual(pinned.width, OrbLayout.pinnedWidth)
+        XCTAssertEqual(pinned.height, 300)
+        let tall = OrbLayout.pinnedFrame(contentHeight: 5000, geometry: g)
+        XCTAssertEqual(tall.height, OrbLayout.pinnedMaxHeight(geometry: g))
+        XCTAssertGreaterThanOrEqual(tall.minY, g.visibleFrame.minY)
+        XCTAssertEqual(OrbLayout.pinnedFrame(contentHeight: 10, geometry: g).height, OrbLayout.pinnedMinHeight)
+    }
+
+    func testTheExpandedConversationIsLargeAndCenteredUnderTheNotch() {
+        let g = notched
+        let frame = OrbLayout.expandedFrame(geometry: g)
+        XCTAssertEqual(frame.width, OrbLayout.expandedWidth)
+        XCTAssertEqual(frame.midX, g.screenFrame.midX, accuracy: 0.5)
+        XCTAssertEqual(frame.height, (g.screenFrame.height * OrbLayout.expandedHeightFraction).rounded(), accuracy: 1)
+        XCTAssertEqual(frame.maxY, OrbLayout.cardFrame(size: CGSize(width: 10, height: 10), geometry: g).maxY)
+        XCTAssertGreaterThanOrEqual(frame.minY, g.visibleFrame.minY)
+    }
+
+    func testTheExpandedConversationFitsASmallScreen() {
+        let g = HUDNotchGeometry(screenFrame: CGRect(x: 0, y: 0, width: 600, height: 400),
+                                 visibleFrame: CGRect(x: 0, y: 0, width: 600, height: 375))
+        let frame = OrbLayout.expandedFrame(geometry: g)
+        XCTAssertLessThanOrEqual(frame.width, 600 - 2 * OrbLayout.expandedMargin)
+        XCTAssertGreaterThanOrEqual(frame.minX, g.visibleFrame.minX)
+        XCTAssertGreaterThanOrEqual(frame.minY, g.visibleFrame.minY)
+    }
 }

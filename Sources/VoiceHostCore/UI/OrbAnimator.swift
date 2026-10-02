@@ -104,6 +104,12 @@ struct CardGrow: Equatable {
 
     var isSettled: Bool { progress == target }
 
+    /// Puts the card at `value` at once (a card the conversation hands back appears in place).
+    mutating func jump(to value: CGFloat) {
+        progress = value
+        target = value
+    }
+
     mutating func advance(dt: Double, reduceMotion: Bool) {
         guard !reduceMotion else { progress = target; return }
         let duration = target > progress ? OrbLayout.cardOpenDuration : OrbLayout.cardCloseDuration

@@ -14,7 +14,10 @@ enum VoiceCommand: Equatable {
     /// The actions `action name=` takes (the host's `VoiceHostAction`s).
     static let actions = ["click", "ask", "dictate", "stop", "cancel", "approve", "deny", "dismiss", "mute", "unmute",
                           "open-session", "say"]
-    static let subVerbs = ["state", "status", "hello", "action", "settings", "brain", "models", "history", "secret"]
+    static let subVerbs = ["state", "status", "hello", "action", "settings", "brain", "models", "history", "secret",
+                           "conversation", "send", "card"]
+    /// The states `card` takes.
+    static let cardStates = ["peek", "pin", "expand", "close"]
 
     struct Invalid: Error, CustomStringConvertible {
         let description: String
@@ -44,8 +47,22 @@ enum VoiceCommand: Equatable {
             return try history(args)
         case "secret":
             return try secret(args)
+        case "conversation":
+            return .forward("conversation", [:])
+        case "send":
+            guard let text = args["text"], !text.trimmingCharacters(in: .whitespaces).isEmpty else {
+                throw Invalid("voice send needs text= (a message typed to the agent)")
+            }
+            return .forward("send", ["text": text])
+        case "card":
+            let inline = args["action"].flatMap { $0 == "1" ? nil : $0 }
+            guard let state = inline ?? cardStates.first(where: { args[$0] != nil }), cardStates.contains(state) else {
+                throw Invalid("voice card takes \(cardStates.joined(separator: ", "))")
+            }
+            return .forward("card", ["action": state])
         default:
-            throw Invalid("voice takes state, status, action, settings, brain, models, history or secret, not \(sub)")
+            throw Invalid("voice takes state, status, action, settings, brain, models, history, secret, conversation, "
+                + "send or card, not \(sub)")
         }
     }
 

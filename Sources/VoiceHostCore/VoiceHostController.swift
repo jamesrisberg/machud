@@ -16,7 +16,12 @@ import VoiceKit
 ///
 /// One turn at a time: the companion refuses a second one, so while the brain works an agent
 /// take is refused, and a take moved to the agent then (or while the brain is off) is typed at
-/// the cursor instead.
+/// the cursor instead. A typed turn (`send(typed:)`) goes to the same session and is refused the
+/// same way, with the reason returned to the sender rather than shown under the orb.
+///
+/// Every turn, spoken or typed, and every snapshot also go to `conversation`, which the
+/// presenter draws when the card is pinned or expanded (`state.cardMode`) and which is kept in
+/// `conversationStore` across restarts.
 ///
 /// `brainProblem` says why the brain cannot take a turn (settings, the chosen runtime's tool, or
 /// the companion's own reason). A problem the user has to fix first refuses an agent take up
@@ -38,9 +43,12 @@ public final class VoiceHostController: VoiceHostActing {
         }
     }
     public private(set) var settings: VoiceHostSettings
-    /// Draws the state. Rendered once when set, then on every change.
+    /// Draws the state and the conversation. Rendered once when set, then on every change.
     public var presenter: VoiceHostPresenting? {
-        didSet { presenter?.render(state) }
+        didSet {
+            presenter?.render(state)
+            presenter?.renderConversation(conversation.rows)
+        }
     }
     /// Every state change, after the presenter (the socket's `state` event).
     public var onStateChange: ((VoiceHostState) -> Void)?
@@ -68,6 +76,11 @@ public final class VoiceHostController: VoiceHostActing {
     static let noSpeech = "Speech is not available"
     static let nothingHeard = "Didn't hear anything"
     static let wakeUnavailable = "The wake word needs the microphone, which this voice host does not use."
+    static let nothingToSend = "There is nothing to send"
+    /// How long a pinned card stays after the pointer leaves it.
+    static let pinGrace: TimeInterval = 0.5
+    /// How long after a change the conversation is saved (a finished turn is saved at once).
+    static let conversationSaveDelay: TimeInterval = 1
     /// Progress lines kept on the card.
     static let progressLimit = 4
 
@@ -79,6 +92,8 @@ public final class VoiceHostController: VoiceHostActing {
     /// The wake phrases there are models for, in the order they are offered.
     let wakeModels: [WakePhraseModel]
     private let brainStateRoot: URL
+    /// Where the conversation is kept between launches; nil keeps it only in memory.
+    private let conversationStore: ConversationStoring?
     private let sessions: SessionOpening?
     private let feed: TextFeeding?
     /// MacHUD's tool server; nil when `machud-mcp` is not beside the voice host.
@@ -163,6 +178,13 @@ public final class VoiceHostController: VoiceHostActing {
     private var runtimeProblem: String?
     /// Why the running wake listener stopped by itself; cleared when it starts again.
     private var wakeListenerProblem: String?
+    /// The conversation with the agent, every turn and snapshot reduced to rows.
+    private(set) var conversation: ConversationLog
+    private var conversationSaveScheduled = false
+    /// The pointer is over the card.
+    private var cardHovered = false
+    /// The latest pending unpin; an earlier one that fires finds it changed and does nothing.
+    private var unpinToken = UUID()
 
     /// - Parameters:
     ///   - keys: nil without an fn event tap (`MACHUD_NO_HOTKEYS`).
@@ -170,6 +192,7 @@ public final class VoiceHostController: VoiceHostActing {
     ///   - wake: nil without a microphone for it.
     ///   - wakeModels: the wake phrases there are models for, and their files.
     ///   - brainStateRoot: the folder per-workspace brain state directories go under.
+    ///   - conversationStore: where the conversation is kept; nil keeps it in memory only.
     ///   - sessions: MacHUD's session broker; nil leaves `openSession` unavailable.
     ///   - feed: MacHUD's text-feed broker; nil sends nothing.
     ///   - machudTools: MacHUD's tool server, given to the brain while `machudTools` is on.
@@ -179,7 +202,8 @@ public final class VoiceHostController: VoiceHostActing {
     ///   - homeDirectory: the brain's workspace while `brain.workspacePath` is empty.
     init(settings: VoiceHostSettings, dictation: DictationDriving, keys: VoiceKeySource?,
          brain: BrainDriving?, speaker: ReplySpeaking?, wake: WakeDriving?, wakeModels: [WakePhraseModel] = [],
-         brainStateRoot: URL, sessions: SessionOpening? = nil, feed: TextFeeding? = nil,
+         brainStateRoot: URL, conversationStore: ConversationStoring? = nil,
+         sessions: SessionOpening? = nil, feed: TextFeeding? = nil,
          machudTools: MacHUDToolServer? = nil, machudStatus: MacHUDStatusReading? = nil,
          detectRuntimes: @escaping (BrainSettings) -> [BrainRuntimeDetection] = { BrainRuntimes.detect($0) },
          sessionKeyOf: @escaping (AgentSessionSnapshot) -> String? = { $0.sessionKey },
@@ -194,6 +218,10 @@ public final class VoiceHostController: VoiceHostActing {
         self.wake = wake
         self.wakeModels = wakeModels
         self.brainStateRoot = brainStateRoot
+        self.conversationStore = conversationStore
+        conversation = ConversationLog(record: conversationStore?.load())
+        // The last exchange is there to peek at by hovering the orb, as before the restart.
+        state.card = conversation.latestCard
         self.sessions = sessions
         self.feed = feed
         self.machudTools = machudTools
@@ -222,9 +250,12 @@ public final class VoiceHostController: VoiceHostActing {
             self?.loadHostContext()
         }
         speaker?.onFinished = { [weak self] in
-            guard let self, state.phase == .speaking else { return }
+            guard let self else { return }
+            revealWholeReply()
+            guard state.phase == .speaking else { return }
             state.phase = .idle
         }
+        speaker?.onChunkStarted = { [weak self] chunk in self?.chunkStarted(chunk) }
         wake?.onWake = { [weak self] in
             guard let self else { return }
             startTake(.agent, handsFree: true, fromKeys: false)
@@ -272,8 +303,13 @@ public final class VoiceHostController: VoiceHostActing {
         refreshWakeProblem()
     }
 
+    /// A full-screen app hides the orb and the card: an expanded or pinned card folds back to
+    /// the peek, so it neither comes back over the screen nor takes the keyboard later.
     func setHiddenForFullScreen(_ hidden: Bool) {
-        state.hiddenForFullScreen = hidden
+        var next = state
+        next.hiddenForFullScreen = hidden
+        if hidden { next.cardMode = .peek }
+        state = next
     }
 
     // MARK: - Actions
@@ -300,18 +336,27 @@ public final class VoiceHostController: VoiceHostActing {
         case .dismissCard:
             stopSpeech()
             turn?.cardDismissed = true
-            state.card = nil
+            var next = state
+            next.card = nil
+            next.cardMode = .peek
+            state = next
         case .setMuted(let muted):
             state.muted = muted
             if muted {
                 stopSpeech()
-                turn?.speaks = false
+                silenceTurn()
                 cancelTake()
             }
             refreshKeys()
             refreshWake()
         case .openSession:
             openSession()
+        case .cardHovered(let hovering):
+            cardHoverChanged(hovering)
+        case .cardClicked:
+            state.cardMode = .expanded
+        case .setCardMode(let mode):
+            state.cardMode = mode
         }
     }
 
@@ -331,6 +376,8 @@ public final class VoiceHostController: VoiceHostActing {
         // Never into an open microphone.
         guard take == nil, !dictation.isCapturing else { return Self.takeRecording }
         stopSpeech()
+        // The preview replaces the reply's voice: the reply is not spoken, and shows whole.
+        silenceTurn()
         speaker.append(text)
         speaker.finish()
         switch state.phase {
@@ -375,11 +422,16 @@ public final class VoiceHostController: VoiceHostActing {
     private func brainLost() {
         lastSnapshot = nil
         if state.activeRuntime != nil { state.activeRuntime = nil }
+        if submitting != nil {
+            conversation.refused()
+            conversationChanged()
+        }
         submitting = nil
         setSessionKey(nil)
         guard turn != nil else { return }
         turn = nil
         speaker?.stop()
+        revealWholeReply()
         if take == nil, [.working, .awaitingApproval, .speaking].contains(state.phase) { settle(.idle) }
     }
 
@@ -396,7 +448,7 @@ public final class VoiceHostController: VoiceHostActing {
     private func startTake(_ mode: VoiceMode, handsFree: Bool, fromKeys: Bool) {
         stopSpeech()
         // A reply still streaming is never spoken into the open microphone.
-        turn?.speaks = false
+        silenceTurn()
         if !settings.enabled { return fail(Self.voiceOff) }
         if mode == .agent, !brainEnabled { return fail(Self.brainOff) }
         if mode == .agent, let problem = blockingBrainProblem { return fail(problem) }
@@ -637,29 +689,69 @@ public final class VoiceHostController: VoiceHostActing {
         guard brainEnabled, let brain else { return paste(prompt, notice: Self.brainOffPasted) }
         if let problem = blockingBrainProblem { return paste(prompt, notice: Self.pasted(problem)) }
         guard !agentBusy else { return paste(prompt, notice: Self.agentBusyPasted) }
+        begin(prompt, source: .voice, isLatest: isLatest, brain: brain)
+    }
+
+    /// Sends `text` to the agent as a typed turn, to the same session as voice. Nil once it is
+    /// on its way (a refusal by the brain then shows under the orb, as for a spoken turn), else
+    /// why it was not sent: nothing to send, the brain is off or cannot take a turn, an agent
+    /// take is recording, or the agent is still working.
+    public func send(typed text: String) -> String? {
+        let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty else { return Self.nothingToSend }
+        if !settings.enabled { return Self.voiceOff }
+        guard brainEnabled, let brain else { return Self.brainOff }
+        if let problem = blockingBrainProblem { return problem }
+        if take?.mode == .agent { return Self.takeRecording }
+        if agentBusy { return Self.agentBusy }
+        begin(prompt, source: .typed, isLatest: true, brain: brain)
+        return nil
+    }
+
+    /// Submits `prompt`; the conversation shows it at once, the card and the turn once the
+    /// brain takes it.
+    private func begin(_ prompt: String, source: ConversationSource, isLatest: Bool, brain: BrainDriving) {
         stopSpeech()
+        // The voice loads while the brain thinks, so the first words come sooner.
+        if repliesSpoken(source) { speaker?.warmUp() }
         let requestId = UUID().uuidString
         submitting = requestId
+        conversation.submitted(prompt, source: source)
+        conversationChanged()
         pendingWork = Task { [weak self] in
             do {
                 try await brain.submit(prompt, requestId: requestId)
-                self?.accepted(prompt, requestId: requestId, isLatest: isLatest)
+                self?.accepted(prompt, requestId: requestId, source: source, isLatest: isLatest)
             } catch {
                 guard let self, submitting == requestId else { return }
                 submitting = nil
+                conversation.refused()
+                conversationChanged()
                 // A brain that is not up says why better than the client's error does.
                 fail(state.brainAvailable ? error.localizedDescription : state.brainProblem ?? error.localizedDescription)
             }
         }
     }
 
-    /// The brain took the turn: the card and the turn are ours from here.
-    private func accepted(_ prompt: String, requestId: String, isLatest: Bool) {
+    /// A reply to a turn from `source` is spoken: with `voice.speakReplies` for a spoken turn
+    /// and `speakTypedReplies` for a typed one, never while muted or into a take recording.
+    private func repliesSpoken(_ source: ConversationSource) -> Bool {
+        let wanted = source == .typed ? settings.speakTypedReplies : settings.voice.speakReplies
+        return wanted && !state.muted && take == nil
+    }
+
+    /// The brain took the turn: the card and the turn are ours from here. A reply that is
+    /// spoken shows on the card in step with the voice (`VoiceCard.spokenUpTo`).
+    private func accepted(_ prompt: String, requestId: String, source: ConversationSource, isLatest: Bool) {
         guard submitting == requestId else { return }
         submitting = nil
-        turn = Turn(requestId: requestId, speaks: settings.voice.speakReplies && !state.muted && take == nil)
+        conversation.accepted()
+        conversationChanged()
+        let speaks = repliesSpoken(source)
+        turn = Turn(requestId: requestId, speaks: speaks)
         var next = state
-        next.card = VoiceCard(prompt: prompt)
+        // A speaker that reports no chunks (a silent one) cannot pace the card.
+        next.card = VoiceCard(prompt: prompt, spokenUpTo: speaks && speaker?.reportsChunks == true ? 0 : nil)
         if isLatest, take == nil {
             next.phase = .working
             next.inputLevel = 0
@@ -677,6 +769,13 @@ public final class VoiceHostController: VoiceHostActing {
 
     private func handle(_ snapshot: AgentSessionSnapshot) {
         lastSnapshot = snapshot
+        let before = conversation
+        let events = conversation.apply(snapshot)
+        if conversation != before {
+            // A finished turn, or a new conversation, is kept at once.
+            let newConversation = before.threadID != nil && conversation.threadID != before.threadID
+            conversationChanged(saveNow: events.contains(.turnEnded) || newConversation)
+        }
         let runtime = snapshot.runtime ?? AgentRuntime.codex.rawValue
         if state.activeRuntime != runtime { state.activeRuntime = runtime }
         setSessionKey(sessionKeyOf(snapshot))
@@ -710,13 +809,16 @@ public final class VoiceHostController: VoiceHostActing {
                 sendToFeed(snapshot.output, source: Self.agentSource, title: next.card?.prompt)
             }
             next.phase = turn.speaks && isSpeaking ? .speaking : .idle
+            if next.phase != .speaking { next.card?.spokenUpTo = nil }
         case "interrupted":
             speaker?.stop()
             self.turn = nil
             next.phase = .idle
+            next.card?.spokenUpTo = nil
         case "failed":
             speaker?.stop()
             self.turn = nil
+            next.card?.spokenUpTo = nil
             state = next
             return fail(snapshot.error ?? "The brain stopped")
         default:
@@ -734,13 +836,61 @@ public final class VoiceHostController: VoiceHostActing {
         if next.card?.approval?.id == id { next.card?.approval = nil }
         if next.phase == .awaitingApproval { next.phase = .working }
         state = next
+        conversation.markDecision(approvalID: id, allow: allow)
+        conversationChanged()
         pendingWork = Task { [weak self] in
             do {
                 try await brain.approve(id: id, allow: allow)
             } catch {
-                self?.fail(error.localizedDescription)
+                guard let self else { return }
+                conversation.decisionFailed(approvalID: id, message: error.localizedDescription)
+                conversationChanged()
+                fail(error.localizedDescription)
             }
         }
+    }
+
+    // MARK: - Conversation
+
+    /// The pointer over the card pins it; leaving unpins it after `pinGrace` unless it comes
+    /// back. Only a peek pins, and only a pin unpins: an expanded card ignores hover.
+    private func cardHoverChanged(_ hovering: Bool) {
+        cardHovered = hovering
+        let token = UUID()
+        unpinToken = token
+        if hovering {
+            if state.cardMode == .peek { state.cardMode = .pinned }
+            return
+        }
+        guard state.cardMode == .pinned else { return }
+        schedule(Self.pinGrace) { [weak self] in
+            guard let self, unpinToken == token, !cardHovered, state.cardMode == .pinned else { return }
+            state.cardMode = .peek
+        }
+    }
+
+    /// Draws the conversation and keeps it: at once with `saveNow`, else `conversationSaveDelay`
+    /// after the first change since the last save (a streaming reply changes many times a second).
+    private func conversationChanged(saveNow: Bool = false) {
+        presenter?.renderConversation(conversation.rows)
+        guard conversationStore != nil else { return }
+        if saveNow { return saveConversation() }
+        guard !conversationSaveScheduled else { return }
+        conversationSaveScheduled = true
+        schedule(Self.conversationSaveDelay) { [weak self] in
+            guard let self, conversationSaveScheduled else { return }
+            saveConversation()
+        }
+    }
+
+    private func saveConversation() {
+        conversationSaveScheduled = false
+        conversationStore?.save(conversation.record)
+    }
+
+    /// Saves a change still waiting for its delay (the host is quitting).
+    func flushConversation() {
+        if conversationSaveScheduled { saveConversation() }
     }
 
     // MARK: - Text feed
@@ -762,8 +912,25 @@ public final class VoiceHostController: VoiceHostActing {
     private func stopSpeech() {
         guard isSpeaking else { return }
         speaker?.stop()
-        turn?.speaks = false
+        silenceTurn()
         if state.phase == .speaking { state.phase = .idle }
+    }
+
+    /// The running turn's reply is not spoken from here on; the card shows all of it.
+    private func silenceTurn() {
+        turn?.speaks = false
+        revealWholeReply()
+    }
+
+    /// A chunk of the reply started playing: the card shows the reply up to its end. Chunks
+    /// only ever reveal more, and only while the card is paced (a preview's chunks are not).
+    private func chunkStarted(_ chunk: SpeechChunk) {
+        guard let shown = state.card?.spokenUpTo, chunk.rawRange.upperBound > shown else { return }
+        state.card?.spokenUpTo = chunk.rawRange.upperBound
+    }
+
+    private func revealWholeReply() {
+        if state.card?.spokenUpTo != nil { state.card?.spokenUpTo = nil }
     }
 
     // MARK: - Collaborators

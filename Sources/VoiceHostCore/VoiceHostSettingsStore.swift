@@ -52,6 +52,10 @@ public struct VoiceHostEnvironment: Equatable {
     /// `$MACHUD_VOICE_HISTORY_DIR`, else nil for `~/Library/Application Support/MacHUD/Voice/History`:
     /// MacHUD's own dictation history folder.
     public var historyDirectory: URL?
+    /// `$MACHUD_VOICE_CONVERSATION_FILE`, else nil for
+    /// `~/Library/Application Support/MacHUD/Voice/conversation.json`: where the conversation
+    /// with the agent is kept.
+    public var conversationFile: URL?
     /// `$SPEAKFREE_CONFIG_DIR` (SpeakFree's own override), else `~/.config/speakfree`: where
     /// SpeakFree keeps its config and its recordings, which a shared history writes into.
     public var speakFreeConfigDirectory: URL
@@ -85,6 +89,9 @@ public struct VoiceHostEnvironment: Equatable {
             modelsDirectory = URL(fileURLWithPath: (models as NSString).expandingTildeInPath, isDirectory: true)
         } else {
             modelsDirectory = nil
+        }
+        conversationFile = environment["MACHUD_VOICE_CONVERSATION_FILE"].flatMap { path in
+            path.isEmpty ? nil : URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
         }
         historyDirectory = environment["MACHUD_VOICE_HISTORY_DIR"].flatMap { path in
             path.isEmpty ? nil : URL(fileURLWithPath: (path as NSString).expandingTildeInPath, isDirectory: true)
