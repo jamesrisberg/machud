@@ -435,7 +435,12 @@ final class AppSupervisor {
 
     func handle(_ event: [String: Any], from id: String) {
         if let name = event["event"] as? String, name != "state" {
-            if records[id] != nil { onAppEvent?(id, event) }
+            guard let record = records[id] else { return }
+            // The app is terminating on purpose (its own Quit, ⌘Q, `quit`): the user quit it,
+            // so no relaunch follows its exit. A kill or crash sends nothing and is relaunched.
+            // Opening it again clears this (`didLaunch`).
+            if name == "quitting" { record.quitRequested = true; return }
+            onAppEvent?(id, event)
             return
         }
         guard let record = records[id], let panels = event["panels"] as? [[String: Any]] else { return }

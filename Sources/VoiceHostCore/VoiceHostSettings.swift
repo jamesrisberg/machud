@@ -5,7 +5,7 @@ import VoiceKit
 /// Everything the voice host is configured by. Stored as `voice.json` in MacHUD's config
 /// directory; the voice host owns the file and MacHUD edits it through `settings set`.
 public struct VoiceHostSettings: Codable, Equatable, Sendable {
-    public enum KeyMode: String, Codable, Equatable, Sendable {
+    public enum KeyMode: String, Codable, CaseIterable, Equatable, Sendable {
         /// Hold fn to dictate; tap then hold to talk to the agent.
         case hold
         /// Tap fn to dictate; double-tap to talk to the agent.
@@ -41,13 +41,16 @@ public struct VoiceHostSettings: Codable, Equatable, Sendable {
     /// Replies to typed messages are spoken too (with the reply voice); off, only replies to
     /// spoken turns are, as `voice.speakReplies` says.
     public var speakTypedReplies: Bool
+    /// When a hands-free take (orb, wake word, socket `ask`) is over.
+    public var handsFree: HandsFreeSettings
 
     public init(enabled: Bool = true, keyMode: KeyMode = .hold, agentGesture: Bool = true,
                 brainEnabled: Bool = true, brainPort: Int = 8791,
                 brain: BrainSettings = BrainSettings(), machudTools: Bool = true,
                 machudToolsRequireApproval: Bool = false, voice: VoiceSettings = VoiceSettings(),
                 history: DictationHistorySettings? = nil, feedTranscripts: Bool = true,
-                feedAgentReplies: Bool = false, speakTypedReplies: Bool = false) {
+                feedAgentReplies: Bool = false, speakTypedReplies: Bool = false,
+                handsFree: HandsFreeSettings = HandsFreeSettings()) {
         self.enabled = enabled
         self.keyMode = keyMode
         self.agentGesture = agentGesture
@@ -61,11 +64,12 @@ public struct VoiceHostSettings: Codable, Equatable, Sendable {
         self.feedTranscripts = feedTranscripts
         self.feedAgentReplies = feedAgentReplies
         self.speakTypedReplies = speakTypedReplies
+        self.handsFree = handsFree
     }
 
     private enum CodingKeys: String, CodingKey {
         case enabled, keyMode, agentGesture, brainEnabled, brainPort, brain, voice, history, feedTranscripts,
-             feedAgentReplies, speakTypedReplies
+             feedAgentReplies, speakTypedReplies, handsFree
     }
 
     /// The keys this host adds to the `brain` object.
@@ -92,6 +96,7 @@ public struct VoiceHostSettings: Codable, Equatable, Sendable {
         feedTranscripts = (try? c.decode(Bool.self, forKey: .feedTranscripts)) ?? d.feedTranscripts
         feedAgentReplies = (try? c.decode(Bool.self, forKey: .feedAgentReplies)) ?? d.feedAgentReplies
         speakTypedReplies = (try? c.decode(Bool.self, forKey: .speakTypedReplies)) ?? d.speakTypedReplies
+        handsFree = (try? c.decode(HandsFreeSettings.self, forKey: .handsFree)) ?? d.handsFree
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -112,10 +117,83 @@ public struct VoiceHostSettings: Codable, Equatable, Sendable {
         try c.encode(feedTranscripts, forKey: .feedTranscripts)
         try c.encode(feedAgentReplies, forKey: .feedAgentReplies)
         try c.encode(speakTypedReplies, forKey: .speakTypedReplies)
+        try c.encode(handsFree, forKey: .handsFree)
+    }
+}
+
+/// How a hands-free take ends (`handsFree` in `voice.json`). Key-held takes end with the key.
+public struct HandsFreeSettings: Codable, Equatable, Sendable {
+    public enum EndOfTurn: String, Codable, CaseIterable, Equatable, Sendable {
+        /// A pause after speech ends the take (`SilenceEndpointer`).
+        case auto
+        /// Only a tap (the orb, the fn key, `voice action stop`) or the maximum length ends it.
+        case manual
+    }
+
+    /// How readily a sound counts as speech over the room's noise.
+    public enum Sensitivity: String, Codable, CaseIterable, Equatable, Sendable {
+        case low, medium, high
+    }
+
+    /// The choices for `pause`, in seconds.
+    public static let pauseRange: ClosedRange<TimeInterval> = 1...4
+    public static let pauseStep: TimeInterval = 0.5
+
+    public var endOfTurn: EndOfTurn
+    /// Quiet after speech, in seconds, before an automatic take is sent: `pauseRange` in steps
+    /// of `pauseStep`, other values are brought to the nearest choice.
+    public var pause: TimeInterval {
+        didSet { pause = Self.pauseChoice(pause) }
+    }
+    public var sensitivity: Sensitivity
+
+    public init(endOfTurn: EndOfTurn = .auto, pause: TimeInterval = 2, sensitivity: Sensitivity = .medium) {
+        self.endOfTurn = endOfTurn
+        self.pause = Self.pauseChoice(pause)
+        self.sensitivity = sensitivity
+    }
+
+    static func pauseChoice(_ seconds: TimeInterval) -> TimeInterval {
+        guard seconds.isFinite else { return 2 }
+        let stepped = (seconds / pauseStep).rounded() * pauseStep
+        return min(max(stepped, pauseRange.lowerBound), pauseRange.upperBound)
+    }
+
+    private enum CodingKeys: String, CodingKey { case endOfTurn, pause, sensitivity }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = HandsFreeSettings()
+        self.init(endOfTurn: (try? c.decode(EndOfTurn.self, forKey: .endOfTurn)) ?? d.endOfTurn,
+                  pause: (try? c.decode(TimeInterval.self, forKey: .pause)) ?? d.pause,
+                  sensitivity: (try? c.decode(Sensitivity.self, forKey: .sensitivity)) ?? d.sensitivity)
     }
 }
 
 extension VoiceHostSettings {
+    /// The settings whose value is one of a fixed set, by dotted path, with their choices.
+    static let choices: [(path: String, values: [String])] = [
+        ("keyMode", KeyMode.allCases.map(\.rawValue)),
+        ("handsFree.endOfTurn", HandsFreeSettings.EndOfTurn.allCases.map(\.rawValue)),
+        ("handsFree.sensitivity", HandsFreeSettings.Sensitivity.allCases.map(\.rawValue)),
+        ("history.mode", DictationHistorySettings.Mode.allCases.map(\.rawValue)),
+        ("brain.runtime", AgentRuntime.allCases.map(\.rawValue)),
+        ("voice.replyVoice", SpeechVoiceKind.allCases.map(\.rawValue)),
+    ]
+
+    /// Why `object` (a settings object about to be saved) cannot be: a choice setting holds a
+    /// value that is not one of its choices. Decoding would quietly take the default instead.
+    static func invalidChoice(in object: [String: Any]) -> String? {
+        for (path, values) in choices {
+            var current: Any? = object
+            for key in path.split(separator: ".") { current = (current as? [String: Any])?[String(key)] }
+            guard let value = current else { continue }
+            if let text = value as? String, values.contains(text) { continue }
+            return "\(path) must be one of \(values.joined(separator: ", ")), not \(value)"
+        }
+        return nil
+    }
+
     /// These settings with a wake phrase that can be listened for: while the wake word is on, a
     /// phrase no model detects (the default "Hey Computer") becomes the first of `phrases`, the
     /// phrases with a model. While it is off the phrase is left as it is, and with no phrases
