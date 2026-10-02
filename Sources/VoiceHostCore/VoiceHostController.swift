@@ -10,7 +10,8 @@ import VoiceKit
 ///
 /// Takes: fn dictates at the cursor (`.begin(.primary)`) and moves the take to the agent on the
 /// alternate gesture, with `gesturePending` set until the gesture is decided; the orb, the wake word and the socket's `ask` start an agent take that
-/// ends on a click, `stop`, or a `SilenceEndpointer`. An agent take's text becomes a brain
+/// ends on a click, `stop`, or a `SilenceEndpointer` built from `handsFree`; why each such take
+/// ended is kept in `lastTakeEnd` and logged. An agent take's text becomes a brain
 /// turn whose snapshots fill the card and, with `voice.speakReplies`, are spoken as they stream.
 ///
 /// One turn at a time: the companion refuses a second one, so while the brain works an agent
@@ -43,6 +44,8 @@ public final class VoiceHostController: VoiceHostActing {
     }
     /// Every state change, after the presenter (the socket's `state` event).
     public var onStateChange: ((VoiceHostState) -> Void)?
+    /// Where each hands-free take's ending is written, one line per take.
+    var logTakeEnd: (String) -> Void = { NSLog("MacHUDVoice: hands-free take ended: %@", $0) }
 
     /// The latest brain request, approval, cancel or session open in flight (tests await it).
     var pendingWork: Task<Void, Never>?
@@ -63,6 +66,7 @@ public final class VoiceHostController: VoiceHostActing {
     static let noSession = "There is no agent session to open"
     static let takeRecording = "A take is recording"
     static let noSpeech = "Speech is not available"
+    static let nothingHeard = "Didn't hear anything"
     static let wakeUnavailable = "The wake word needs the microphone, which this voice host does not use."
     /// Progress lines kept on the card.
     static let progressLimit = 4
@@ -92,8 +96,13 @@ public final class VoiceHostController: VoiceHostActing {
         /// Nil until the session names the take (its first update or `start`'s outcome).
         var id: UUID?
         var mode: VoiceMode
-        /// Hands-free takes only.
+        /// Started by the orb, the wake word or the socket's `ask`: ends on a tap or the endpointer.
+        var handsFree = false
+        /// Hands-free takes only, until it ends the take.
         var endpointer: SilenceEndpointer?
+        var startedAt: TimeInterval = 0
+        /// `lastTakeEnd` has this take's ending.
+        var endReported = false
         /// Started by the fn key: a change to the key setup ends it.
         var fromKeys = false
         /// The take was kept at the cursor instead of going to the agent; shown when it ends.
@@ -146,6 +155,8 @@ public final class VoiceHostController: VoiceHostActing {
     private var failureToken = UUID()
     /// The notice of the take being transcribed.
     private var pendingNotice: String?
+    /// What the orb says when the cancelled take's dictation reports its end (`nothingHeard`).
+    private var cancelNotice: String?
     private var started = false
     private var brainHealth: BrainHealth = .stopped
     /// The chosen runtime's problem on this Mac, for the settings last applied.
@@ -271,7 +282,7 @@ public final class VoiceHostController: VoiceHostActing {
         switch action {
         case .orbClicked:
             if isSpeaking { return stopSpeech() }
-            if take != nil { return dictation.stop() }
+            if take != nil { return stopTake() }
             switch state.phase {
             case .idle, .failed: startTake(.agent, handsFree: true, fromKeys: false)
             default: break
@@ -279,7 +290,7 @@ public final class VoiceHostController: VoiceHostActing {
         case .start(let mode):
             startTake(mode, handsFree: mode == .agent, fromKeys: false)
         case .stop:
-            if take != nil { dictation.stop() } else if isSpeaking { stopSpeech() }
+            if take != nil { stopTake() } else if isSpeaking { stopSpeech() }
         case .cancel:
             cancel()
         case .approve(let id):
@@ -349,6 +360,7 @@ public final class VoiceHostController: VoiceHostActing {
 
     private func cancelTake() {
         guard take != nil || dictation.isCapturing else { return }
+        reportTakeEnd(.cancelled)
         dictation.cancel()
         if take != nil {
             // The session reported nothing (no take was capturing after all).
@@ -390,7 +402,9 @@ public final class VoiceHostController: VoiceHostActing {
         if mode == .agent, let problem = blockingBrainProblem { return fail(problem) }
         if mode == .agent, agentBusy { return fail(Self.agentBusy) }
         guard take == nil, !dictation.isCapturing else { return }
-        take = Take(id: nil, mode: mode, endpointer: handsFree ? SilenceEndpointer() : nil, fromKeys: fromKeys)
+        take = Take(id: nil, mode: mode, handsFree: handsFree,
+                    endpointer: handsFree ? SilenceEndpointer(settings: settings.handsFree) : nil,
+                    startedAt: now(), fromKeys: fromKeys)
         refreshWake()
         switch dictation.start(mode == .agent ? .caller : .cursor) {
         case .started(let id), .resumed(let id):
@@ -429,7 +443,7 @@ public final class VoiceHostController: VoiceHostActing {
                 dictation.retarget(.caller)
             }
         case .retarget(.primary): dictation.retarget(.cursor)
-        case .end: if take != nil { dictation.stop() }
+        case .end: if take != nil { stopTake() }
         case .discard: dictation.cancel()
         }
     }
@@ -490,15 +504,24 @@ public final class VoiceHostController: VoiceHostActing {
         case .level(let level):
             guard isCurrent else { return }
             state.inputLevel = level
-            if take?.endpointer?.observe(level: level, at: now()) == true {
-                take?.endpointer = nil
-                dictation.stop()
+            switch take?.endpointer?.observe(level: level, at: now()) {
+            case .pause?: endTake(.pause)
+            case .maximum?: endTake(.maximum)
+            case .nothingHeard?:
+                // Nothing to send: the take is thrown away and the orb says so.
+                reportTakeEnd(.nothingHeard)
+                cancelNotice = Self.nothingHeard
+                cancelTake()
+                if cancelNotice != nil { fail(Self.nothingHeard) }
+            case nil: break
             }
         case .partial(let text):
             guard isCurrent else { return }
             state.partialTranscript = text
+            take?.endpointer?.observe(partial: text, at: now())
         case .transcribing:
             guard isCurrent, let current = take else { return }
+            reportTakeEnd(.dictation)
             let mode = current.mode
             // Keep the take's notice for its outcome.
             pendingNotice = current.pastedNotice
@@ -511,6 +534,7 @@ public final class VoiceHostController: VoiceHostActing {
         case .finished(let text, let destination, let transcript):
             let notice = isCurrent ? take?.pastedNotice : pendingNotice
             pendingNotice = nil
+            if isCurrent { reportTakeEnd(.dictation) }
             endCapture(ifCurrent: isCurrent)
             if settings.feedTranscripts { sendToFeed(transcript, source: Self.dictationSource) }
             if destination == .caller {
@@ -520,10 +544,47 @@ public final class VoiceHostController: VoiceHostActing {
             }
         case .failed(let failure):
             pendingNotice = nil
+            let notice = failure == .cancelled ? cancelNotice : nil
+            cancelNotice = nil
+            if isCurrent { reportTakeEnd(failure == .cancelled ? .cancelled : .failed) }
             endCapture(ifCurrent: isCurrent)
             guard isLatest else { return }
-            if let message = Self.message(for: failure) { fail(message) } else { settle(.idle) }
+            if let message = Self.message(for: failure) ?? notice { fail(message) } else { settle(.idle) }
         }
+    }
+
+    /// A tap ends the take: the orb, the fn key or `stop`.
+    private func stopTake() {
+        endTake(.stop)
+    }
+
+    /// Ends the take and sends it on to be transcribed.
+    private func endTake(_ reason: VoiceTakeEnd.Reason) {
+        reportTakeEnd(reason)
+        take?.endpointer = nil
+        dictation.stop()
+    }
+
+    /// Records why the current hands-free take ended in `lastTakeEnd` and the log; the first
+    /// reason given for a take is the one kept.
+    private func reportTakeEnd(_ reason: VoiceTakeEnd.Reason) {
+        guard let current = take, current.handsFree, !current.endReported else { return }
+        take?.endReported = true
+        let time = now()
+        var end = VoiceTakeEnd(reason: reason, seconds: max(time - current.startedAt, 0))
+        if let endpointer = current.endpointer {
+            end.quietMs = endpointer.quiet(at: time).map { Int(($0 * 1000).rounded()) }
+            if endpointer.heardLevels {
+                end.floor = endpointer.floor
+                end.threshold = endpointer.threshold
+            }
+            if endpointer.automatic {
+                end.pause = endpointer.requiredPause(at: time)
+                end.grace = endpointer.unfinished(at: time)
+            }
+        }
+        state.lastTakeEnd = end
+        logTakeEnd(end.summary)
     }
 
     private func endCapture(ifCurrent isCurrent: Bool) {
