@@ -187,7 +187,7 @@ final class AppSupervisor {
 
     /// Replaces the set of known apps (after a scan). Keeps the state of apps still present,
     /// drops (and disconnects) the rest, then brings every app's health up to date and
-    /// launches the `autoLaunch` ones that are not running.
+    /// launches the `autoLaunch` ones that are not running (unless the user quit them).
     func update(apps: [ExternalApp], autoLaunch: Set<String>) {
         let ids = Set(apps.map(\.id))
         for (id, record) in records where !ids.contains(id) {
@@ -201,7 +201,7 @@ final class AppSupervisor {
             record.autoLaunch = autoLaunch.contains(app.id)
             records[app.id] = record
             refresh(app.id)
-            if record.autoLaunch, record.health == .notRunning { launch(app.id) }
+            if record.autoLaunch, record.health == .notRunning, !record.quitRequested { launch(app.id) }
         }
     }
 
