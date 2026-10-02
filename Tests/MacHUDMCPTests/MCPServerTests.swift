@@ -302,6 +302,11 @@ final class MCPServerTests: XCTestCase {
         let apps = try XCTUnwrap(status["apps"] as? [[String: Any]])
         XCTAssertEqual((apps[0]["panels"] as? [[String: Any]])?.first?["visible"] as? Bool, true)
         XCTAssertEqual(apps[1]["actions"] as? [String], ["open-session", "approve", "deny"])
+        XCTAssertEqual(apps[0]["outdated"] as? Bool, true)
+        XCTAssertEqual(apps[0]["outdatedReason"] as? String, "rebuilt after it started")
+        XCTAssertEqual(apps[0]["olderContract"] as? Bool, true)
+        XCTAssertEqual(apps[1]["outdated"] as? Bool, false)
+        XCTAssertEqual(apps[1]["olderContract"] as? Bool, false)
     }
 
     func testStatusReportsAMissingPartWithoutFailing() throws {

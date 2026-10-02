@@ -94,6 +94,7 @@ machud apps launch id=Sift               # by bundle id or name; resets relaunch
 machud apps place id=Sift                # apply its configured placement now
 machud apps quit id=Sift
 machud apps launch-all                   # every app that is not running; quit-all quits every running one
+machud apps relaunch id=Sift             # quit, wait for exit, launch; relaunch-all [outdated=1] for several
 machud panel show id=xyz.machud.sift/browser    # launches the app if needed; short id if unambiguous
 machud summon id=Stash                   # show a sibling's panel where it was last dismissed
 machud dismiss id=Stash                  # hide it, remembering the frame (never launches)

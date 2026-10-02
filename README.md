@@ -89,8 +89,9 @@ Each loadout can also have its own hotkey. All hotkeys live in `layouts.json`.
   **Loadouts** (each with Preview…, Apply, Clear This Screen + Apply, Edit Layout…, Apply
   at Startup and Delete; then Capture Windows as Loadout…, Save Dock and Panels as HUD
   Loadout…, Draw a New Layout…, the Snap Layout ⇧-drag uses, and Restore Cleared Windows);
-  the Tool Dock, then **Apps** (Launch All Apps and Quit All Apps, then each app with Show,
-  its own menu, Hide/Park, Show on Tool Dock, Settings and Launch or Quit) and Get Apps…; **Advanced** for the JSON file.
+  the Tool Dock, then **Apps** (Launch All Apps and Quit All Apps, plus Relaunch Outdated Apps
+  while an app runs an older build than its bundle on disk, then each app with Show, its own menu,
+  Hide/Park, Show on Tool Dock, Settings, Relaunch and Launch or Quit) and Get Apps…; **Advanced** for the JSON file.
 - Capturing asks for the loadout's name, whether to also keep its layout on its own (for
   ⇧-drag and other loadouts, under its own name) or only for this loadout, and whether to
   save the tool dock and the apps' panels with it. Windows MacHUD has parked are captured

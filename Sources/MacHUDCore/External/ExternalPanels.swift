@@ -52,6 +52,7 @@ final class ExternalPanels {
             registry?.noteChange()
             self?.supervisorChanged(id)
         }
+        supervisor.bundles = { [weak self] id in self?.duplicates[id] ?? [] }
     }
 
     // MARK: - Default placement
@@ -107,6 +108,41 @@ final class ExternalPanels {
                 case .success: out[id] = "quit"
                 case .failure(let error): out[id] = "\(error)"
                 }
+                if out.count == ids.count { completion(out) }
+            }
+        }
+    }
+
+    /// Relaunches one app (`apps relaunch`, the menu's Relaunch): quit, wait for it to exit,
+    /// launch the same bundle again, wait for it to listen. Completes with
+    /// `{id, previousPID?, pid, health}` or `{id, previousPID?, error}`.
+    func relaunch(_ id: String, completion: @escaping ([String: Any]) -> Void) {
+        let previous = supervisor.livePIDs(id).first
+        supervisor.relaunch(id) { result in
+            var d: [String: Any] = ["id": id]
+            if let previous { d["previousPID"] = Int(previous) }
+            switch result {
+            case .success(let up):
+                d["pid"] = Int(up.pid)
+                d["health"] = up.health.rawValue
+            case .failure(let error):
+                d["error"] = error.description
+            }
+            completion(d)
+        }
+    }
+
+    /// Relaunches every app that is up, or only the outdated ones (`apps relaunch-all
+    /// [outdated=1]`, the menu's Relaunch Outdated Apps). Completes once each is back, with
+    /// `relaunch`'s result per app id.
+    func relaunchAll(outdatedOnly: Bool, completion: @escaping ([String: [String: Any]]) -> Void = { _ in }) {
+        let outdated = Set(supervisor.outdatedIDs)
+        let ids = apps.map(\.id).filter { isUp($0) && (!outdatedOnly || outdated.contains($0)) }
+        var out: [String: [String: Any]] = [:]
+        guard !ids.isEmpty else { completion(out); return }
+        for id in ids {
+            relaunch(id) { result in
+                out[id] = result
                 if out.count == ids.count { completion(out) }
             }
         }
@@ -263,6 +299,7 @@ final class ExternalPanels {
     var json: [[String: Any]] {
         supervisor.all.map { record in
             var d = record.json
+            if let status = supervisor.buildStatus(record.app.id) { d.merge(status.json) { a, _ in a } }
             if let placement = config().placement(for: record.app.id),
                let data = try? JSONEncoder().encode(placement),
                let object = try? JSONSerialization.jsonObject(with: data) { d["placement"] = object }
@@ -276,7 +313,7 @@ final class ExternalPanels {
     // MARK: - Control
 
     /// `apps`, `apps rescan`, `apps launch id=`, `apps place id=`, `apps quit id=`,
-    /// `apps launch-all`, `apps quit-all`,
+    /// `apps launch-all`, `apps quit-all`, `apps relaunch id=`, `apps relaunch-all [outdated=1]`,
     /// `apps menu id=` (the app's status menu, fetched now),
     /// `apps menu-invoke id= item= [title=]` (perform one of its items),
     /// `apps perform app= verb= [key=value ...]` (one of the app's own `action` verbs),
@@ -285,8 +322,8 @@ final class ExternalPanels {
     func registerControl(_ control: HUDSocketServer) {
         control.register("apps") { [weak self] args, done in
             guard let self else { done(["ok": false, "error": "apps gone"]); return }
-            let actions = ["rescan", "launch-all", "quit-all", "launch", "place", "quit", "menu", "menu-invoke", "perform",
-                           "announce", "forget", "install", "update", "uninstall", "list"]
+            let actions = ["rescan", "relaunch-all", "launch-all", "quit-all", "relaunch", "launch", "place", "quit", "menu",
+                           "menu-invoke", "perform", "announce", "forget", "install", "update", "uninstall", "list"]
             let action = args["action"] ?? actions.first { args[$0] != nil } ?? "list"
             switch action {
             case "list":
@@ -342,6 +379,19 @@ final class ExternalPanels {
                 done(["ok": true, "launched": launched])
             case "quit-all":
                 self.quitAll { done(["ok": true, "quit": $0]) }
+            case "relaunch-all":
+                let outdatedOnly = ["1", "true", "yes"].contains((args["outdated"] ?? "0").lowercased())
+                self.relaunchAll(outdatedOnly: outdatedOnly) { done(["ok": true, "relaunched": $0]) }
+            case "relaunch":
+                guard let key = args["id"] ?? args["name"], let app = self.app(matching: key) else {
+                    done(["ok": false, "error": "id=<bundle id or name> of a discovered app required"]); return
+                }
+                self.relaunch(app.id) { result in
+                    var r = result
+                    r["ok"] = result["error"] == nil
+                    if let row = self.json.first(where: { $0["id"] as? String == app.id }) { r["app"] = row }
+                    done(r)
+                }
             case "launch", "place", "quit":
                 guard let key = args["id"] ?? args["name"], let app = self.app(matching: key) else {
                     done(["ok": false, "error": "id=<bundle id or name> of a discovered app required"]); return
@@ -368,7 +418,7 @@ final class ExternalPanels {
                 guard let installActions = self.installActions else { done(["ok": false, "error": "the installer is not available"]); return }
                 installActions(action, args, done)
             default:
-                done(["ok": false, "error": "apps action must be list, rescan, launch, launch-all, place, quit, quit-all, menu, menu-invoke, perform, announce, forget, install, update or uninstall"])
+                done(["ok": false, "error": "apps action must be list, rescan, launch, launch-all, place, quit, quit-all, relaunch, relaunch-all, menu, menu-invoke, perform, announce, forget, install, update or uninstall"])
             }
         }
     }

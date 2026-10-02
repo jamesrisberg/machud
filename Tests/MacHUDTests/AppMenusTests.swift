@@ -126,7 +126,7 @@ final class AppMenusTests: XCTestCase {
         connector.deferred?.removeFirst().reply()
         let titles = sub.items.map { $0.isSeparatorItem ? "-" : $0.title }
         XCTAssertEqual(titles, ["Show Sift", "-", "Show Sift", "Dock Mode", "-", "When Names Collide", "-",
-                                "Park", "Show on Tool Dock", "Sift Settings…", "-", "Quit Sift"])
+                                "Park", "Show on Tool Dock", "Sift Settings…", "-", "Relaunch Sift", "Quit Sift"])
         let dock = try XCTUnwrap(sub.items.first { $0.title == "Dock Mode" })
         XCTAssertEqual(dock.state, .on)
         let appShow = sub.items[2]

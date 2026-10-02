@@ -443,12 +443,13 @@ final class PlacementOnLaunchTests: XCTestCase {
         workspace.start(id)
         clock.runQueued()
         entry = MacHUDMenuModel.entries(externals: externals) { _ in .full }.first
-        XCTAssertEqual(entry?.actions.map(\.kind), [.summon, .separator, .appMenu, .separator, .park, .dockToggle, .settings, .separator, .quit])
+        XCTAssertEqual(entry?.actions.map(\.kind), [.summon, .separator, .appMenu, .separator, .park, .dockToggle, .settings, .separator, .relaunch, .quit])
+        XCTAssertEqual(entry?.actions.last { $0.kind == .relaunch }?.title, "Relaunch Placed")
         entry = MacHUDMenuModel.entries(externals: externals, liveMenus: false) { _ in .full }.first
-        XCTAssertEqual(entry?.actions.map(\.kind), [.summon, .separator, .park, .dockToggle, .settings, .separator, .quit],
+        XCTAssertEqual(entry?.actions.map(\.kind), [.summon, .separator, .park, .dockToggle, .settings, .separator, .relaunch, .quit],
                        "no app menu with menuBar.consumeSiblings off")
         entry = MacHUDMenuModel.entries(externals: externals) { _ in .parked }.first
-        XCTAssertEqual(entry?.actions.map(\.kind), [.summon, .separator, .appMenu, .separator, .reveal, .dockToggle, .settings, .separator, .quit])
+        XCTAssertEqual(entry?.actions.map(\.kind), [.summon, .separator, .appMenu, .separator, .reveal, .dockToggle, .settings, .separator, .relaunch, .quit])
         XCTAssertEqual(entry?.actions[4].panelID, "\(id)/main")
     }
 
