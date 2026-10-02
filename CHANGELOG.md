@@ -24,6 +24,17 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - An app that serves only widgets is listed under Apps like any other, without a tool dock
   button, and a panel kind MacHUD does not know is skipped instead of being shown as a window.
 
+### Quitting an app yourself keeps it quit
+- Quitting a HUD app with ⌘Q or its own Quit menu item now counts as you meaning it: MacHUD no
+  longer brings the app back, including apps it keeps running for their widgets. Open the app
+  again and it is kept up as before. An app that is killed or crashes is still relaunched.
+  Needs apps built on HUDKit 0.3 or newer.
+
+### widgetHUD and the other widget apps
+- widgetHUD is a new HUD app that puts a clock, the weather and a calendar on your desktop as
+  widgets. serversHUD (Running Servers), Stash (Latest Clips) and MechaHUD (Claude Sessions) now
+  offer widgets too, and the README lists them.
+
 ### MacHUD checks that a panel really appeared
 - When you click or summon a HUD app's panel and it opens on another desktop (or nowhere on
   screen), MacHUD no longer takes the app's word that it is showing: it says where the panel
