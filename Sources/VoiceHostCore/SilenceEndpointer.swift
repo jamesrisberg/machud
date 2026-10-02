@@ -15,9 +15,13 @@ import Foundation
 /// With end of turn `auto`, the take ends after `pause` seconds of quiet once speech was
 /// heard, plus `grace` while the sentence may not be over: the latest partial transcript ends
 /// mid-thought, speech was heard after it arrived, or none has arrived yet while one is still
-/// expected (`partialsExpected`). Silence before any speech never ends the take by a pause; with
-/// no speech `nothingHeardAfter` seconds into the take it ends as `nothingHeard`. With `manual`
-/// only the maximum ends it; a tap ends it in the controller.
+/// expected (`partialsExpected`). Silence before any speech never ends the take by a pause. With
+/// no speech detected `nothingHeardAfter` seconds into the take it ends as `nothingHeard` (and is
+/// thrown away), unless there is other evidence of speech: a partial transcript with letters, or
+/// levels at or above the sensitivity's absolute minimum for `evidenceOfSpeech` in all (speech
+/// the threshold missed, such as a loud start with no quiet to measure the floor by). Then the
+/// take counts as heard and ends by a pause from there. With `manual` only the maximum ends it;
+/// a tap ends it in the controller.
 struct SilenceEndpointer {
     enum Ending: Equatable {
         case pause, maximum, nothingHeard
@@ -34,6 +38,8 @@ struct SilenceEndpointer {
     static let minimumFloor = 0.002
     /// An automatic take with no speech this long after it started ends as `nothingHeard`.
     static let nothingHeardAfter: TimeInterval = 10
+    /// Time at or above the absolute minimum that keeps a take from ending as `nothingHeard`.
+    static let evidenceOfSpeech: TimeInterval = 0.3
     /// SpeakFree's streaming sends its first partial about 2.3 s into a take; with none by this
     /// time there is no transcript to wait for (streaming is off or the engine has none).
     static let partialsExpected: TimeInterval = 3
@@ -61,6 +67,10 @@ struct SilenceEndpointer {
     private var lastSpeechAt: TimeInterval?
     private var partial = ""
     private var partialAt: TimeInterval?
+    private var lastLevelAt: TimeInterval?
+    /// Time spent at or above `minimumThreshold`, and whether a partial had letters.
+    private var loudTime: TimeInterval = 0
+    private var partialHadWords = false
 
     init(settings: HandsFreeSettings = HandsFreeSettings(), maximum: TimeInterval = SilenceEndpointer.defaultMaximum) {
         pause = settings.pause
@@ -107,6 +117,7 @@ struct SilenceEndpointer {
     mutating func observe(partial text: String, at time: TimeInterval) {
         partial = text
         partialAt = time
+        if text.contains(where: \.isLetter) { partialHadWords = true }
     }
 
     /// Feeds one level reading; why the take should end, or nil.
@@ -114,6 +125,8 @@ struct SilenceEndpointer {
         let start = startedAt ?? time
         startedAt = start
         follow(level, at: time)
+        if level >= minimumThreshold { loudTime += min(max(time - (lastLevelAt ?? time), 0), 0.1) }
+        lastLevelAt = time
         if time - start >= maximum - 1e-6 { return .maximum }
 
         if level >= quietThreshold {
@@ -135,8 +148,12 @@ struct SilenceEndpointer {
         }
 
         guard automatic else { return nil }
-        guard heardSpeech else {
-            return time - start >= Self.nothingHeardAfter - 1e-6 ? .nothingHeard : nil
+        if !heardSpeech {
+            guard time - start >= Self.nothingHeardAfter - 1e-6 else { return nil }
+            guard partialHadWords || loudTime >= Self.evidenceOfSpeech - 1e-6 else { return .nothingHeard }
+            // Speech the threshold missed: from here the take ends by a pause.
+            heardSpeech = true
+            if !speaking, let dipSince { quietSince = dipSince }
         }
         // Never on a rise that may be the start of a word.
         guard !speaking, aboveSince == nil, let quiet = quiet(at: time) else { return nil }

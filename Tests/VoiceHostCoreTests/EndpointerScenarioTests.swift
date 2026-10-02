@@ -136,7 +136,15 @@ struct EndpointerScenario {
                            phrase: normal, pause: 0.5...1.5),
         EndpointerScenario(name: "fan room, streaming off", floor: 0.03...0.06, leadIn: 0.2...0.8, phrase: normal,
                            pause: 0.5...1.8, streaming: false),
+        EndpointerScenario(name: "fan room, late start", floor: 0.03...0.06, leadIn: 2...6, phrase: normal,
+                           pause: 0.5...1.5),
+        loudContinuousStart,
     ]
+
+    /// Talking straight away, loudly, for 12 s with only short gaps between words.
+    static let loudContinuousStart = EndpointerScenario(
+        name: "loud continuous start, 12 s, short gaps", floor: quiet, leadIn: 0...0.05, phrase: 0.6...0.95,
+        phraseLength: 12...12, pause: 0...0, phrases: 1, wordGap: 0.03)
 }
 
 /// Mid-sentence cut-offs at most 2%, and the take ends on time after the speech in at least 95%,
@@ -149,6 +157,13 @@ final class EndpointerScenarioTests: XCTestCase {
                          scenario.name, rates.cutOff * 100, rates.onTime * 100))
             XCTAssertLessThanOrEqual(rates.cutOff, 0.02, "\(scenario.name): cut off")
             XCTAssertGreaterThanOrEqual(rates.onTime, 0.95, "\(scenario.name): on time")
+        }
+    }
+
+    func testALoudContinuousStartIsNeverThrownAway() {
+        for seed in 0..<500 {
+            XCTAssertNotEqual(EndpointerScenario.loudContinuousStart.run(seed: UInt64(seed)).ending, .nothingHeard,
+                              "seed \(seed)")
         }
     }
 

@@ -44,6 +44,26 @@ final class SilenceEndpointerTests: XCTestCase {
         XCTAssertEqual(end.at, 10, accuracy: 0.001)
     }
 
+    /// Loud talking with no quiet frame at all gives the floor nothing to go by, so the threshold
+    /// never confirms it; levels above the absolute minimum keep it from being thrown away, and
+    /// from 10 s it ends by a pause (on a trace this smooth, possibly before the talking stops).
+    func testSpeechTheThresholdMissedIsNotThrownAway() throws {
+        var endpointer = SilenceEndpointer()
+        let steady = { (t: Double) in 0.65 + 0.25 * sin(t * 23) }
+        let end = try XCTUnwrap(feed(&endpointer, from: 0, to: 12, steady) ?? feed(&endpointer, from: 12, to: 30, quietRoom))
+        XCTAssertEqual(end.ending, .pause)
+        XCTAssertGreaterThan(end.at, 10)
+    }
+
+    func testAPartialWithWordsIsEvidenceOfSpeech() throws {
+        var endpointer = SilenceEndpointer()
+        XCTAssertNil(feed(&endpointer, from: 0, to: 2.3, quietRoom))
+        endpointer.observe(partial: "Hello there.", at: 2.3)
+        let end = try XCTUnwrap(feed(&endpointer, from: 2.3, to: 30, quietRoom))
+        XCTAssertEqual(end.ending, .pause, "not thrown away")
+        XCTAssertEqual(end.at, 10, accuracy: 0.001, "the quiet already lasts longer than the pause")
+    }
+
     func testManualNeverEndsOnSilence() {
         var endpointer = SilenceEndpointer(settings: settings(endOfTurn: .manual))
         XCTAssertFalse(endpointer.automatic)
