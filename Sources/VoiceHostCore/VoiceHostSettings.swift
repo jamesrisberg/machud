@@ -38,13 +38,16 @@ public struct VoiceHostSettings: Codable, Equatable, Sendable {
     public var feedTranscripts: Bool
     /// Each finished agent reply goes to the text feed too (source "Agent").
     public var feedAgentReplies: Bool
+    /// Replies to typed messages are spoken too (with the reply voice); off, only replies to
+    /// spoken turns are, as `voice.speakReplies` says.
+    public var speakTypedReplies: Bool
 
     public init(enabled: Bool = true, keyMode: KeyMode = .hold, agentGesture: Bool = true,
                 brainEnabled: Bool = true, brainPort: Int = 8791,
                 brain: BrainSettings = BrainSettings(), machudTools: Bool = true,
                 machudToolsRequireApproval: Bool = false, voice: VoiceSettings = VoiceSettings(),
                 history: DictationHistorySettings? = nil, feedTranscripts: Bool = true,
-                feedAgentReplies: Bool = false) {
+                feedAgentReplies: Bool = false, speakTypedReplies: Bool = false) {
         self.enabled = enabled
         self.keyMode = keyMode
         self.agentGesture = agentGesture
@@ -57,11 +60,12 @@ public struct VoiceHostSettings: Codable, Equatable, Sendable {
         self.history = history
         self.feedTranscripts = feedTranscripts
         self.feedAgentReplies = feedAgentReplies
+        self.speakTypedReplies = speakTypedReplies
     }
 
     private enum CodingKeys: String, CodingKey {
         case enabled, keyMode, agentGesture, brainEnabled, brainPort, brain, voice, history, feedTranscripts,
-             feedAgentReplies
+             feedAgentReplies, speakTypedReplies
     }
 
     /// The keys this host adds to the `brain` object.
@@ -87,6 +91,7 @@ public struct VoiceHostSettings: Codable, Equatable, Sendable {
         history = try? c.decodeIfPresent(DictationHistorySettings.self, forKey: .history)
         feedTranscripts = (try? c.decode(Bool.self, forKey: .feedTranscripts)) ?? d.feedTranscripts
         feedAgentReplies = (try? c.decode(Bool.self, forKey: .feedAgentReplies)) ?? d.feedAgentReplies
+        speakTypedReplies = (try? c.decode(Bool.self, forKey: .speakTypedReplies)) ?? d.speakTypedReplies
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -106,6 +111,7 @@ public struct VoiceHostSettings: Codable, Equatable, Sendable {
         try c.encodeIfPresent(history, forKey: .history)
         try c.encode(feedTranscripts, forKey: .feedTranscripts)
         try c.encode(feedAgentReplies, forKey: .feedAgentReplies)
+        try c.encode(speakTypedReplies, forKey: .speakTypedReplies)
     }
 }
 

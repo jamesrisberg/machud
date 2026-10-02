@@ -37,13 +37,15 @@ public struct VoiceHostState: Codable, Equatable, Sendable {
     /// outlasts a tap, the second press arrives, or the take ends. The orb shows a neutral
     /// armed look meanwhile, so it never morphs into the waveform only to turn back.
     public var gesturePending: Bool
+    /// How much of the conversation the card under the orb shows.
+    public var cardMode: VoiceCardMode
 
     public init(phase: VoicePhase = .idle, inputLevel: Double = 0, partialTranscript: String = "",
                 card: VoiceCard? = nil, hiddenForFullScreen: Bool = false, brainAvailable: Bool = false,
                 brainProblem: String? = nil, sessionKey: String? = nil, sessionProvider: String? = nil,
                 activeRuntime: String? = nil,
                 wakeListening: Bool = false, wakeProblem: String? = nil, muted: Bool = false,
-                gesturePending: Bool = false) {
+                gesturePending: Bool = false, cardMode: VoiceCardMode = .peek) {
         self.phase = phase
         self.inputLevel = inputLevel
         self.partialTranscript = partialTranscript
@@ -58,7 +60,18 @@ public struct VoiceHostState: Codable, Equatable, Sendable {
         self.wakeProblem = wakeProblem
         self.muted = muted
         self.gesturePending = gesturePending
+        self.cardMode = cardMode
     }
+}
+
+/// The card under the orb, from a glance to a conversation.
+public enum VoiceCardMode: String, Codable, Equatable, Sendable {
+    /// The latest exchange, while a turn runs, for a while after, and while the orb is hovered.
+    case peek
+    /// The pointer is over the card: it stays open and shows the whole conversation, scrollable.
+    case pinned
+    /// The card was clicked: a larger panel over a scrim, with a field for typing to the agent.
+    case expanded
 }
 
 /// Where a take's words go.
@@ -177,17 +190,32 @@ public enum VoiceHostAction: Codable, Equatable, Sendable {
     case setMuted(Bool)
     /// Show the brain's current session (`sessionKey`) in the app MacHUD opens sessions in.
     case openSession
+    /// The pointer entered or left the card (pins it while over it).
+    case cardHovered(Bool)
+    /// The card was clicked (expands it).
+    case cardClicked
+    /// Sets the card's mode directly: Esc or the scrim collapse to `peek`; the socket's `card`.
+    case setCardMode(VoiceCardMode)
 }
 
 /// The UI's way back into the controller.
 @MainActor
 public protocol VoiceHostActing: AnyObject {
     func perform(_ action: VoiceHostAction)
+    /// Sends `text` to the agent as a typed turn. Nil once it is on its way, else why not.
+    func send(typed text: String) -> String?
 }
 
-/// Draws the voice host. The controller calls `render` on every state change; the presenter
-/// sends user input back through the `VoiceHostActing` it was given.
+/// Draws the voice host. The controller calls `render` on every state change and
+/// `renderConversation` on every change of the conversation; the presenter sends user input
+/// back through the `VoiceHostActing` it was given.
 @MainActor
 public protocol VoiceHostPresenting: AnyObject {
     func render(_ state: VoiceHostState)
+    func renderConversation(_ rows: [ConversationRow])
+}
+
+extension VoiceHostPresenting {
+    /// A presenter that shows no conversation ignores it.
+    public func renderConversation(_ rows: [ConversationRow]) {}
 }
