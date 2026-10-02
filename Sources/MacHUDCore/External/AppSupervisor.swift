@@ -205,6 +205,17 @@ final class AppSupervisor {
         }
     }
 
+    /// Changes which apps are kept running without a rescan. An app newly kept running is
+    /// launched now unless the user quit it.
+    func setAutoLaunch(_ ids: Set<String>) {
+        for record in all {
+            let wanted = ids.contains(record.app.id)
+            guard wanted != record.autoLaunch else { continue }
+            record.autoLaunch = wanted
+            if wanted, record.health == .notRunning, !record.quitRequested { launch(record.app.id) }
+        }
+    }
+
     /// Re-reads process state for one app and (re)connects if it is up but unsubscribed.
     func refresh(_ id: String) {
         guard let record = records[id] else { return }
