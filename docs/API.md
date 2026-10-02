@@ -293,7 +293,9 @@ its `Info.plist` and `machud.json`), else the first found. `apps` reports every 
 Supervision: launches are on demand (`panel show`, a loadout slot, `widgets add`) or at
 startup for `apps.autoLaunch` and apps with widgets placed. An `autoLaunch` app that exits unexpectedly is relaunched
 after 2 s, then 4 s, and given up on after 3 launches (`lastError: "gave up …"`);
-60 s of uptime resets the count. A lost subscription while the process lives is
+60 s of uptime resets the count. An app that pushed `quitting` before it exited (HUDKit 0.3+:
+its own Quit, ⌘Q, the `quit` verb) was quit by the user and is not relaunched, by a crash
+relaunch, a rescan or widget keep-running; opening it again supervises it as before. A lost subscription while the process lives is
 retried with backoff (0.5 s doubling to 8 s). Commands for an app whose socket is
 not up yet are queued for 20 s.
 
@@ -500,8 +502,10 @@ what the user does to a widget into placement.
   itself are saved; a widget asking to open its app summons the app's first panel.
 - **Running**: an app with widgets placed is kept running like an `autoLaunch` app: launched at
   startup and relaunched when it stops, unless it was quit through MacHUD (`apps quit`, the menu's
-  Quit). ⌘Q in the app itself or a kill counts as a crash and it comes back. An app quit through
-  MacHUD is kept running again once it is opened, from MacHUD or by hand. An isolated instance
+  Quit). For apps on HUDKit 0.3+, ⌘Q or the app's own Quit counts as the same user quit: the app
+  announces `quitting` before it exits and is not relaunched. A kill, a crash, or an app on older
+  HUDKit (which sends no `quitting`) counts as a crash and it comes back. An app quit by the user
+  is kept running again once it is opened, from MacHUD or by hand. An isolated instance
   launches nothing at startup (`MACHUD_APPLY_STARTUP`).
 - **Reveal hotkey**: ⌃⌥W is registered only while some app serves widgets; otherwise the chord
   is left to other apps. Esc is taken only while widgets are revealed or being edited.

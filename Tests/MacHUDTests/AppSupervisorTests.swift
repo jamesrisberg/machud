@@ -146,6 +146,50 @@ final class AppSupervisorTests: XCTestCase {
         XCTAssertEqual(workspace.launches.count, 3)
     }
 
+    func testAnAppThatSentQuittingIsNotRelaunchedAndStaysSupervisedWhenReopened() {
+        connector.reachable = [socket]
+        supervisor.update(apps: [app], autoLaunch: [id])
+        workspace.start(id)
+        clock.runQueued()                                    // connect
+        XCTAssertEqual(health, .running)
+        var forwarded: [String] = []
+        supervisor.onAppEvent = { _, event in forwarded.append(event["event"] as? String ?? "") }
+
+        connector.onEvents[socket]?(["event": "quitting"])
+        XCTAssertEqual(supervisor.record(id)?.quitRequested, true)
+        XCTAssertTrue(forwarded.isEmpty, "quitting is the supervisor's, not the widget layer's")
+        clock.queue.removeAll()
+        workspace.stop(id)
+        XCTAssertEqual(health, .notRunning)
+        XCTAssertTrue(clock.queue.isEmpty, "a user quit is not relaunched")
+        supervisor.update(apps: [app], autoLaunch: [id])
+        XCTAssertEqual(workspace.launches.count, 1, "nor by a rescan")
+        supervisor.setAutoLaunch([])
+        supervisor.setAutoLaunch([id])
+        XCTAssertEqual(workspace.launches.count, 1, "nor when widgets start keeping it running")
+
+        // Opened again by hand: supervised as before.
+        workspace.start(id)
+        XCTAssertEqual(supervisor.record(id)?.quitRequested, false)
+        clock.queue.removeAll()
+        workspace.stop(id)
+        XCTAssertEqual(clock.runQueued(), [2], "a crash after reopening is relaunched")
+        XCTAssertEqual(workspace.launches.count, 2)
+    }
+
+    func testAnExitWithoutQuittingIsACrashAndRelaunched() {
+        connector.reachable = [socket]
+        supervisor.update(apps: [app], autoLaunch: [id])
+        workspace.start(id)
+        clock.runQueued()
+        connector.onEvents[socket]?(["event": "state", "panels": []])
+        XCTAssertEqual(supervisor.record(id)?.quitRequested, false)
+        clock.queue.removeAll()
+        workspace.stop(id)
+        XCTAssertEqual(clock.runQueued(), [2])
+        XCTAssertEqual(workspace.launches.count, 2)
+    }
+
     func testTerminationIsSeenWhileTheDyingProcessIsStillListed() {
         connector.reachable = [socket]
         workspace.running[id] = [100]
