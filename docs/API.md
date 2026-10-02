@@ -32,9 +32,9 @@ display). Region geometry in `layouts` is fractions of the screen's visible area
 | `status` | `screen=<ref>` (optional) | `layout`, `activeLoadout`, `regions[] {region, name, x, y, w, h, screen, space, occupant?, window?, iou, fits}` — what sits in each region now, plus `redirected[]` when the last apply had to stand in for a missing display |
 | `screens` | | `screens[] {index, name, persistentID, main, builtin, x, y, w, h, spaces, currentSpace}`; `persistentID` (`<vendor>-<model>-<serial>`, hex) is what loadouts pin displays to |
 | `spaces` | `screen=<ref>` (optional) | desktop count, current desktop, which Mission Control shortcuts are enabled, `privateAPI` |
-| `panels` | | `panels[] {id, title, visible}` — MacHUD's own windows (`web:<url>`), `menubar` and `tooldock`, then sibling apps' panels with `app`, `panel` (the app's own id), `health`, `cooperative`, `mode`, `badge`/`status` when the app reports them, `frames[] {x, y, w, h}` (its on-screen windows on any layer, largest first, parked ones included), and for a visible panel MacHUD showed, `onScreen` plus `elsewhere` (`"another desktop"` or `"off screen"`) when it is not (see Show verification). External ids are `<app bundle id>/<panel id>` |
-| `apps` | | MacHUD-aware apps found by manifest: `apps[] {id, name, bundle, socket, health, running, reachable, autoLaunch, launchAttempts, panels[], manifest, lastError?, duplicates?, outdated?, outdatedReason?, newerCopy?, newerCopyVersion?, newerCopyBuilt?, contract?}` (`panels` are the full panel ids, `manifest` the app's `machud.json` as MacHUD read it, each panel's `verbs` and `capabilities` included), plus `known[]` (announced bundles), `failures[]` for unreadable manifests and `duplicates {id: [bundle]}` for ids declared by several bundles. `health` is `running` (subscribed), `socketUnreachable`, `launching`, `notRunning` or `notInstalled`. A running app also has `outdated`: the bundle it runs from is newer than the process (rebuilt after the process started, or a different `CFBundleShortVersionString` than its `hello` reported), so a relaunch picks something up; `outdatedReason` says which. `newerCopy` (with `newerCopyVersion` and `newerCopyBuilt`) names another bundle declaring the same id whose build is newer than the one running, for information only: a relaunch restarts the bundle the app runs from and never switches copies. Once it answered `hello` it also has `contract {app, machud, older}` (the HUDKit contracts as `major.minor`; `older` when the app's is behind MacHUD's; MacHUD still talks to it) |
-| `menu` | | radial wheel description: `wedges[] {index, title, digit, angleStart/Center/End, kind, rings[]}` (the ring labels inside out), `rings` (radii), `visible`, current `selection`. A loadout wedge's rings are Preview / Apply / Clear this screen + Apply (P over a loadout wedge previews it too); the capture wedge's are Capture this screen / Capture all screens / Draw a new layout; the park wedge has two: Park front window / Restore parked |
+| `panels` | | `panels[] {id, title, visible}` — MacHUD's own windows (`web:<url>`), `menubar` and `tooldock`, then sibling apps' panels with `app`, `panel` (the app's own id), `health`, `cooperative`, `mode`, `badge`/`status` when the app reports them, `frames[] {x, y, w, h}` (its on-screen windows on any layer, largest first, parked ones included, its widgets left out), and for a visible panel MacHUD showed, `onScreen` plus `elsewhere` (`"another desktop"` or `"off screen"`) when it is not (see Show verification). External ids are `<app bundle id>/<panel id>` |
+| `apps` | | MacHUD-aware apps found by manifest: `apps[] {id, name, bundle, socket, health, running, reachable, autoLaunch, launchAttempts, panels[], widgets[], manifest, lastError?, duplicates?, outdated?, outdatedReason?, newerCopy?, newerCopyVersion?, newerCopyBuilt?, contract?}` (`panels` are the full ids of its hover and windowed panels, `widgets` the ids of the widget types it serves, `manifest` the app's `machud.json` as MacHUD read it, each panel's `verbs` and `capabilities` included; `autoLaunch` is also true for an app with widgets placed, see Desktop widgets), plus `known[]` (announced bundles), `failures[]` for unreadable manifests and `duplicates {id: [bundle]}` for ids declared by several bundles. `health` is `running` (subscribed), `socketUnreachable`, `launching`, `notRunning` or `notInstalled`. A running app also has `outdated`: the bundle it runs from is newer than the process (rebuilt after the process started, or a different `CFBundleShortVersionString` than its `hello` reported), so a relaunch picks something up; `outdatedReason` says which. `newerCopy` (with `newerCopyVersion` and `newerCopyBuilt`) names another bundle declaring the same id whose build is newer than the one running, for information only: a relaunch restarts the bundle the app runs from and never switches copies. Once it answered `hello` it also has `contract {app, machud, older}` (the HUDKit contracts as `major.minor`; `older` when the app's is behind MacHUD's; MacHUD still talks to it) |
+| `menu` | | radial wheel description: `wedges[] {index, title, digit, angleStart/Center/End, kind, rings[]}` (the ring labels inside out), `rings` (radii), `visible`, current `selection`. A loadout wedge's rings are Preview / Apply / Clear this screen + Apply (P over a loadout wedge previews it too); the capture wedge's are Capture this screen / Capture all screens / Draw a new layout; the park wedge has two: Park front window / Restore parked; while any app serves widgets a Widgets wedge has two: Reveal widgets / Edit widgets |
 
 ## Layouts and loadouts
 
@@ -256,7 +256,11 @@ request=1` (or the menu bar's Permissions › Request Missing Permissions…) on
 MacHUD finds MacHUD-aware apps by their `Contents/Resources/machud.json` in
 `/Applications`, `~/Applications` (and one level of subfolders) and
 `apps.searchPaths`, plus every bundle in `apps.known` (announced ones), subscribes to
-each running one's `state`, and registers its panels. It skips its own manifest.
+each running one's `state` and `widget` events, and registers its hover and windowed panels. Widget
+panels are widget types (see Desktop widgets), never panels, and a panel `kind` MacHUD does not
+know is skipped (never shown as windowed). An app that serves only widgets is listed, launched,
+quit, relaunched and configured like any other, without a tool dock button. It skips its own
+manifest.
 
 **New builds appear by themselves.** A bundle is announced with `apps announce` by
 HUDKit's `hud-build.sh` right after a build and by the app itself when it launches (HUDKit's
@@ -286,8 +290,8 @@ its `Info.plist` and `machud.json`), else the first found. `apps` reports every 
 | `apps menu` / `apps menu-invoke` | `id=`, `item=` | the app's own status menu and performing one of its items (see Menu bar consolidation) |
 | `apps perform` | `app=<bundle id or name>`, `verb=<action verb>`, any other `key=value` | sends the app `action name=<verb>` with the other keys (launching it first if it is not running; commands wait for its socket as for `panel show`); returns the app's reply plus `app` (its bundle id), or the app's own `ok: false`. The target is `app=`, not `id=`, so an action's own `id=` passes through; `name`, `app`, `verb` and `action` cannot be passed to the app this way |
 
-Supervision: launches are on demand (`panel show`, a loadout slot) or at startup
-for `apps.autoLaunch`. An `autoLaunch` app that exits unexpectedly is relaunched
+Supervision: launches are on demand (`panel show`, a loadout slot, `widgets add`) or at
+startup for `apps.autoLaunch` and apps with widgets placed. An `autoLaunch` app that exits unexpectedly is relaunched
 after 2 s, then 4 s, and given up on after 3 launches (`lastError: "gave up …"`);
 60 s of uptime resets the count. A lost subscription while the process lives is
 retried with backoff (0.5 s doubling to 8 s). Commands for an app whose socket is
@@ -298,7 +302,8 @@ screen. Half a second after an app accepts a `panel show` (a dock hover or click
 the menu's Show, `panel show`, a loadout slot), MacHUD looks for one of the app's windows
 (normal layer or above) on screen over a display. Not found, the panel is recorded as
 `elsewhere: "another desktop"` (a window on a desktop that is not showing) or `"off screen"`
-(ordered out, or past every display) in `panels`, and the app's submenu says so. A tool dock
+(ordered out, or past every display) in `panels`, and the app's submenu says so. Windows at the
+frames of the app's widgets MacHUD placed are not counted (they float while revealed or edited). A tool dock
 click or a summon (the menu's Show <App>, `summon`) that missed also shows a toast naming the
 fix (Relaunch <App>); a passing hover, `panel show` and a loadout slot only record it. A
 parked panel is not checked, and a HUD loadout's panel shows go to the apps directly and are
@@ -398,7 +403,8 @@ apps (`HUDManifest.dockSorted`: by the manifest's `order` within each group, app
 without one after, then by name), with a thin divider between the groups; a Parked
 Windows button ends the hover group while orbs are hidden and something is parked. An
 app with several panels gets one button (grouped by its first panel in that order)
-whose click opens a menu of them.
+whose click opens a menu of them. Widget types are not panels: an app that serves only
+widgets has no button.
 
 **Positions** (`toolDock.position`, one of `HUDDockPosition`'s eight): `bottom`, `top`,
 `left`, `right` are a single row or column centred on that edge; `topLeft`, `topRight`,
@@ -459,6 +465,66 @@ refused (use auto-hide).
 While the tool dock is on, parking orbs are hidden unless `orb show` (or the
 setting) says otherwise.
 
+## Desktop widgets
+
+Any MacHUD app may serve **widgets**: small glass tiles on the desktop, declared as `kind:
+widget` panels in its manifest (the contract is `../hudkit/docs/CONTRACT.md` § Widgets). MacHUD
+owns the placed widgets: it keeps them in layouts.json, sends each app its own, and turns
+what the user does to a widget into placement.
+
+- **Grid**: widgets snap to square cells per display (`widgets.cell`, default 170 pt, `gap` 16,
+  `margin` 24 from the display's visible frame), column 0 at the left and row 0 at the top. Sizes
+  take `small` 1 × 1, `medium` 2 × 1, `large` 2 × 2 and `extraLarge` 4 × 2 cells. Widgets never
+  overlap: adding or moving one takes the nearest free cells (and says so). Positions are cells,
+  so they survive resolution changes; a widget whose display is missing stands in on the main
+  display (`screenMissing`), one beyond a smaller grid is pulled inside it, and one that would land
+  on another moves to the nearest free cells (`placedAt`), without changing what is saved.
+- **Layers**: `desktop` (under every window) or `float` (above windows). **Reveal** (⌃⌥W,
+  `hotkeys.widgets`; the status menu; the wheel; `widgets reveal`) raises the desktop widgets
+  above windows until pressed again or Esc.
+- **Edit mode** (`widgets edit on`, the status menu's Edit Widgets…, the wheel): every widget is
+  unlocked with remove, settings and next-size controls, a faint cell grid shows on each
+  display, and a gallery lists every widget type by app with an Add button per size. Done or Esc
+  leaves it. Widgets never take focus or activate their app.
+- **Sync**: when an app serving widgets connects (launch, relaunch, reconnect) MacHUD sends it
+  `widget sync` with all its widgets and the current edit and reveal modes; after that every
+  change (this verb, a widget event, a loadout, a hand edit of layouts.json, a display change)
+  goes out as the app's `widget create`, `update` or `remove`. A widget the app refuses (sync's
+  `rejected`, a failed create) is marked with `problem` and not offered again until it changes;
+  settings it dropped are listed as `droppedSettings`; one toast per app says so. A widget of a
+  type its app no longer serves is kept, marked `missingType` and not sent.
+- **Events**: a widget dragged in edit mode snaps to the nearest free cells of the display under
+  its centre; the resize control takes the next size in place or at the nearest spot with room
+  (else a toast); remove removes it; the settings control (or the widget's own button) opens the
+  widget's settings in a MacHUD window built from its type's schema; settings the widget changed
+  itself are saved; a widget asking to open its app summons the app's first panel.
+- **Running**: an app with widgets placed is kept running like an `autoLaunch` app (launched at
+  startup, relaunched if it quits unexpectedly, not after an explicit quit). An isolated
+  instance launches nothing at startup (`MACHUD_APPLY_STARTUP`).
+
+| Command | Args | Effect |
+| --- | --- | --- |
+| `widgets` / `widgets list` | | `editing`, `revealed`, `grid {cell, gap, margin}`, `instances[] {instance, app, appName?, type, title?, size, layer, col, row, screen? (the saved display), settings, health, frame?, display?, screenMissing?, placedAt? {col, row}, overlapping?, missingType?, problem?, droppedSettings? {key: why}}` |
+| `widgets types` | | `types[] {app, appName, type, title, symbol, sizes[], defaultSize, multiple, refresh?, settingsSchema?, placed}`: every widget type of every discovered app, read from the manifests (the app need not run) |
+| `widgets add` | `type=`, `app=` (bundle id or name; needed only when two apps serve the type), `size=` (default the type's `defaultSize`), `screen=` (main, builtin, index or name; default the main display), `col= row=` (default the first free cells, down the first column first), `layer=desktop\|float`, `settings=<JSON object>` | places a widget and returns it as `instance`, with `note` when it went elsewhere than asked or its app is being launched. Refused: a size the type does not declare, a second widget of a `multiple: false` type, a setting its schema rejects, no room, or the app refusing it (then nothing is saved) |
+| `widgets remove` | `instance=` | |
+| `widgets move` | `instance= col= row=`, `screen=` | to the nearest free cells; `note` when not the ones asked |
+| `widgets resize` | `instance= size=` | in place when it fits, else at the nearest spot with room |
+| `widgets layer` | `instance=` plus `desktop` or `float` (or `layer=`) | |
+| `widgets settings` | `instance=` plus `key=value ...` or `settings=<JSON object>` (`null` removes a key) | merged into the widget's settings, each checked and typed by its type's schema (keys the schema does not list are kept as given) |
+| `widgets edit` / `widgets reveal` | `on`, `off` or `toggle` (default; or `state=`) | returns `editing`, `revealed` |
+
+The status menu's **Widgets** submenu (next to Tool Dock) has Reveal Widgets, Edit Widgets…,
+Add Widget ▸ (types by app, sizes) and every placed widget with Settings…, Float Above Windows
+and Remove.
+
+```json
+"widgets": {"cell": 170, "gap": 16, "margin": 24,
+            "instances": [{"instance": "8F0C1E2A", "app": "xyz.machud.widgethud", "type": "clock",
+                           "size": "small", "screen": {"builtin": true}, "col": 0, "row": 0,
+                           "layer": "desktop", "settings": {"zone": "Europe/Oslo"}}]}
+```
+
 ## HUD loadouts
 
 A loadout can also hold the MacHUD side of the desktop in `hud`; a loadout may hold
@@ -470,15 +536,21 @@ only that (`"layout": ""`, `"slots": []`):
          "apps": {"xyz.machud.sift": {"panels": {"browser": {"visible": true, "mode": "full",
                                                           "frame": {"x": 0, "y": 80, "w": 900, "h": 975},
                                                           "settings": {"dock.edge": "left"}}}},
-                  "xyz.machud.servershud": {"panels": {"servers": {"visible": false, "mode": "full"}}}}}}
+                  "xyz.machud.servershud": {"panels": {"servers": {"visible": false, "mode": "full"}}}},
+         "widgets": [{"instance": "8F0C1E2A", "app": "xyz.machud.widgethud", "type": "clock",
+                      "size": "small", "col": 0, "row": 0, "layer": "desktop"}]}}
 ```
 
 - **Capture** (`capture name= hud=only|1`, or the status menu's **Save Current HUD as
   Loadout…**) records the tool dock's position and, for every running (reachable)
   sibling, each panel's `visible` and `mode` from its state, its `frame` (the one the
   app reports in a fresh `state`, else its window's while showing) and, for apps that
-  have a `dock.position` or `dock.edge` setting, that setting (on the app's first panel).
-- **Apply** (after the loadout's windows, if any) moves the tool dock, then per app:
+  have a `dock.position` or `dock.edge` setting, that setting (on the app's first panel), and
+  the placed widgets (`widgets`, as layouts.json keeps them) when there are any.
+- **Apply** (after the loadout's windows, if any) moves the tool dock, replaces the placed
+  widgets with the loadout's `widgets` when it has that key (a widget of the same app and type at
+  the same cells keeps its id and window; without the key the widgets are left alone; the report
+  says how many as `widgets`), then per app:
   launches it if it is not running, then sends `settings set`, `panel mode`, `panel frame`
   (not for a parked panel) and `panel show`/`hide` (`reason=summon`), in that order;
   commands wait for the app to listen. An app that is not installed is reported, not fatal.
@@ -711,7 +783,7 @@ are in [MCP.md](MCP.md).
 
 ## Files
 
-- `~/.config/machud/layouts.json` — layouts, loadouts, hotkeys, trigger, grid, browser, apps, menuBar, toolDock, spaces. Hot-reloaded
+- `~/.config/machud/layouts.json` — layouts, loadouts, hotkeys, trigger, grid, browser, apps, menuBar, toolDock, spaces, widgets. Hot-reloaded
   on save (atomic or in place).
   `spaces`: `{"policy": "bring"}` (or `launchNew`, `leave`): what apply does with a window on a desktop that is not
   showing (see Placement plan).
@@ -732,7 +804,9 @@ are in [MCP.md](MCP.md).
   `catalog`: `{"url": "https://jamesrisberg.github.io/machud/catalog.json", "installDir": null, "refreshHours": 6}`,
   every key optional (these are the defaults). `url` may be `file://` or a path; `installDir` replaces the
   /Applications-else-~/Applications choice and is also searched for apps (see App catalog).
-  `hotkeys.dock` (default ⌃⌥D) shows and hides the tool dock.
+  `hotkeys.dock` (default ⌃⌥D) shows and hides the tool dock; `hotkeys.widgets` (default ⌃⌥W,
+  `{"key": ""}` turns it off) reveals the desktop widgets.
+  `widgets`: the widget grid and every placed widget (see Desktop widgets).
 - `~/.config/machud/voice.json` — the voice host's settings (see Voice). The voice host writes
   it; MacHUD reads only `enabled`, to decide whether to start it.
 - `~/.config/machud/state/catalog.json` — the last catalog fetched; `state/onboarding.json` records the onboarding (`status`, `step`).

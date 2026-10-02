@@ -20,6 +20,8 @@ apps that make up the rest of the HUD:
 - **Radial wheel**: hold **⌃⌥Space**, drag toward a loadout, release. Three rings: preview,
   apply, clear this screen and apply.
 - **Tool dock**: a Dock-like strip of the sibling apps (**⌃⌥D**).
+- **Widgets**: glass tiles on the desktop (a clock, the weather, your servers) that any sibling
+  can serve, placed on a grid, under your windows until **⌃⌥W** raises them.
 - **Parking**: tuck windows off an edge behind a hover orb.
 - **Menu bar**: hide menu bar items behind a separator, Hidden Bar style.
 - **Voice**: MacHUD runs its voice host (dictation and the agent brain) as a helper process,
@@ -69,8 +71,9 @@ permissions request=1` shows every missing prompt (Accessibility and Automation)
 | --- | --- |
 | Shift while dragging a window | Snap it into the region under the cursor |
 | Tab / Esc mid-drag | Next layout / cancel the snap |
-| ⌃⌥Space (hold) | Radial wheel: drag to a loadout, release. Inner ring previews, middle ring applies, outer ring clears this screen first; **P** previews the highlighted loadout too. Capture (this screen / all displays / draw a new layout) and Park (park the front window / restore parked). The hotkey is a setting |
+| ⌃⌥Space (hold) | Radial wheel: drag to a loadout, release. Inner ring previews, middle ring applies, outer ring clears this screen first; **P** previews the highlighted loadout too. Capture (this screen / all displays / draw a new layout), Park (park the front window / restore parked) and, when an app serves widgets, Widgets (reveal / edit). The hotkey is a setting |
 | ⌃⌥D | Show / hide the tool dock |
+| ⌃⌥W | Raise the desktop widgets above your windows; again or Esc lowers them |
 | ⌃⌥B | Collapse / expand the menu bar (when menu bar management is on) |
 
 Each loadout can also have its own hotkey. All hotkeys live in `layouts.json`.
@@ -89,7 +92,8 @@ Each loadout can also have its own hotkey. All hotkeys live in `layouts.json`.
   **Loadouts** (each with Preview…, Apply, Clear This Screen + Apply, Edit Layout…, Apply
   at Startup and Delete; then Capture Windows as Loadout…, Save Dock and Panels as HUD
   Loadout…, Draw a New Layout…, the Snap Layout ⇧-drag uses, and Restore Cleared Windows);
-  the Tool Dock, then **Apps** (Launch All Apps and Quit All Apps, plus Relaunch Outdated Apps
+  the Tool Dock, **Widgets** (Reveal, Edit Widgets…, Add Widget, and each widget's Settings…,
+  Float Above Windows and Remove), then **Apps** (Launch All Apps and Quit All Apps, plus Relaunch Outdated Apps
   while an app runs an older build than its bundle on disk, then each app with Show, its own menu,
   Hide/Park, Show on Tool Dock, Settings, Relaunch and Launch or Quit) and Get Apps…; **Advanced** for the JSON file.
 - Capturing asks for the loadout's name, whether to also keep its layout on its own (for
@@ -126,6 +130,26 @@ and where Sift's own dock sits). With "Put it back when MacHUD starts" checked, 
 the `startupLoadout` and comes back about two seconds after launch
 (`machud capture name=Desk hud=only`, then `machud apply loadout=Desk`, from a
 script). See docs/API.md.
+
+### Desktop widgets
+
+Any sibling app can serve widgets: small glass tiles on the desktop, such as a clock or the
+dev servers that are up. MacHUD places them and remembers where.
+
+- **Add**: status menu › Widgets › Add Widget, or **Edit Widgets…**, which opens a gallery of
+  every widget by app with an Add button per size. Small is one grid cell, medium two side by
+  side, large two by two, extra large four by two. A widget can be placed several times, each
+  with its own settings.
+- **Arrange**: in edit mode the widgets unlock: drag one and it snaps to the nearest free cells
+  of the grid shown on each display; its corner controls remove it, open its settings and step
+  through its sizes. Done or Esc locks them again.
+- **Layers**: widgets sit on the desktop under your windows. **⌃⌥W** raises them all above
+  windows until you press it again or Esc; Float Above Windows keeps one on top for good.
+- They are on every desktop, come back where they were after a restart, a display change or the
+  app relaunching, and never take focus. An app with widgets is kept running. A HUD loadout saves
+  the widgets with it and puts them back when applied.
+- Script them with `machud widgets …` (`list`, `types`, `add type=clock`, `move`, `resize`,
+  `layer`, `settings`, `remove`, `edit on`, `reveal on`); see docs/API.md.
 
 ### Loadouts
 
@@ -265,7 +289,7 @@ right of the chevron, collapsing is refused until you ⌘-drag it back.
 
 MacHUD finds MacHUD-aware apps by their `machud.json` manifest (in `/Applications`,
 `~/Applications` and any `apps.searchPaths`), supervises them, puts their panels in
-loadouts and on the tool dock, and parks them. Every sibling also works on its own.
+loadouts and on the tool dock, parks them, and places the desktop widgets they serve. Every sibling also works on its own.
 Released ones are listed in the app catalog and install from Settings → Apps.
 The repos sit next to this one (`~/dev/<name>`); `workspace.json` lists them.
 
