@@ -25,7 +25,9 @@ apps that make up the rest of the HUD:
 - **Parking**: tuck windows off an edge behind a hover orb.
 - **Menu bar**: hide menu bar items behind a separator, Hidden Bar style.
 - **Voice**: MacHUD runs its voice host (dictation and the agent brain) as a helper process,
-  restarts it if it stops, and has Voice and Brain tabs in its settings.
+  restarts it if it stops, and has Voice and Brain tabs in its settings. The agent's reply card
+  under the notch orb shows the whole conversation while you hover it, and a click opens it
+  larger with a field for typing to the agent ([docs/API.md#voice](docs/API.md#voice)).
 - **CLI and API**: everything is scriptable through `machud <command>` (JSON over a
   Unix socket). See [docs/API.md](docs/API.md); a Claude Code skill lives in
   `.claude/skills/machud`.
