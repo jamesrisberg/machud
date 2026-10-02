@@ -283,6 +283,35 @@ final class WidgetLayerTests: XCTestCase {
         XCTAssertEqual(call(["action": "move", "instance": "W1"])["error"] as? String, "widgets move needs x= y= or col= row=")
     }
 
+    func testTheLayoutEditorSeesAndMovesWidgetsThroughTheLayer() throws {
+        startApp()
+        _ = call(["action": "add", "type": "clock"])                                  // W1 on the main display
+        _ = call(["action": "add", "type": "clock", "screen": "Side"])                // W2 on the side one
+        XCTAssertEqual(layer.editorWidgets(on: main.frame), [EditorWidget(id: "W1", title: "Clock", symbol: "clock", size: .small,
+                                                                         frame: CGRect(x: 0, y: 705, width: 170, height: 170))])
+        XCTAssertEqual(layer.editorWidgets(on: side.frame).map(\.id), ["W2"])
+        let types = layer.editorWidgetTypes()
+        XCTAssertEqual(types.map(\.type), ["clock", "weather"])
+        XCTAssertEqual(types.map(\.canAdd), [true, true])
+
+        connector.requests = []
+        // The editor's preview is already snapped; the layer puts it there and tells the app.
+        XCTAssertNil(layer.editorMove("W1", to: CGRect(x: 360, y: 705, width: 170, height: 170), grid: .default))
+        XCTAssertEqual(widgetRequests.last, ["action": "update", "instance": "W1", "frame": "360,705,170,170"])
+        // On a coarser grid the editor shows (24 × 12: 60 pt across).
+        XCTAssertNil(layer.editorMove("W1", to: CGRect(x: 480, y: 705, width: 170, height: 170), grid: GridSize(cols: 24, rows: 12)))
+        XCTAssertEqual(stored.instances[0].x, 480.0 / 1440, accuracy: 1e-6)
+        _ = call(["action": "add", "type": "clock", "col": "0", "row": "0"])          // W3 top-left
+        XCTAssertEqual(layer.editorMove("W1", to: CGRect(x: 0, y: 705, width: 170, height: 170), grid: .default),
+                       "That spot is taken; moved to the nearest free one")
+
+        var note: String?? = .none
+        layer.editorAdd(app: appID, type: "weather", size: .small, screenFrame: side.frame) { note = .some($0) }
+        XCTAssertEqual(note, .some(nil))
+        XCTAssertEqual(stored.instances.last?.screen, .display(id: "1-2-3", name: "Side"))
+        XCTAssertEqual(layer.editorWidgetTypes().first { $0.type == "weather" }?.canAdd, false, "one weather allowed")
+    }
+
     func testTypesListsEveryWidgetType() throws {
         let types = layer.typesJSON()
         XCTAssertEqual(types.map { $0["type"] as? String }, ["clock", "weather"])

@@ -501,7 +501,11 @@ extension AppDelegate {
         ui.regions = { [weak store] screen in
             store?.activeLayout?.regions.map { $0.frame.cocoaRect(in: screen.visible) } ?? []
         }
-        layer.onChange = { [weak ui] in ui?.refresh() }
+        editor.widgets = layer
+        layer.onChange = { [weak ui, weak editor] in
+            ui?.refresh()
+            editor?.widgetsChanged()
+        }
         monitor.isWidget = { [weak layer] frame in layer?.isWidgetFrame(frame) ?? false }
         let previous = store.onChange
         store.onChange = { [weak self, weak layer] in
