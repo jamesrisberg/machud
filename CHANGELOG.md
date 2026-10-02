@@ -14,7 +14,7 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   shown panel.
 
 ### Relaunch apps after an update
-- MacHUD notices when a HUD app is still running an older build than the one on disk, or was
+- MacHUD notices when a HUD app is still running an older build than its own bundle on disk, or was
   built for an older MacHUD. Its submenu says "Update ready, relaunch to apply" or "Built for an
   older MacHUD", every running app's submenu has **Relaunch <App>**, and **Relaunch Outdated
   Apps** appears next to Launch All Apps while any app is behind. Scripts get `outdated` and
