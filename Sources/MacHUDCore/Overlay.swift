@@ -59,15 +59,7 @@ final class OverlayView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         let accent = NSColor.controlAccentColor
 
-        // Non-target regions: faint outline.
-        for (i, r) in regions.enumerated() where i != target {
-            let path = NSBezierPath(roundedRect: local(r).insetBy(dx: 2, dy: 2), xRadius: 10, yRadius: 10)
-            NSColor.white.withAlphaComponent(0.06).setFill()
-            path.fill()
-            NSColor.white.withAlphaComponent(0.35).setStroke()
-            path.lineWidth = 1.5
-            path.stroke()
-        }
+        for (i, r) in regions.enumerated() where i != target { GridDrawing.faintRegion(local(r)) }
 
         // Hit zones that differ from their region: small dashed marker so the
         // user can find them.
@@ -113,5 +105,47 @@ final class OverlayView: NSView {
         NSColor.black.withAlphaComponent(0.65).setFill()
         bg.fill()
         str.draw(at: CGPoint(x: c.x - s.width / 2, y: c.y - s.height / 2))
+    }
+}
+
+/// How the layout grid and its regions look, shared by the layout editor, the drag overlay and
+/// the widget edit overlay so every grid in MacHUD looks the same.
+enum GridDrawing {
+    /// The editor's dimmed backdrop: the whole screen, a little darker over the visible frame.
+    static func backdrop(_ bounds: CGRect, visible: CGRect) {
+        NSColor.black.withAlphaComponent(0.55).setFill()
+        bounds.fill()
+        NSColor.black.withAlphaComponent(0.2).setFill()
+        visible.fill()
+    }
+
+    /// The grid lines over `visible`: faint minor lines, and brighter major ones dividing it
+    /// into about 12 across and 6 down.
+    static func lines(_ grid: GridSize, in visible: CGRect) {
+        let cols = max(1, grid.cols), rows = max(1, grid.rows)
+        let minor = NSBezierPath(), major = NSBezierPath()
+        let majorEveryC = max(1, cols / 12), majorEveryR = max(1, rows / 6)
+        for c in 0...cols {
+            let x = (visible.minX + CGFloat(c) / CGFloat(cols) * visible.width).rounded() + 0.5
+            let p = (c % majorEveryC == 0) ? major : minor
+            p.move(to: CGPoint(x: x, y: visible.minY)); p.line(to: CGPoint(x: x, y: visible.maxY))
+        }
+        for r in 0...rows {
+            let y = (visible.minY + CGFloat(r) / CGFloat(rows) * visible.height).rounded() + 0.5
+            let p = (r % majorEveryR == 0) ? major : minor
+            p.move(to: CGPoint(x: visible.minX, y: y)); p.line(to: CGPoint(x: visible.maxX, y: y))
+        }
+        NSColor.white.withAlphaComponent(0.06).setStroke(); minor.lineWidth = 1; minor.stroke()
+        NSColor.white.withAlphaComponent(0.16).setStroke(); major.lineWidth = 1; major.stroke()
+    }
+
+    /// A region that is not the one being worked on: a faint outline.
+    static func faintRegion(_ r: CGRect) {
+        let path = NSBezierPath(roundedRect: r.insetBy(dx: 2, dy: 2), xRadius: 10, yRadius: 10)
+        NSColor.white.withAlphaComponent(0.06).setFill()
+        path.fill()
+        NSColor.white.withAlphaComponent(0.35).setStroke()
+        path.lineWidth = 1.5
+        path.stroke()
     }
 }
