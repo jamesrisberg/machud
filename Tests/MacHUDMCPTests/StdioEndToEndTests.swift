@@ -41,7 +41,7 @@ final class StdioEndToEndTests: XCTestCase {
 
         XCTAssertEqual((lines.response(id: 1)?["result"] as? [String: Any])?["protocolVersion"] as? String, "2025-11-25")
         let tools = (lines.response(id: 2)?["result"] as? [String: Any])?["tools"] as? [[String: Any]] ?? []
-        XCTAssertEqual(tools.count, 15)
+        XCTAssertEqual(tools.count, 19)
         let show = tools.first { $0["name"] as? String == "show_panel" }
         XCTAssertTrue((show?["description"] as? String ?? "").contains("Scratch (xyz.machud.scratch)"),
                       "the binary read the apps from MACHUD_SOCKET at start")

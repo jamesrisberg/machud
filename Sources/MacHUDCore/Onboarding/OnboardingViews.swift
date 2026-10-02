@@ -790,7 +790,7 @@ struct AppTile: View {
                     icon.frame(width: 32, height: 32)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(row.entry.name).font(.system(size: 13, weight: .semibold))
-                        Text(row.entry.isBundled ? "\(row.entry.kind) · bundled" : row.entry.kind)
+                        Text(row.entry.isBundled ? "\(row.entry.kindLabel) · bundled" : row.entry.kindLabel)
                             .font(.system(size: 10)).foregroundStyle(OnboardingStyle.secondary)
                     }
                     Spacer()

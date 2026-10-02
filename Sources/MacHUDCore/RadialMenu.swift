@@ -103,7 +103,7 @@ struct RadialGeometry: Equatable {
 @MainActor
 final class RadialMenu {
     struct Wedge {
-        enum Kind: Equatable { case loadout(String), capture, park }
+        enum Kind: Equatable { case loadout(String), capture, park, widgets }
         var title: String
         var subtitle: String = ""
         var icons: [NSImage] = []
@@ -125,12 +125,16 @@ final class RadialMenu {
         /// The park wedge's inner ring: park the focused window. Its outer ring: bring
         /// every parked window back.
         case park(restore: Bool)
+        /// The widgets wedge's inner ring: reveal (or lower) the widgets. Its outer ring: edit them.
+        case widgets(edit: Bool)
     }
 
-    /// How many rings a wedge has: park has two, the others three.
+    /// How many rings a wedge has: park and widgets have two, the others three.
     static func ringCount(for kind: Wedge.Kind) -> Int {
-        if case .park = kind { return 2 }
-        return 3
+        switch kind {
+        case .park, .widgets: return 2
+        case .loadout, .capture: return 3
+        }
     }
 
     /// What each ring of a wedge does.
@@ -144,6 +148,8 @@ final class RadialMenu {
         case (.capture, .outer): return "Draw a new layout"
         case (.park, .inner): return "Park front window"
         case (.park, .middle), (.park, .outer): return "Restore parked"
+        case (.widgets, .inner): return "Reveal widgets"
+        case (.widgets, .middle), (.widgets, .outer): return "Edit widgets"
         }
     }
 
@@ -236,6 +242,8 @@ final class RadialMenu {
             case (.capture, .outer): onCommit?(.drawLayout)
             case (.park, .inner): onCommit?(.park(restore: false))
             case (.park, _): onCommit?(.park(restore: true))
+            case (.widgets, .inner): onCommit?(.widgets(edit: false))
+            case (.widgets, _): onCommit?(.widgets(edit: true))
             case (.loadout(let name), .inner): onCommit?(.preview(loadout: name))
             case (.loadout(let name), .middle): onCommit?(.apply(loadout: name, clear: false))
             case (.loadout(let name), .outer): onCommit?(.apply(loadout: name, clear: true))
@@ -271,6 +279,7 @@ final class RadialMenu {
                     switch wedge.kind {
                     case .capture: return "capture"
                     case .park: return "park"
+                    case .widgets: return "widgets"
                     case .loadout: return "loadout"
                     }
                 }(),

@@ -210,6 +210,17 @@ struct Hotkeys: Codable, Equatable {
     /// Collapse/expand the menu bar's hidden items. `menuBar.hotkey` wins over it; with
     /// neither set it is ⌃⌥B (see `MenuBarConfig.defaultHotkey`).
     var menuBar: HotKey? = nil
+    /// Reveal the desktop widgets; press again or Esc lowers them. Absent means ⌃⌥W; an
+    /// empty `key` turns it off.
+    var widgets: HotKey? = nil
+
+    static let defaultWidgets = HotKey(key: "w", modifiers: ["control", "option"])
+
+    /// The widget reveal hotkey in effect.
+    var widgetsReveal: HotKey? {
+        let hk = widgets ?? Self.defaultWidgets
+        return hk.key.isEmpty ? nil : hk
+    }
 
     static let defaults = Hotkeys(
         loadoutMenu: HotKey(key: "space", modifiers: ["control", "option"]),
@@ -385,6 +396,8 @@ struct Config: Codable, Equatable {
     var startupLoadout: String? = nil
     /// The app catalog (Settings → Apps): its URL and the install directory.
     var catalog: CatalogConfig? = nil
+    /// Desktop widgets: the grid and every placed widget.
+    var widgets: WidgetsConfig? = nil
 
     /// Blank by default: the editor opens on first trigger so you draw your own.
     static let defaults = Config(gap: 0, trigger: .shift, grid: .default, layouts: [], loadouts: [],
@@ -418,6 +431,7 @@ struct Config: Codable, Equatable {
         spaces = try c.decodeIfPresent(SpacesConfig.self, forKey: .spaces)
         startupLoadout = try c.decodeIfPresent(String.self, forKey: .startupLoadout)
         catalog = try c.decodeIfPresent(CatalogConfig.self, forKey: .catalog)
+        widgets = try c.decodeIfPresent(WidgetsConfig.self, forKey: .widgets)
     }
 }
 

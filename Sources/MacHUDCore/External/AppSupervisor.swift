@@ -105,7 +105,8 @@ final class AppSupervisor {
                                     "running": health == .running || health == .socketUnreachable,
                                     "reachable": health == .running, "autoLaunch": autoLaunch,
                                     "launchAttempts": launchAttempts,
-                                    "panels": app.manifest.panels.map { "\(app.id)/\($0.id)" }]
+                                    "panels": app.manifest.presentedPanels.map { "\(app.id)/\($0.id)" },
+                                    "widgets": app.manifest.widgetPanels.map(\.id)]
             if let manifest = Self.object(app.manifest) { d["manifest"] = manifest }
             if let lastError { d["lastError"] = lastError }
             return d
@@ -146,11 +147,18 @@ final class AppSupervisor {
     /// Every bundle declaring an app id (set from discovery's duplicates); empty when only
     /// the one in use does.
     var bundles: (String) -> [URL] = { _ in [] }
-    /// Where an app's panel is, given its processes; nil when it cannot tell.
-    var windowProbe: (Set<pid_t>) -> ShowOutcome? = { WindowPresence.probe($0) }
+    /// Where an app's panel is, given its processes and the frames of windows that are not
+    /// panels (`widgetFrames`); nil when it cannot tell.
+    var windowProbe: (Set<pid_t>, [CGRect]) -> ShowOutcome? = { WindowPresence.probe($0, ignoring: $1) }
+    /// The frames of the app's widget instances MacHUD placed (wired to the widget layer).
+    var widgetFrames: (String) -> [CGRect] = { _ in [] }
     /// A loud show (a click or summon, not a passing hover) did not reach the screen: app id,
     /// panel id and where it went.
     var onShowMissed: ((String, String, ShowOutcome) -> Void)?
+    /// An app connected (or reconnected) and its queued commands went out: app id.
+    var onConnected: ((String) -> Void)?
+    /// An event other than `state` (`widget`) pushed by an app: app id and the event.
+    var onAppEvent: ((String, [String: Any]) -> Void)?
 
     init(workspace: WorkspaceControl? = nil, connector: SocketConnector? = nil,
          schedule: ((TimeInterval, @escaping @MainActor () -> Void) -> Void)? = nil) {
@@ -179,7 +187,7 @@ final class AppSupervisor {
 
     /// Replaces the set of known apps (after a scan). Keeps the state of apps still present,
     /// drops (and disconnects) the rest, then brings every app's health up to date and
-    /// launches the `autoLaunch` ones that are not running.
+    /// launches the `autoLaunch` ones that are not running (unless the user quit them).
     func update(apps: [ExternalApp], autoLaunch: Set<String>) {
         let ids = Set(apps.map(\.id))
         for (id, record) in records where !ids.contains(id) {
@@ -193,7 +201,18 @@ final class AppSupervisor {
             record.autoLaunch = autoLaunch.contains(app.id)
             records[app.id] = record
             refresh(app.id)
-            if record.autoLaunch, record.health == .notRunning { launch(app.id) }
+            if record.autoLaunch, record.health == .notRunning, !record.quitRequested { launch(app.id) }
+        }
+    }
+
+    /// Changes which apps are kept running without a rescan. An app newly kept running is
+    /// launched now unless the user quit it.
+    func setAutoLaunch(_ ids: Set<String>) {
+        for record in all {
+            let wanted = ids.contains(record.app.id)
+            guard wanted != record.autoLaunch else { continue }
+            record.autoLaunch = wanted
+            if wanted, record.health == .notRunning, !record.quitRequested { launch(record.app.id) }
         }
     }
 
@@ -309,6 +328,8 @@ final class AppSupervisor {
 
     func didLaunch(_ id: String) {
         guard let record = records[id] else { return }
+        // Opened again (by hand too): an earlier quit no longer keeps it down.
+        record.quitRequested = false
         record.launchInFlight = false
         record.launchedAt = now()
         record.connectAttempts = 0
@@ -369,6 +390,7 @@ final class AppSupervisor {
                 self.seedState(id)
                 self.flushPending(record)
                 self.askHello(id)
+                self.onConnected?(id)
             case .failure(let error):
                 record.lastError = "\(error)"
                 self.set(record, .socketUnreachable)
@@ -412,8 +434,11 @@ final class AppSupervisor {
     }
 
     func handle(_ event: [String: Any], from id: String) {
+        if let name = event["event"] as? String, name != "state" {
+            if records[id] != nil { onAppEvent?(id, event) }
+            return
+        }
         guard let record = records[id], let panels = event["panels"] as? [[String: Any]] else { return }
-        if let name = event["event"] as? String, name != "state" { return }
         var changed = false
         for p in panels {
             guard let panelID = p["id"] as? String else { continue }
@@ -524,7 +549,7 @@ final class AppSupervisor {
             // A parked panel is mostly past the screen edge, its orb under the window filter.
             guard let self, let record = self.records[id], record.health == .running,
                   let state = record.panels[panel], state.visible, state.mode != .parked else { return }
-            let outcome = self.windowProbe(Set(self.livePIDs(id))) ?? hint.map { $0 ? .onScreen : .anotherDesktop }
+            let outcome = self.windowProbe(Set(self.livePIDs(id)), self.widgetFrames(id)) ?? hint.map { $0 ? .onScreen : .anotherDesktop }
             guard let outcome else { return }
             if record.showChecks[panel] != outcome {
                 record.showChecks[panel] = outcome
@@ -765,7 +790,7 @@ final class HUDSocketConnector: SocketConnector {
         let events = UncheckedBox(onEvent), closed = UncheckedBox(onClose), done = UncheckedBox(completion)
         queue.async {
             let result = Result<SocketSubscription, Error> {
-                try client.subscribe(events: ["state"], onEvent: { event in
+                try client.subscribe(events: ["state", "widget"], onEvent: { event in
                     let box = UncheckedBox(event)
                     DispatchQueue.main.async { events.value(box.value) }
                 }, onClose: {

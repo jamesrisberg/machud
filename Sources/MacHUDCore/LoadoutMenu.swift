@@ -57,6 +57,12 @@ final class LoadoutMenu {
 
     // MARK: Wedges
 
+    /// Whether any app serves widgets (the wheel then has a Widgets wedge), its subtitle,
+    /// and what its rings do: reveal (false) or edit (true).
+    var hasWidgets: (() -> Bool)?
+    var widgetsSubtitle: (() -> String)?
+    var onWidgets: ((Bool) -> Void)?
+
     func wedges() -> [RadialMenu.Wedge] {
         let loadouts = store.loadouts
         let capture = RadialMenu.Wedge(
@@ -71,6 +77,13 @@ final class LoadoutMenu {
             icons: [NSImage(systemSymbolName: "rectangle.portrait.and.arrow.right", accessibilityDescription: nil)]
                 .compactMap { $0 },
             kind: .park)
+        var tools = [capture, park]
+        if hasWidgets?() == true {
+            tools.append(RadialMenu.Wedge(
+                title: "Widgets", subtitle: widgetsSubtitle?() ?? "",
+                icons: [NSImage(systemSymbolName: "square.grid.2x2", accessibilityDescription: nil)].compactMap { $0 },
+                kind: .widgets))
+        }
         return loadouts.map {
             let n = $0.allSlots.count
             var subtitle = "\(n) window\(n == 1 ? "" : "s")"
@@ -80,7 +93,7 @@ final class LoadoutMenu {
             return RadialMenu.Wedge(title: $0.name, subtitle: subtitle,
                                     icons: RadialMenu.icons(for: $0, panels: engine.panels),
                                     kind: .loadout($0.name), hotkey: $0.hotkey)
-        } + [capture, park]
+        } + tools
     }
 
     func showRadial(at point: CGPoint? = nil) {
@@ -98,6 +111,8 @@ final class LoadoutMenu {
             captureCurrent(allScreens: allScreens)
         case .drawLayout:
             DispatchQueue.main.async { self.openNewLayout?() }
+        case .widgets(let edit):
+            DispatchQueue.main.async { self.onWidgets?(edit) }
         case .park(let restore):
             guard requireAccessibility(for: "park windows") else { return }
             if restore {
@@ -248,7 +263,11 @@ final class LoadoutMenu {
                       name, capture.regionCount, capture.slotCount, capture.screens.count)
                 let finish = { (hud: HUDLoadout?) in
                     var detail = Self.captureDetail(of: capture)
-                    if let apps = hud?.apps?.count { detail += "\nTool dock + \(apps) app\(apps == 1 ? "" : "s") saved with it" }
+                    if let apps = hud?.apps?.count {
+                        let widgets = hud?.widgets?.count ?? 0
+                        detail += "\nTool dock + \(apps) app\(apps == 1 ? "" : "s")"
+                            + (widgets > 0 ? " + \(widgets) widget\(widgets == 1 ? "" : "s")" : "") + " saved with it"
+                    }
                     Toast.show("Captured \(name)", detail: detail, on: screen, seconds: 3.5)
                 }
                 if answer.includeHUD {

@@ -54,13 +54,13 @@ Each tool carries `annotations` (`readOnlyHint`, `destructiveHint`, `idempotentH
 
 | Tool | Arguments | MacHUD commands |
 |---|---|---|
-| `machud_status` | | `apps`, `panels`, `screens`, `loadouts`, `status`, `tooldock`, `park list`, `voice status` and `voice state`: `apps[] {app, name, health, running, outdated, outdatedReason?, olderContract, actions[], panels[] {id, title, kind, visible, capabilities, actions}}`, `screens[] {index, name, main, builtin, w, h, spaces, currentSpace}`, `loadouts` (as `list_loadouts`), `toolDock {enabled, position, visible, autoHide, screenName}`, `parked[]`, `voice {status, connected, muted, phase, brainAvailable, brainProblem, sessionKey, sessionProvider, wakeListening}`. A part MacHUD cannot give is named in `unavailable {part: why}`; MacHUD not running fails the call |
+| `machud_status` | | `apps`, `panels`, `screens`, `loadouts`, `status`, `widgets`, `tooldock`, `park list`, `voice status` and `voice state`: `apps[] {app, name, health, running, outdated, outdatedReason?, olderContract, actions[], panels[] {id, title, kind, visible, capabilities, actions}, widgets?[]}` (`panels` hover and windowed only, `widgets` the widget types it serves), `screens[] {index, name, main, builtin, w, h, spaces, currentSpace}`, `loadouts` (as `list_loadouts`), `widgets {editing, revealed, placed[] {instance, app, type, size, display, layer, missingType?, problem?}}`, `toolDock {enabled, position, visible, autoHide, screenName}`, `parked[]`, `voice {status, connected, muted, phase, brainAvailable, brainProblem, sessionKey, sessionProvider, wakeListening}`. A part MacHUD cannot give is named in `unavailable {part: why}`; MacHUD not running fails the call |
 | `list_loadouts` | | `loadouts`, `status`: `loadouts[] {name, layout?, windows, screens?, hud, hotkey?, startup, lastApplied}` (`lastApplied` is `status`'s `activeLoadout`) |
 | `apply_loadout` | `name`, `clear?`, `screen?`, `dry_run?` | `apply loadout= [clear=1] [screen=] [plan=1]` |
 | `capture_loadout` | `name`, `all_screens?`, `screen?`, `hud?` (`none`, `include`, `only`) | `capture name= [screens=all \| screen=] [hud=1 \| hud=only]` |
 | `show_panel` / `hide_panel` | `app`, `panel?` | `summon` / `dismiss id=<app>/<panel>` (the tool dock's show and hide: remembered frames, hover panels by their button) |
 | `toggle_panel` | `app`, `panel?` | `panels`, then `summon` or `dismiss` by the panel's `visible` |
-| `list_app_actions` | `app` | none (the apps last read): `{app, name, health, running, outdated, outdatedReason?, olderContract, actions[], panels[] {id, title, kind, capabilities, actions}}` |
+| `list_app_actions` | `app` | none (the apps last read): `{app, name, health, running, outdated, outdatedReason?, olderContract, actions[], panels[] {id, title, kind, capabilities, actions}, widgets?[]}` |
 | `app_action` | `app`, `verb`, `args?` (an object; values sent as strings) | `apps perform app= verb= <args>`. `verb` must be one of the app's action verbs, else a tool error that lists them; `args` may not use `action`, `_`, `perform`, `app`, `verb` or `name` |
 | `tool_dock` | `action?` (`state`, `show`, `hide`, `position`), `position?` (the eight `HUDDockPosition`s), `screen?` | `tooldock action=…` |
 | `park_window` | exactly one of `region`, `window`, `app` (+ `title?`); `edge?`, `peek?` | `park id=<region> \| window= \| app= [title=] [edge=] [peek=]` |
@@ -68,9 +68,14 @@ Each tool carries `annotations` (`readOnlyHint`, `destructiveHint`, `idempotentH
 | `open_session` | `id` | `sessions open id=` |
 | `feed_add` | `text`, `source?` (default `Agent`), `title?` | `feed add text= source= [title=]` |
 | `say` | `text` | `voice action name=say text=` |
+| `list_widgets` | | `widgets list` and `widgets types`: `{editing, revealed, grid, instances[], types[]}` as those commands give them |
+| `add_widget` | `type`, `app?`, `size?`, `screen?`, `col?` and `row?` (both or neither), `layer?` (`desktop`, `float`), `settings?` (an object) | `widgets add type= [app=] [size=] [screen=] [col= row=] [layer=] [settings=<JSON>]` |
+| `change_widget` | `instance`, `action` (`remove`, `move`, `resize`, `layer`, `settings`); for move `col`, `row`, `screen?`; for resize `size`; for layer `layer`; for settings `settings` (an object, `null` removes a key) | `widgets <action> instance= …` |
+| `widget_mode` | `mode` (`edit`, `reveal`), `state?` (`on`, `off`, `toggle`; default toggle) | `widgets edit\|reveal state=` |
 
 `app` is an app's bundle id (the schema's `enum` lists the discovered apps) or its name. `panel`
-defaults to the app's first panel and may be the panel id or title. An app's **action verbs** are
+defaults to the app's first panel and may be the panel id or title; only hover and windowed
+panels count (an app that serves only widgets has none, and the panel tools say so). An app's **action verbs** are
 its manifest panels' `verbs` minus the panel verbs every app handles through `panel` (`show`,
 `hide`, `toggle`, `frame`, `mode`). An app not in the list last read from MacHUD is looked up once
 more before the call fails.

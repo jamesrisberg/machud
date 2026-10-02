@@ -125,7 +125,7 @@ struct AppsRowView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(row.entry.name).font(.headline)
-                    Text(row.entry.kind).font(.caption2.weight(.semibold)).textCase(.uppercase)
+                    Text(row.entry.kindLabel).font(.caption2.weight(.semibold)).textCase(.uppercase)
                         .padding(.horizontal, 5).padding(.vertical, 1)
                         .background(Capsule().fill(Color.secondary.opacity(0.2)))
                     if row.entry.isBundled { Text("bundled").font(.caption2).foregroundStyle(.secondary) }

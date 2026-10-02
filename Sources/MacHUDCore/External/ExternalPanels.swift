@@ -27,6 +27,9 @@ final class ExternalPanels {
     /// false: `autoLaunch` apps are neither launched, relaunched nor placed (an isolated
     /// instance; see `Env.autoApply`).
     var autoLaunches = true
+    /// Apps kept running like `autoLaunch` ones besides the configured: those with widgets
+    /// placed (wired to the widget layer).
+    var keepRunning: () -> Set<String> = { [] }
     /// Rescans when an app appears in, leaves or is replaced in a watched directory.
     private(set) var watcher: AppDirectoryWatcher?
     /// Puts an app's panel where its `apps.<id>.placement` says (wired to the loadout
@@ -264,11 +267,13 @@ final class ExternalPanels {
     /// `duplicates` for `apps`: id → every bundle declaring it, the one in use first.
     var duplicatesJSON: [String: [String]] { duplicates.mapValues { $0.map(\.path) } }
 
-    /// Registers `apps` (replacing any earlier set). Split from `rescan` for tests.
+    /// Registers `apps` (replacing any earlier set) and their hover and windowed panels; widget
+    /// types and unknown kinds are not panels. Split from `rescan` for tests.
     func install(_ apps: [ExternalApp], autoLaunch configured: Set<String>) {
-        let autoLaunch = autoLaunches ? configured : []
+        // Apps first: `keepRunning` asks which apps serve the widgets placed.
         self.apps = apps
-        let wanted = Set(apps.flatMap { app in app.manifest.panels.map { ExternalPanel.id(app: app.id, panel: $0.id) } })
+        let autoLaunch = autoLaunches ? configured.union(keepRunning()) : []
+        let wanted = Set(apps.flatMap { app in app.manifest.presentedPanels.map { ExternalPanel.id(app: app.id, panel: $0.id) } })
         registry.unregister { panel in
             guard let external = panel as? ExternalPanel else { return false }
             // Re-register panels whose app moved or whose manifest changed.
@@ -282,13 +287,19 @@ final class ExternalPanels {
         }
         supervisor.update(apps: apps, autoLaunch: autoLaunch)
         for app in apps {
-            for descriptor in app.manifest.panels {
+            for descriptor in app.manifest.presentedPanels {
                 let id = ExternalPanel.id(app: app.id, panel: descriptor.id)
                 if let existing = registry.panel(id: id) as? ExternalPanel, existing.app == app,
                    existing.descriptor == descriptor { continue }
                 registry.register(ExternalPanel(app: app, descriptor: descriptor, supervisor: supervisor))
             }
         }
+    }
+
+    /// Applies a change in `keepRunning` (a widget placed for an app, or its last one removed);
+    /// an app the user quit stays quit.
+    func refreshKeepRunning() {
+        supervisor.setAutoLaunch(autoLaunches ? Set(config().autoLaunch ?? []).union(keepRunning()) : [])
     }
 
     /// Bundle id, or app name (case-insensitive).

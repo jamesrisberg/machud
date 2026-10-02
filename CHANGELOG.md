@@ -6,6 +6,24 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 
 ## [Unreleased]
 
+### Desktop widgets
+- HUD apps can now put widgets on your desktop: small glass tiles such as a clock or the weather.
+  Add them from the status menu's new **Widgets** submenu or from **Edit Widgets…**, which shows a
+  gallery of every widget by app with a button per size. Widgets snap to a grid, never overlap,
+  and can be placed several times, each with its own settings.
+- In edit mode you drag widgets to move them, and their controls remove them, open their settings
+  and change their size; a faint grid shows where they can go. Done or Esc locks them again.
+- Widgets sit under your windows. **⌃⌥W** raises them all until you press it again or Esc (also
+  in the Widgets submenu and on the wheel); Float Above Windows keeps one on top.
+- Widgets are on every desktop and come back where they were after a restart, a display change or
+  their app relaunching. An app with widgets is kept running unless you quit it from MacHUD. HUD
+  loadouts save your widgets and put them back.
+- Scripts and agents get `machud widgets` (list, types, add, move, resize, layer, settings,
+  remove, edit, reveal) and the MCP tools `list_widgets`, `add_widget`, `change_widget` and
+  `widget_mode`.
+- An app that serves only widgets is listed under Apps like any other, without a tool dock
+  button, and a panel kind MacHUD does not know is skipped instead of being shown as a window.
+
 ### MacHUD checks that a panel really appeared
 - When you click or summon a HUD app's panel and it opens on another desktop (or nowhere on
   screen), MacHUD no longer takes the app's word that it is showing: it says where the panel

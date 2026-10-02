@@ -135,6 +135,15 @@ final class AppSupervisorTests: XCTestCase {
         XCTAssertEqual(workspace.terminated, [id], "not subscribed, so terminate instead of socket quit")
         workspace.onTerminate?(id, 4242)
         XCTAssertTrue(clock.queue.isEmpty, "a requested quit is not relaunched")
+        supervisor.update(apps: [app], autoLaunch: [id])
+        XCTAssertEqual(workspace.launches.count, 2, "nor by a rescan")
+
+        // Opened again by hand: kept up again.
+        workspace.start(id)
+        clock.queue.removeAll()
+        workspace.stop(id)
+        XCTAssertEqual(clock.runQueued(), [2], "a crash after reopening is relaunched")
+        XCTAssertEqual(workspace.launches.count, 3)
     }
 
     func testTerminationIsSeenWhileTheDyingProcessIsStillListed() {
