@@ -81,6 +81,37 @@ final class ExternalPanels {
         return error
     }
 
+    /// Whether the app is up or on its way: what Quit applies to, and what Launch skips.
+    func isUp(_ id: String) -> Bool {
+        [.running, .socketUnreachable, .launching].contains(supervisor.record(id)?.health ?? .notRunning)
+    }
+
+    /// Launches every discovered app that is not up (`apps launch-all`, the menu's Launch
+    /// All). Returns `launch`'s result per app id it tried.
+    @discardableResult
+    func launchAll() -> [String: Result<String, AppSupervisor.LaunchError>] {
+        var out: [String: Result<String, AppSupervisor.LaunchError>] = [:]
+        for app in apps where !isUp(app.id) { out[app.id] = launch(app, manual: true) }
+        return out
+    }
+
+    /// Quits every app that is up (`apps quit-all`, the menu's Quit All). Completes once
+    /// each has answered, with per app id `quit` or the error.
+    func quitAll(completion: @escaping ([String: String]) -> Void = { _ in }) {
+        let ids = apps.map(\.id).filter(isUp)
+        var out: [String: String] = [:]
+        guard !ids.isEmpty else { completion(out); return }
+        for id in ids {
+            supervisor.quit(id) { result in
+                switch result {
+                case .success: out[id] = "quit"
+                case .failure(let error): out[id] = "\(error)"
+                }
+                if out.count == ids.count { completion(out) }
+            }
+        }
+    }
+
     /// `apps install|update|uninstall` (the catalog installer), when wired up.
     var installActions: ((String, [String: String], @escaping ([String: Any]) -> Void) -> Void)?
 
@@ -245,6 +276,7 @@ final class ExternalPanels {
     // MARK: - Control
 
     /// `apps`, `apps rescan`, `apps launch id=`, `apps place id=`, `apps quit id=`,
+    /// `apps launch-all`, `apps quit-all`,
     /// `apps menu id=` (the app's status menu, fetched now),
     /// `apps menu-invoke id= item= [title=]` (perform one of its items),
     /// `apps perform app= verb= [key=value ...]` (one of the app's own `action` verbs),
@@ -253,8 +285,8 @@ final class ExternalPanels {
     func registerControl(_ control: HUDSocketServer) {
         control.register("apps") { [weak self] args, done in
             guard let self else { done(["ok": false, "error": "apps gone"]); return }
-            let actions = ["rescan", "launch", "place", "quit", "menu", "menu-invoke", "perform", "announce", "forget",
-                           "install", "update", "uninstall", "list"]
+            let actions = ["rescan", "launch-all", "quit-all", "launch", "place", "quit", "menu", "menu-invoke", "perform",
+                           "announce", "forget", "install", "update", "uninstall", "list"]
             let action = args["action"] ?? actions.first { args[$0] != nil } ?? "list"
             switch action {
             case "list":
@@ -300,6 +332,16 @@ final class ExternalPanels {
                 }
             case "perform":
                 self.perform(args, done: done)
+            case "launch-all":
+                let launched = self.launchAll().mapValues { result -> String in
+                    switch result {
+                    case .success(let placement): return placement
+                    case .failure(let error): return error.description
+                    }
+                }
+                done(["ok": true, "launched": launched])
+            case "quit-all":
+                self.quitAll { done(["ok": true, "quit": $0]) }
             case "launch", "place", "quit":
                 guard let key = args["id"] ?? args["name"], let app = self.app(matching: key) else {
                     done(["ok": false, "error": "id=<bundle id or name> of a discovered app required"]); return
@@ -326,7 +368,7 @@ final class ExternalPanels {
                 guard let installActions = self.installActions else { done(["ok": false, "error": "the installer is not available"]); return }
                 installActions(action, args, done)
             default:
-                done(["ok": false, "error": "apps action must be list, rescan, launch, place, quit, menu, menu-invoke, perform, announce, forget, install, update or uninstall"])
+                done(["ok": false, "error": "apps action must be list, rescan, launch, launch-all, place, quit, quit-all, menu, menu-invoke, perform, announce, forget, install, update or uninstall"])
             }
         }
     }

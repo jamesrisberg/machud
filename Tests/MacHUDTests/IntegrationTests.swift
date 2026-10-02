@@ -451,6 +451,42 @@ final class PlacementOnLaunchTests: XCTestCase {
         XCTAssertEqual(entry?.actions.map(\.kind), [.summon, .separator, .appMenu, .separator, .reveal, .dockToggle, .settings, .separator, .quit])
         XCTAssertEqual(entry?.actions[4].panelID, "\(id)/main")
     }
+
+    func testLaunchAllStartsWhatIsDownAndQuitAllStopsWhatIsUp() throws {
+        let other = ExternalApp(manifest: HUDManifest(id: "dev.test.other", name: "Other", socket: "/tmp/gs-other.sock",
+                                                      panels: [HUDManifest.Panel(id: "main", title: "Main")]),
+                                bundleURL: URL(fileURLWithPath: "/tmp/Other.app"))
+        let missing = ExternalApp(manifest: HUDManifest(id: "dev.test.missing", name: "Missing", socket: "/tmp/gs-missing.sock",
+                                                        panels: [HUDManifest.Panel(id: "main", title: "Main")]),
+                                  bundleURL: URL(fileURLWithPath: "/tmp/Missing.app"))
+        workspace.installed.insert(other.id)
+        connector.reachable.insert(other.socketPath)
+        externals.install([app, other, missing], autoLaunch: [])
+        workspace.start(id)
+        clock.runQueued()
+        XCTAssertTrue(MacHUDMenuModel.bulk(externals: externals) == (true, true))
+
+        let launched = externals.launchAll()
+        XCTAssertEqual(Set(launched.keys), [other.id, missing.id], "the running app is left alone")
+        XCTAssertEqual(try launched[other.id]?.get(), "none")
+        guard case .failure(.notInstalled) = launched[missing.id] else { return XCTFail("\(String(describing: launched[missing.id]))") }
+        XCTAssertEqual(workspace.launches, [other.id])
+        workspace.start(other.id, pid: 4343)
+        clock.runQueued()
+
+        var quit: [String: String]?
+        externals.quitAll { quit = $0 }
+        XCTAssertEqual(quit, [id: "quit", other.id: "quit"], "the uninstalled app is not up")
+        XCTAssertEqual(connector.requests.filter { $0.command == "quit" }.map(\.path).sorted(),
+                       [app.socketPath, other.socketPath].sorted())
+        workspace.stop(id)
+        workspace.stop(other.id)
+        XCTAssertTrue(MacHUDMenuModel.bulk(externals: externals) == (true, false))
+
+        quit = nil
+        externals.quitAll { quit = $0 }
+        XCTAssertEqual(quit, [:], "nothing up answers at once")
+    }
 }
 
 @MainActor
