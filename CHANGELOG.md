@@ -11,15 +11,15 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   with the agent, scrollable, newest at the bottom.
 - Click it and it opens larger, over a dimmed screen, with a field for typing to the agent: the
   same session you talk to. Return sends, Shift-Return starts a new line, ↑ brings back your last
-  message, ⌘K clears the field, and Esc or a click outside closes it. Approvals can be answered
-  with ⌘Y and ⌘N. Talking to the orb keeps working while it is open.
+  message, ⌘K clears the field, copy and paste work, and Esc or a click outside closes it.
+  Approvals can be answered with ⌘Y and ⌘N. Talking to the orb keeps working while it is open.
 - Replies to typed messages are not spoken unless you turn on **Speak replies to typed
   messages** in the Voice settings.
 - While a reply is spoken, the card under the orb shows it in step with the voice, and the voice
   gets ready while the agent is still thinking, so it starts sooner.
 - The conversation comes back after the voice host restarts, and starts again when the agent
   starts a new session. The orb's right-click menu has **Show Conversation**.
-- Scripts and agents get `machud voice conversation`, `machud voice say text=…` (a typed message)
+- Scripts and agents get `machud voice conversation`, `machud voice send text=…` (a typed message)
   and `machud voice card peek|pin|expand|close`.
 
 ### Desktop widgets

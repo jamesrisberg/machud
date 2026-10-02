@@ -686,7 +686,7 @@ see Running several instances).
 | `voice settings get` | | `settings`: the voice host's settings object |
 | `voice settings set` | `settings=<JSON object>`, or dotted `key=value` pairs | `settings=` replaces the whole object. `key=value` pairs (`enabled=false`, `voice.speakReplies=true`, `brain.runtime=claude`) are applied to the current settings, each converted to the type already stored, and the whole object is sent back; an unknown key is an error. A `history.` key while no `history` is saved starts from what `history status` resolves to. Turning `enabled` off stops the voice host; on starts it |
 | `voice conversation` | | the voice host's `conversation` (below): the conversation with the agent as rows |
-| `voice say` | `text=` | the voice host's `say` (below): sends `text` to the agent as a typed message, to the same session as voice; not to be confused with `voice action say`, which speaks text aloud |
+| `voice send` | `text=` | the voice host's `send` (below): sends `text` to the agent as a typed message, to the same session as voice (the agent may use its tools); `voice action say` speaks text aloud instead |
 | `voice card` | `peek`, `pin`, `expand` or `close` | the voice host's `card` (below): shows the reply card as a peek, pins it, expands it, or closes it |
 | `voice secret` | `set name=grok [value=…]` / `clear name=grok` | stores or removes the Grok API key in the Keychain; the key is never returned. Without `value=`, `machud voice secret set name=grok` reads the key from stdin (without echo at a terminal): prefer that, so the key stays out of the shell history and the process list |
 
@@ -729,7 +729,7 @@ HUDKit's JSON-lines socket, one request per connection, served by `MacHUDVoice` 
 | `models` | `action=download id=hey-jarvis` (or its `manifestId`) | downloads that wake phrase's model through VoiceKit's `ModelStore` into the models folder (`MACHUD_VOICE_MODELS_DIR`, else `~/Library/Application Support/MacHUD/Voice/Models`), each file checked against its pinned size and SHA-256. Returns the status; progress as above. Once it is installed the wake word listens, without a restart, if it is on and that is its phrase |
 | `history` | `action=status` (or `history status`) | `{ok, mode, shareWithSpeakFree, speakFreeInstalled, folder, default}`: the `history` setting as it resolves on this Mac now. `mode` is `off`, `text` or `textAndAudio`; `shareWithSpeakFree` is true only while SpeakFree is installed; `folder` is where takes are kept (or would be); `default` is true while no setting is saved |
 | `conversation` | | `{ok, threadId, rows[]}`: the conversation with the agent (below), oldest first; `threadId` is the brain's conversation it belongs to, null until the brain has named one |
-| `say` | `text=<text>` | sends `text` to the agent as a typed turn, to the same session as voice: `{ok, state}` once it is on its way, else `{ok: false, error}` without `text`, while the brain is off or cannot take a turn, while an agent take is recording, or while the agent is still working (`The agent is still working`). A refusal by the brain itself then shows under the orb, as for a spoken turn. Its reply is spoken only with `speakTypedReplies` |
+| `send` | `text=<text>` | sends `text` to the agent as a typed turn, to the same session as voice: `{ok, state}` once it is on its way, else `{ok: false, error}` without `text`, while the brain is off or cannot take a turn, while an agent take is recording, or while the agent is still working (`The agent is still working`). A refusal by the brain itself then shows under the orb, as for a spoken turn. Its reply is spoken only with `speakTypedReplies` |
 | `card` | `action=peek\|pin\|expand\|close` | sets `cardMode` (`peek`, `pinned`, `expanded`); `close` closes the card as its close button does (`dismiss`). Returns `{ok, state}` |
 | `secret` | `action=set name=grok value=…` / `action=clear name=grok` | writes the Keychain; never returns a value |
 | `quit` | | exits after replying |
@@ -777,8 +777,12 @@ screen's height, centered under the notch, over a scrim that dims the rest of th
 a field for typing to the agent. Return sends, Shift-Return starts a new line, ↑ in an empty
 field recalls the last typed message, ⌘K clears the field, ⌘Y and ⌘N allow or deny the newest
 approval (Tab also reaches its buttons), and Esc, the close button or a click on the scrim
-collapses it back to the peek. The expanded panel takes the keyboard without bringing the voice
-host forward, and the app that had it gets it back on collapse. Voice keeps working meanwhile:
+collapses it back to the peek; so does switching to another app, and a full-screen app folds a
+pinned or expanded card back to the peek. The field takes the standard editing keys (⌘X, ⌘C, ⌘V,
+⌘A, ⌘Z, ⇧⌘Z). The expanded panel is a non-activating panel made key, so typing goes to it
+without the voice host becoming the active app; when it collapses it gives up key status, and
+should the voice host have become active, the app that was in front is activated again. A send
+the brain refuses comes back to the field, and failures show above it. Voice keeps working meanwhile:
 the orb stays above the panel and a spoken turn appears in the same conversation. The orb's
 right-click menu has Show Conversation, and `card` sets the state from a script.
 
@@ -787,9 +791,10 @@ The conversation is BrainKit's transcript of the brain's turns: what the user sa
 progress (`progress`, `step` `running`, `done`, `failed` or `denied`), approvals (`approval`,
 with `approvalId`, `detail` and `decision` `pending`, `delivering`, `allowed`, `denied`,
 `resolved` or `failed`) and interruptions or failures (`notice`, `isError`). Each row has an
-`id` and the `turnId` it belongs to. The newest 200 rows are kept in
-`~/Library/Application Support/MacHUD/Voice/conversation.json` (not while the brain cannot run,
-`MACHUD_VOICE_NO_BRAIN`), saved a second after a change and at once when a turn ends, so the
+`id` and the `turnId` it belongs to; a message the brain has not taken yet is `pending: true`
+(it goes if the brain refuses it). The newest 200 rows are kept, readable by the user only, in
+`$MACHUD_VOICE_CONVERSATION_FILE`, else `~/Library/Application Support/MacHUD/Voice/conversation.json`
+(not while the brain cannot run, `MACHUD_VOICE_NO_BRAIN`), saved a second after a change and at once when a turn ends, so the
 conversation and the last exchange's peek come back after a restart; a row's text is kept up to
 20,000 characters. When the brain starts another conversation (a new session, another workspace
 or runtime), the conversation starts again.
@@ -869,7 +874,8 @@ file), `MACHUD_NO_HOTKEYS` (no fn key tap), `MACHUD_VOICE_NO_MIC=1` (simulated c
 microphone is never opened), `MACHUD_VOICE_NO_BRAIN=1` (the brain never starts),
 `MACHUD_VOICE_HEADLESS=1` (no orb on screen), `MACHUD_VOICE_NO_SPEECH=1` (replies and `say` make
 no sound), `MACHUD_VOICE_MODELS_DIR` (where downloaded models are kept),
-`MACHUD_VOICE_HISTORY_DIR` (MacHUD's own history folder), `SPEAKFREE_CONFIG_DIR` (SpeakFree's
+`MACHUD_VOICE_HISTORY_DIR` (MacHUD's own history folder), `MACHUD_VOICE_CONVERSATION_FILE` (where
+the conversation with the agent is kept), `SPEAKFREE_CONFIG_DIR` (SpeakFree's
 config folder, for its `saveRecordings` and a shared history),
 `MACHUD_VOICE_KEYCHAIN_SERVICE` (the Keychain service for secrets) and `MACHUD_SOCKET` (MacHUD's
 control socket, for `open-session` and `feed add`).
@@ -936,7 +942,9 @@ variables. MacHUD also starts it with `MACHUD_VOICE_NO_MIC=1`, `MACHUD_VOICE_NO_
 `MACHUD_VOICE_HEADLESS=1` and `MACHUD_VOICE_NO_SPEECH=1` (no microphone, no brain, no orb, no
 sound), `MACHUD_VOICE_MODELS_DIR=<voice socket without its extension>-models` (never the real
 models folder) and `MACHUD_VOICE_HISTORY_DIR=<voice socket without its extension>-history`
-unless `MACHUD_VOICE_LIVE=1`, and
+unless `MACHUD_VOICE_LIVE=1`, with
+`MACHUD_VOICE_CONVERSATION_FILE=<voice socket without its extension>-conversation.json` (live or
+not, unless set), and
 with `MACHUD_VOICE_KEYCHAIN_SERVICE=com.jrisberg.machud.voice.isolated` unless that variable is
 already set, so a test instance never touches the real Grok key.
 

@@ -252,6 +252,7 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
         var busy: Bool
         var link: String?
         var geometry: CGRect
+        var errorMessage: String?
     }
 
     private var conversationLook: ConversationLook?
@@ -263,12 +264,14 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
         let expanded = mode == .expanded
         let link = tracker.state.sessionKey == nil ? nil : OrbSceneTracker.sessionLink(provider: tracker.state.sessionProvider)
         let look = ConversationLook(mode: mode, busy: Self.isBusy(tracker.state.phase), link: link,
-                                    geometry: geometry.screenFrame)
+                                    geometry: geometry.screenFrame, errorMessage: scene.errorMessage)
         guard force || look != conversationLook else { return }
         conversationLook = look
         let width = expanded ? OrbLayout.expandedFrame(geometry: geometry).width : OrbLayout.pinnedWidth
         conversationView.panelWidth = width
-        conversationView.update(rows: rows, mode: expanded ? .expanded : .pinned, busy: look.busy, sessionLink: link)
+        // The peek, where failures show, is away: they show above the field instead.
+        conversationView.update(rows: rows, mode: expanded ? .expanded : .pinned, busy: look.busy, sessionLink: link,
+                                errorMessage: look.errorMessage)
         let frame = expanded
             ? OrbLayout.expandedFrame(geometry: geometry)
             : OrbLayout.pinnedFrame(contentHeight: conversationView.fittingHeight, geometry: geometry)

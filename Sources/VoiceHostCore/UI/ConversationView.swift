@@ -30,6 +30,14 @@ final class ConversationPanelView: NSView, NSTextViewDelegate {
     /// The list has been built once (an empty conversation still shows its note).
     private var built = false
     private var lastSent: String?
+    /// A message sent and not yet taken by the brain, and how many user rows there were then:
+    /// if its pending row goes without a new user row, the brain refused it and the text comes
+    /// back to the field.
+    private var awaiting: (text: String, userRows: Int)?
+    /// The failure shown in the status line (`update`'s `errorMessage`).
+    private var shownError: String?
+    /// Whether Shift is held (Return then starts a new line); the current event's flags.
+    var isShiftDown: () -> Bool = { NSApp.currentEvent?.modifierFlags.contains(.shift) == true }
 
     static let inset: CGFloat = 14
     static let headerHeight: CGFloat = 20
@@ -76,6 +84,9 @@ final class ConversationPanelView: NSView, NSTextViewDelegate {
 
     private func build() {
         titleLabel.stringValue = "Conversation"
+        // "Open in …" gives way first: the title never squeezes to nothing.
+        titleLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        openSessionButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         header.orientation = .horizontal
         header.spacing = 8
         header.translatesAutoresizingMaskIntoConstraints = false
@@ -175,8 +186,10 @@ final class ConversationPanelView: NSView, NSTextViewDelegate {
     // MARK: Content
 
     /// Shows `rows` in `mode`; `busy` while the agent works on a turn, `sessionLink` titles
-    /// "Open in …" (nil hides it). Rows are kept by id, so a streaming reply updates in place.
-    func update(rows: [ConversationRow], mode: Mode, busy: Bool, sessionLink: String?) {
+    /// "Open in …" (nil hides it), `errorMessage` is a failure shown above the field (a spoken or
+    /// typed turn the brain refused). Rows are kept by id and only a row whose content changed
+    /// is laid out again, so a streaming reply updates in place.
+    func update(rows: [ConversationRow], mode: Mode, busy: Bool, sessionLink: String?, errorMessage: String? = nil) {
         let modeChanged = mode != self.mode
         self.mode = mode
         self.busy = busy
@@ -185,6 +198,17 @@ final class ConversationPanelView: NSView, NSTextViewDelegate {
         openSessionButton.setAccessibilityLabel(sessionLink ?? "")
         if modeChanged { applyMode() }
         updatePlaceholder()
+        // A refused message comes back to the field before its reason shows (a text change
+        // clears the status line).
+        if rows != self.rows { settleAwaiting(rows) }
+        if errorMessage != shownError {
+            if let errorMessage {
+                showStatus(errorMessage)
+            } else if statusLabel.stringValue == shownError {
+                hideStatus()
+            }
+            shownError = errorMessage
+        }
         guard rows != self.rows || modeChanged || !built else { return }
         built = true
         let follow = followsBottom
@@ -298,7 +322,7 @@ final class ConversationPanelView: NSView, NSTextViewDelegate {
     func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         switch selector {
         case #selector(NSResponder.insertNewline(_:)):
-            if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
+            if isShiftDown() {
                 textView.insertNewlineIgnoringFieldEditor(nil)
             } else {
                 send()
@@ -327,10 +351,7 @@ final class ConversationPanelView: NSView, NSTextViewDelegate {
     }
 
     private func composerChanged() {
-        if !statusLabel.isHidden {
-            statusLabel.isHidden = true
-            statusLabel.stringValue = ""
-        }
+        if !statusLabel.isHidden { hideStatus() }
         composerHeight.constant = composer.fittingTextHeight
         composer.needsDisplay = true
     }
@@ -346,21 +367,66 @@ final class ConversationPanelView: NSView, NSTextViewDelegate {
         statusLabel.isHidden = false
     }
 
+    private func hideStatus() {
+        statusLabel.isHidden = true
+        statusLabel.stringValue = ""
+    }
+
+    /// The message above the field, while one shows.
+    var statusText: String? { statusLabel.isHidden ? nil : statusLabel.stringValue }
+
     func send() {
         let text = composer.string
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let userRows = rows.filter { $0.kind == .user && $0.pending != true }.count
+        awaiting = (trimmed, userRows)
         if let refusal = onSend?(text) {
+            awaiting = nil
             showStatus(refusal)
         } else {
-            lastSent = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            lastSent = trimmed
             composerText = ""
             scrollToBottom()
         }
     }
 
-    /// ⌘K clears the field; ⌘Y allows and ⌘N denies the newest approval waiting for an answer.
+    /// A message sent from the field is settled once its pending row goes: taken (a new user
+    /// row) or refused, when its text comes back to an empty field for another try.
+    private func settleAwaiting(_ rows: [ConversationRow]) {
+        guard let awaiting, !rows.contains(where: { $0.pending == true }) else { return }
+        self.awaiting = nil
+        let userRows = rows.filter { $0.kind == .user && $0.pending != true }.count
+        if userRows <= awaiting.userRows, composer.string.isEmpty { composerText = awaiting.text }
+    }
+
+    /// The edit command a key equivalent stands for: the field has no Edit menu to route
+    /// ⌘X, ⌘C, ⌘V, ⌘A, ⌘Z and ⇧⌘Z through (the voice host has no main menu, and one would
+    /// bring ⌘Q with it), so the panel sends them to the focused view itself.
+    static func editAction(for event: NSEvent) -> Selector? {
+        let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        switch (flags, event.charactersIgnoringModifiers?.lowercased()) {
+        case (.command, "x"): return #selector(NSText.cut(_:))
+        case (.command, "c"): return #selector(NSText.copy(_:))
+        case (.command, "v"): return #selector(NSText.paste(_:))
+        case (.command, "a"): return #selector(NSText.selectAll(_:))
+        case (.command, "z"): return Selector(("undo:"))
+        case ([.command, .shift], "z"): return Selector(("redo:"))
+        case ([.command, .option, .shift], "v"): return #selector(NSTextView.pasteAsPlainText(_:))
+        default: return nil
+        }
+    }
+
+    /// The standard edit commands (`editAction`) go to the focused view; in the expanded panel
+    /// ⌘K clears the field, and ⌘Y allows and ⌘N denies the newest approval waiting for an
+    /// answer. Caps Lock and the like do not matter.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        guard mode == .expanded, event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command else {
+        if let action = Self.editAction(for: event), let responder = window?.firstResponder,
+           responder.tryToPerform(action, with: self) {
+            return true
+        }
+        let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        guard mode == .expanded, flags == .command else {
             return super.performKeyEquivalent(with: event)
         }
         switch event.charactersIgnoringModifiers?.lowercased() {
@@ -572,7 +638,19 @@ final class ConversationRowView: NSView {
         }
     }
 
+    private struct Configuration: Equatable {
+        var row: ConversationRow
+        var width: CGFloat
+        var shortcuts: Bool
+    }
+
+    private var configuration: Configuration?
+
+    /// Shows `row` at `width`; nothing is redone while they are what the view already shows.
     func configure(_ row: ConversationRow, width: CGFloat, shortcuts: Bool) {
+        let wanted = Configuration(row: row, width: width, shortcuts: shortcuts)
+        guard wanted != configuration else { return }
+        configuration = wanted
         widthConstraint.constant = width
         let inner = width - content.edgeInsets.left - content.edgeInsets.right
         switch kind {
