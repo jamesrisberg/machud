@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-02T04:38:40Z",
+  "updatedAt": "2026-10-02T04:39:40Z",
   "hudkit": "0.3.0",
   "apps": [
     {
@@ -57,12 +57,12 @@
       "name": "Scratch",
       "kind": "hover",
       "summary": "A floating scratchpad with text transforms",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "minOS": "14.0",
-      "download": "https://github.com/jamesrisberg/scratch/releases/download/v0.2.0/Scratch-0.2.0.zip",
-      "sha256": "bb7fcadd5bf5c787a81fc1061804c069d083ef46db25f475c6045689a674c3c3",
-      "size": 1779837,
-      "publishedAt": "2026-09-29T11:24:10Z",
+      "download": "https://github.com/jamesrisberg/scratch/releases/download/v0.3.0/Scratch-0.3.0.zip",
+      "sha256": "dd4de2c673cfc7440b5c8736f7a0a5b00240b577f6cd5e89e131f18e44d59794",
+      "size": 2002544,
+      "publishedAt": "2026-10-02T04:39:40Z",
       "icon": "https://jamesrisberg.github.io/machud/icons/scratch.png",
       "homepage": "https://github.com/jamesrisberg/scratch",
       "bundled": true
