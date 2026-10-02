@@ -459,7 +459,7 @@ final class ToolDockControllerTests: XCTestCase {
 
     func testAPanelThatMissedTheScreenIsReportedForClicksNotPassingHovers() throws {
         var missed: [String] = []
-        externals.supervisor.windowProbe = { _ in .anotherDesktop }
+        externals.supervisor.windowProbe = { _, _ in .anotherDesktop }
         externals.supervisor.onShowMissed = { app, _, _ in missed.append(app) }
         let on = try centre(scratchID)
         dock.step(mouse: on, now: 10)

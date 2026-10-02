@@ -303,12 +303,15 @@ public final class MacHUDTools: @unchecked Sendable {
     }
 
     private func panelID(_ app: DiscoveredApp, _ args: Arguments) throws -> String {
-        guard let first = app.panels.first else { throw InvalidArgument("\(app.name) has no panels") }
+        let panels = app.dockPanels
+        guard let first = panels.first else {
+            throw InvalidArgument(app.widgetTypes.isEmpty ? "\(app.name) has no panels" : "\(app.name) serves only widgets (see widgets)")
+        }
         guard let key = try args.string("panel") else { return "\(app.id)/\(first.id)" }
         let short = key.hasPrefix(app.id + "/") ? String(key.dropFirst(app.id.count + 1)) : key
-        guard let panel = app.panels.first(where: { $0.id == short })
-                ?? app.panels.first(where: { $0.title.caseInsensitiveCompare(short) == .orderedSame }) else {
-            throw InvalidArgument("\(app.name) has no panel \(key); its panels: \(app.panels.map(\.id).joined(separator: ", "))")
+        guard let panel = panels.first(where: { $0.id == short })
+                ?? panels.first(where: { $0.title.caseInsensitiveCompare(short) == .orderedSame }) else {
+            throw InvalidArgument("\(app.name) has no panel \(key); its panels: \(panels.map(\.id).joined(separator: ", "))")
         }
         return "\(app.id)/\(panel.id)"
     }
@@ -337,11 +340,12 @@ public final class MacHUDTools: @unchecked Sendable {
             "app": app.id, "name": app.name, "health": app.health, "running": app.running,
             "outdated": app.outdated != nil, "olderContract": app.olderContract,
             "actions": app.actions,
-            "panels": app.panels.map { panel -> [String: Any] in
+            "panels": app.dockPanels.map { panel -> [String: Any] in
                 ["id": panel.id, "title": panel.title, "kind": panel.kind.rawValue,
                  "capabilities": panel.capabilities, "actions": DiscoveredApp.actions(of: panel)]
             },
         ]
+        if !app.widgetTypes.isEmpty { d["widgets"] = app.widgetTypes.map(\.id) }
         if let reason = app.outdated { d["outdatedReason"] = reason }
         return d
     }
@@ -423,7 +427,7 @@ public final class MacHUDTools: @unchecked Sendable {
             }
         out["apps"] = apps.map { app -> [String: Any] in
             var d = Self.describe(app)
-            d["panels"] = app.panels.map { panel -> [String: Any] in
+            d["panels"] = app.dockPanels.map { panel -> [String: Any] in
                 ["id": panel.id, "title": panel.title, "kind": panel.kind.rawValue,
                  "visible": panelStates["\(app.id)/\(panel.id)"] ?? false,
                  "capabilities": panel.capabilities, "actions": DiscoveredApp.actions(of: panel)]

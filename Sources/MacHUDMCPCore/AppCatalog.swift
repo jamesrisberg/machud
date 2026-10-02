@@ -28,6 +28,13 @@ public struct DiscoveredApp: Equatable, Sendable {
         self.panels = panels
     }
 
+    /// The panels MacHUD shows (hover and windowed), in manifest order: never widget types or
+    /// kinds this HUDKit does not know.
+    public var dockPanels: [HUDManifest.Panel] { panels.filter(\.kind.isDockKind) }
+
+    /// The widget types the app serves.
+    public var widgetTypes: [HUDManifest.Panel] { panels.filter { $0.kind == .widget } }
+
     /// The `action` verbs a panel's manifest declares, in manifest order.
     public static func actions(of panel: HUDManifest.Panel) -> [String] {
         panel.verbs.filter { !panelVerbs.contains($0) }

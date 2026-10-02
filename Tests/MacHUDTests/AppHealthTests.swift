@@ -32,7 +32,7 @@ final class AppHealthTests: XCTestCase {
         let supervisor = AppSupervisor(workspace: workspace, connector: connector, schedule: clock.schedule)
         supervisor.now = { [unowned self] in self.clock.now }
         supervisor.contractVersion = "0.2.0"
-        supervisor.windowProbe = { [unowned self] _ in self.probe }
+        supervisor.windowProbe = { [unowned self] _, _ in self.probe }
         supervisor.fileDate = { _ in nil }
         supervisor.bundleVersion = { _ in nil }
         supervisor.bundleExecutable = { _ in nil }

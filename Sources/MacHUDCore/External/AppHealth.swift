@@ -122,11 +122,19 @@ enum WindowPresence {
     }
 
     /// Any window on screen and over a display wins; else one on another desktop; else the
-    /// panel is off screen (ordered out, or placed beyond every display).
-    static func classify(_ windows: [Window], screens: [CGRect]) -> ShowOutcome {
+    /// panel is off screen (ordered out, or placed beyond every display). Windows at one of
+    /// the `ignoring` frames (the app's widgets MacHUD placed, which float while revealed or
+    /// edited) are not the panel and do not count.
+    static func classify(_ windows: [Window], screens: [CGRect], ignoring: [CGRect] = []) -> ShowOutcome {
+        let windows = windows.filter { w in !ignoring.contains { Self.sameFrame($0, w.frame) } }
         if windows.contains(where: { w in w.onScreen && screens.contains { $0.intersects(w.frame) } }) { return .onScreen }
         if windows.contains(where: { !$0.onScreen && ($0.spaces ?? 0) > 0 }) { return .anotherDesktop }
         return .offScreen
+    }
+
+    /// Within a couple of points: the window server rounds frames.
+    static func sameFrame(_ a: CGRect, _ b: CGRect) -> Bool {
+        abs(a.minX - b.minX) <= 2 && abs(a.minY - b.minY) <= 2 && abs(a.width - b.width) <= 2 && abs(a.height - b.height) <= 2
     }
 
     /// The windows of `pids` at or above the normal layer (a widget on the desktop layer or a
@@ -150,10 +158,11 @@ enum WindowPresence {
         }
     }
 
-    /// Where the app's panel is now; nil without a process to look at.
+    /// Where the app's panel is now, leaving out windows at the `ignoring` frames; nil without
+    /// a process to look at.
     @MainActor
-    static func probe(_ pids: Set<pid_t>) -> ShowOutcome? {
+    static func probe(_ pids: Set<pid_t>, ignoring: [CGRect] = []) -> ShowOutcome? {
         guard !pids.isEmpty else { return nil }
-        return classify(windows(pids: pids), screens: NSScreen.screens.map(\.frame))
+        return classify(windows(pids: pids), screens: NSScreen.screens.map(\.frame), ignoring: ignoring)
     }
 }

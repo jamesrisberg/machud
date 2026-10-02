@@ -105,7 +105,8 @@ final class AppSupervisor {
                                     "running": health == .running || health == .socketUnreachable,
                                     "reachable": health == .running, "autoLaunch": autoLaunch,
                                     "launchAttempts": launchAttempts,
-                                    "panels": app.manifest.panels.map { "\(app.id)/\($0.id)" }]
+                                    "panels": app.manifest.presentedPanels.map { "\(app.id)/\($0.id)" },
+                                    "widgets": app.manifest.widgetPanels.map(\.id)]
             if let manifest = Self.object(app.manifest) { d["manifest"] = manifest }
             if let lastError { d["lastError"] = lastError }
             return d
@@ -146,8 +147,11 @@ final class AppSupervisor {
     /// Every bundle declaring an app id (set from discovery's duplicates); empty when only
     /// the one in use does.
     var bundles: (String) -> [URL] = { _ in [] }
-    /// Where an app's panel is, given its processes; nil when it cannot tell.
-    var windowProbe: (Set<pid_t>) -> ShowOutcome? = { WindowPresence.probe($0) }
+    /// Where an app's panel is, given its processes and the frames of windows that are not
+    /// panels (`widgetFrames`); nil when it cannot tell.
+    var windowProbe: (Set<pid_t>, [CGRect]) -> ShowOutcome? = { WindowPresence.probe($0, ignoring: $1) }
+    /// The frames of the app's widget instances MacHUD placed (wired to the widget layer).
+    var widgetFrames: (String) -> [CGRect] = { _ in [] }
     /// A loud show (a click or summon, not a passing hover) did not reach the screen: app id,
     /// panel id and where it went.
     var onShowMissed: ((String, String, ShowOutcome) -> Void)?
@@ -524,7 +528,7 @@ final class AppSupervisor {
             // A parked panel is mostly past the screen edge, its orb under the window filter.
             guard let self, let record = self.records[id], record.health == .running,
                   let state = record.panels[panel], state.visible, state.mode != .parked else { return }
-            let outcome = self.windowProbe(Set(self.livePIDs(id))) ?? hint.map { $0 ? .onScreen : .anotherDesktop }
+            let outcome = self.windowProbe(Set(self.livePIDs(id)), self.widgetFrames(id)) ?? hint.map { $0 ? .onScreen : .anotherDesktop }
             guard let outcome else { return }
             if record.showChecks[panel] != outcome {
                 record.showChecks[panel] = outcome
