@@ -102,8 +102,13 @@ protocol ReplySpeaking: AnyObject {
     var isSpeaking: Bool { get }
     /// Everything appended and finished has been said (or speech failed).
     var onFinished: (() -> Void)? { get set }
+    /// A chunk of the reply starts playing; its `rawRange` counts `Character`s of everything
+    /// appended for the reply.
+    var onChunkStarted: ((SpeechChunk) -> Void)? { get set }
     /// The voice for the next reply.
     func configure(_ voice: VoiceSettings)
+    /// Gets the voice ready for a reply that is coming (loads the model); never plays.
+    func warmUp()
     func append(_ text: String)
     func finish()
     func stop()

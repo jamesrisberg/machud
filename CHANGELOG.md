@@ -15,6 +15,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   with ⌘Y and ⌘N. Talking to the orb keeps working while it is open.
 - Replies to typed messages are not spoken unless you turn on **Speak replies to typed
   messages** in the Voice settings.
+- While a reply is spoken, the card under the orb shows it in step with the voice, and the voice
+  gets ready while the agent is still thinking, so it starts sooner.
 - The conversation comes back after the voice host restarts, and starts again when the agent
   starts a new session. The orb's right-click menu has **Show Conversation**.
 - Scripts and agents get `machud voice conversation`, `machud voice say text=…` (a typed message)

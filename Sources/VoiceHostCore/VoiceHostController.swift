@@ -250,9 +250,12 @@ public final class VoiceHostController: VoiceHostActing {
             self?.loadHostContext()
         }
         speaker?.onFinished = { [weak self] in
-            guard let self, state.phase == .speaking else { return }
+            guard let self else { return }
+            revealWholeReply()
+            guard state.phase == .speaking else { return }
             state.phase = .idle
         }
+        speaker?.onChunkStarted = { [weak self] chunk in self?.chunkStarted(chunk) }
         wake?.onWake = { [weak self] in
             guard let self else { return }
             startTake(.agent, handsFree: true, fromKeys: false)
@@ -336,7 +339,7 @@ public final class VoiceHostController: VoiceHostActing {
             state.muted = muted
             if muted {
                 stopSpeech()
-                turn?.speaks = false
+                silenceTurn()
                 cancelTake()
             }
             refreshKeys()
@@ -421,6 +424,7 @@ public final class VoiceHostController: VoiceHostActing {
         guard turn != nil else { return }
         turn = nil
         speaker?.stop()
+        revealWholeReply()
         if take == nil, [.working, .awaitingApproval, .speaking].contains(state.phase) { settle(.idle) }
     }
 
@@ -437,7 +441,7 @@ public final class VoiceHostController: VoiceHostActing {
     private func startTake(_ mode: VoiceMode, handsFree: Bool, fromKeys: Bool) {
         stopSpeech()
         // A reply still streaming is never spoken into the open microphone.
-        turn?.speaks = false
+        silenceTurn()
         if !settings.enabled { return fail(Self.voiceOff) }
         if mode == .agent, !brainEnabled { return fail(Self.brainOff) }
         if mode == .agent, let problem = blockingBrainProblem { return fail(problem) }
@@ -701,6 +705,8 @@ public final class VoiceHostController: VoiceHostActing {
     /// brain takes it.
     private func begin(_ prompt: String, source: ConversationSource, isLatest: Bool, brain: BrainDriving) {
         stopSpeech()
+        // The voice loads while the brain thinks, so the first words come sooner.
+        if repliesSpoken(source) { speaker?.warmUp() }
         let requestId = UUID().uuidString
         submitting = requestId
         conversation.submitted(prompt, source: source)
@@ -720,17 +726,24 @@ public final class VoiceHostController: VoiceHostActing {
         }
     }
 
-    /// The brain took the turn: the card and the turn are ours from here. Its reply is spoken
-    /// with `voice.speakReplies` for a spoken turn and `speakTypedReplies` for a typed one.
+    /// A reply to a turn from `source` is spoken: with `voice.speakReplies` for a spoken turn
+    /// and `speakTypedReplies` for a typed one, never while muted or into a take recording.
+    private func repliesSpoken(_ source: ConversationSource) -> Bool {
+        let wanted = source == .typed ? settings.speakTypedReplies : settings.voice.speakReplies
+        return wanted && !state.muted && take == nil
+    }
+
+    /// The brain took the turn: the card and the turn are ours from here. A reply that is
+    /// spoken shows on the card in step with the voice (`VoiceCard.spokenUpTo`).
     private func accepted(_ prompt: String, requestId: String, source: ConversationSource, isLatest: Bool) {
         guard submitting == requestId else { return }
         submitting = nil
         conversation.accepted()
         conversationChanged()
-        let speaks = source == .typed ? settings.speakTypedReplies : settings.voice.speakReplies
-        turn = Turn(requestId: requestId, speaks: speaks && !state.muted && take == nil)
+        let speaks = repliesSpoken(source)
+        turn = Turn(requestId: requestId, speaks: speaks)
         var next = state
-        next.card = VoiceCard(prompt: prompt)
+        next.card = VoiceCard(prompt: prompt, spokenUpTo: speaks ? 0 : nil)
         if isLatest, take == nil {
             next.phase = .working
             next.inputLevel = 0
@@ -788,13 +801,16 @@ public final class VoiceHostController: VoiceHostActing {
                 sendToFeed(snapshot.output, source: Self.agentSource, title: next.card?.prompt)
             }
             next.phase = turn.speaks && isSpeaking ? .speaking : .idle
+            if next.phase != .speaking { next.card?.spokenUpTo = nil }
         case "interrupted":
             speaker?.stop()
             self.turn = nil
             next.phase = .idle
+            next.card?.spokenUpTo = nil
         case "failed":
             speaker?.stop()
             self.turn = nil
+            next.card?.spokenUpTo = nil
             state = next
             return fail(snapshot.error ?? "The brain stopped")
         default:
@@ -888,8 +904,25 @@ public final class VoiceHostController: VoiceHostActing {
     private func stopSpeech() {
         guard isSpeaking else { return }
         speaker?.stop()
-        turn?.speaks = false
+        silenceTurn()
         if state.phase == .speaking { state.phase = .idle }
+    }
+
+    /// The running turn's reply is not spoken from here on; the card shows all of it.
+    private func silenceTurn() {
+        turn?.speaks = false
+        revealWholeReply()
+    }
+
+    /// A chunk of the reply started playing: the card shows the reply up to its end. Chunks
+    /// only ever reveal more, and only while the card is paced (a preview's chunks are not).
+    private func chunkStarted(_ chunk: SpeechChunk) {
+        guard let shown = state.card?.spokenUpTo, chunk.rawRange.upperBound > shown else { return }
+        state.card?.spokenUpTo = chunk.rawRange.upperBound
+    }
+
+    private func revealWholeReply() {
+        if state.card?.spokenUpTo != nil { state.card?.spokenUpTo = nil }
     }
 
     // MARK: - Collaborators

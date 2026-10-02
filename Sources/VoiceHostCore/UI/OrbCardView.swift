@@ -141,7 +141,8 @@ final class OrbCardView: NSView {
         errorLabel.isHidden = errorMessage == nil
         promptRow.isHidden = card == nil
         promptLabel.stringValue = card?.prompt ?? ""
-        let reply = OrbCardText.replyTail(card?.reply ?? "")
+        // In step with the voice while the reply is spoken.
+        let reply = OrbCardText.replyTail(card?.shownReply ?? "")
         replyLabel.stringValue = reply
         replyLabel.isHidden = card == nil || reply.isEmpty
         let progress = OrbCardText.progressTail(card?.progress ?? [])
