@@ -13,8 +13,9 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   Speech is judged against the room's own noise, measured continuously, so soft speech in a quiet
   room counts and a click or a knock does not; a fan that starts mid-take can read as speech for
   up to 3 seconds. A take can run up to two minutes.
-- If it hears no speech at all for 10 seconds, the orb stops listening and says "Didn't hear
-  anything" instead of keeping the microphone open.
+- If it hears nothing that could be speech for 10 seconds (no words transcribed, nothing above a
+  whisper), the orb stops listening and says "Didn't hear anything" instead of keeping the
+  microphone open.
 - New **Hands-free** settings in the Voice tab: **End of turn** (Automatically, or When I tap),
   **Pause before sending** (1 to 4 seconds) and **Microphone sensitivity** (low, medium, high).
   Scripts use `machud voice settings set handsFree.pause=3` and friends; a value that is not one

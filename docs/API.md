@@ -677,9 +677,12 @@ noise can read as speech). Speech starts once the level has stayed at or above t
 0.018, 0.025 or 0.035) for 150 ms without falling below the quiet mark (halfway from the floor to
 the threshold); a shorter rise is not speech. Speech ends once the level has stayed below the
 quiet mark for 150 ms, and the quiet is counted from the start of that dip; a take never ends
-while a rise may be the start of a word. Silence before any speech never ends a take by a pause:
-with no speech 10 s into an automatic take it is thrown away (nothing is transcribed or sent) and
-the orb says "Didn't hear anything". With `manual` silence never ends the take: a tap on the orb
+while a rise may be the start of a word. Silence before any speech never ends a take by a pause.
+With no speech detected 10 s into an automatic take it is thrown away (nothing is transcribed or
+sent) and the orb says "Didn't hear anything", unless there was evidence of speech the threshold
+missed (a loud start leaves no quiet to measure the floor by): a partial transcript with letters,
+or levels at or above the sensitivity's minimum for 0.3 s in all. Then the take counts as heard
+and ends by a pause from there. With `manual` silence never ends the take: a tap on the orb
 or the fn key, or `action stop`, sends it. Either way a take stops after 120 s.
 
 `lastTakeEnd` says how the latest hands-free take ended: `{reason, seconds, quietMs?, floor?,
