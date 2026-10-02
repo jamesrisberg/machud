@@ -486,6 +486,7 @@ extension AppDelegate {
             c.widgets = widgets
             store.save(c)
         })
+        layer.grid = { [weak store] in store?.grid ?? .default }
         let supervisor = externals.supervisor
         externals.keepRunning = { [weak layer] in layer?.appsWithInstances ?? [] }
         supervisor.widgetFrames = { [weak layer] in layer?.frames(app: $0) ?? [] }
@@ -497,7 +498,14 @@ extension AppDelegate {
         layer.summon = { [weak machud] id in machud?.summon?(id) }
         layer.registerControl(control)
         let ui = WidgetUI(layer: layer)
-        layer.onChange = { [weak ui] in ui?.refresh() }
+        ui.regions = { [weak store] screen in
+            store?.activeLayout?.regions.map { $0.frame.cocoaRect(in: screen.visible) } ?? []
+        }
+        editor.widgets = layer
+        layer.onChange = { [weak ui, weak editor] in
+            ui?.refresh()
+            editor?.widgetsChanged()
+        }
         monitor.isWidget = { [weak layer] frame in layer?.isWidgetFrame(frame) ?? false }
         let previous = store.onChange
         store.onChange = { [weak self, weak layer] in

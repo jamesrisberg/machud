@@ -69,8 +69,8 @@ Each tool carries `annotations` (`readOnlyHint`, `destructiveHint`, `idempotentH
 | `feed_add` | `text`, `source?` (default `Agent`), `title?` | `feed add text= source= [title=]` |
 | `say` | `text` | `voice action name=say text=` |
 | `list_widgets` | | `widgets list` and `widgets types`: `{editing, revealed, grid, instances[], types[]}` as those commands give them |
-| `add_widget` | `type`, `app?`, `size?`, `screen?`, `col?` and `row?` (both or neither), `layer?` (`desktop`, `float`), `settings?` (an object) | `widgets add type= [app=] [size=] [screen=] [col= row=] [layer=] [settings=<JSON>]` |
-| `change_widget` | `instance`, `action` (`remove`, `move`, `resize`, `layer`, `settings`); for move `col`, `row`, `screen?`; for resize `size`; for layer `layer`; for settings `settings` (an object, `null` removes a key) | `widgets <action> instance= …` |
+| `add_widget` | `type`, `app?`, `size?`, `screen?`, a position: `x?` and `y?` (fractions 0-1 of the visible frame from its top-left) or `col?` and `row?` (layout-grid line indices); each pair both or neither, not both pairs; `layer?` (`desktop`, `float`), `settings?` (an object) | `widgets add type= [app=] [size=] [screen=] [x= y= \| col= row=] [layer=] [settings=<JSON>]` |
+| `change_widget` | `instance`, `action` (`remove`, `move`, `resize`, `layer`, `settings`); for move `x` and `y` or `col` and `row` (as for `add_widget`), `screen?`; for resize `size`; for layer `layer`; for settings `settings` (an object, `null` removes a key) | `widgets <action> instance= …` |
 | `widget_mode` | `mode` (`edit`, `reveal`), `state?` (`on`, `off`, `toggle`; default toggle) | `widgets edit\|reveal state=` |
 
 `app` is an app's bundle id (the schema's `enum` lists the discovered apps) or its name. `panel`
