@@ -6,12 +6,76 @@ import HUDKit
 @MainActor
 enum OrbSnapshot {
     static let canvas = CGSize(width: 560, height: 470)
+    /// Room for the expanded conversation (640 wide, 70% of the height) and its scrim.
+    static let conversationCanvas = CGSize(width: 900, height: 760)
 
     /// A notched screen whose top edge is the canvas's top edge.
-    static var geometry: HUDNotchGeometry {
+    static var geometry: HUDNotchGeometry { geometry(for: canvas) }
+
+    static func geometry(for canvas: CGSize) -> HUDNotchGeometry {
         HUDNotchGeometry(screenFrame: CGRect(origin: .zero, size: canvas),
                          visibleFrame: CGRect(x: 0, y: 0, width: canvas.width, height: canvas.height - 32),
                          safeAreaInsetTop: 32, notchWidth: 185)
+    }
+
+    /// Renders the pinned or expanded conversation (`state.cardMode`) with `rows`, under the
+    /// orb for `state`, on `conversationCanvas`; expanded with the scrim, `composerText` in the
+    /// field and `status` above it (a refusal, as after a send).
+    static func renderConversation(_ state: VoiceHostState, rows: [ConversationRow], composerText: String = "",
+                                   status: String? = nil) -> NSBitmapImageRep? {
+        let canvas = conversationCanvas
+        let geometry = geometry(for: canvas)
+        var tracker = OrbSceneTracker()
+        tracker.ingest(state, now: Date())
+        let scene = tracker.scene(now: Date())
+        var animator = OrbAnimator(stretch: OrbAnimator.target(for: scene), float: OrbAnimator.floatTarget(for: scene, reduceMotion: false))
+        for _ in 0..<20 { animator.advance(dt: 1.0 / 60, scene: scene, level: state.inputLevel, reduceMotion: false) }
+
+        let root = SnapshotBackdrop(frame: CGRect(origin: .zero, size: canvas))
+        root.appearance = NSAppearance(named: .darkAqua)
+        let expanded = state.cardMode == .expanded
+        if expanded {
+            let scrim = ConversationScrimView(frame: root.bounds)
+            root.addSubview(scrim)
+        }
+        let panel = ConversationPanelView(frame: .zero)
+        panel.panelWidth = expanded ? OrbLayout.expandedFrame(geometry: geometry).width : OrbLayout.pinnedWidth
+        let link = state.sessionKey == nil ? nil : OrbSceneTracker.sessionLink(provider: state.sessionProvider)
+        panel.update(rows: rows, mode: expanded ? .expanded : .pinned,
+                     busy: state.phase == .working || state.phase == .awaitingApproval, sessionLink: link)
+        if expanded {
+            panel.composerText = composerText
+            if let status { panel.showStatus(status) }
+        }
+        panel.frame = expanded
+            ? OrbLayout.expandedFrame(geometry: geometry)
+            : OrbLayout.pinnedFrame(contentHeight: panel.fittingHeight, geometry: geometry)
+        root.addSubview(panel)
+        panel.layoutSubtreeIfNeeded()
+        panel.scrollToBottom()
+
+        let orbSize = OrbLayout.windowSize(stretch: animator.stretch, geometry: geometry)
+        let orb = OrbView(frame: geometry.anchorFrame(for: orbSize), geometry: geometry)
+        orb.scene = scene
+        orb.animator = animator
+        root.addSubview(orb)
+        return draw(root, canvas: canvas)
+    }
+
+    private static func draw(_ root: NSView, canvas: CGSize) -> NSBitmapImageRep? {
+        let scale: CGFloat = 2
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(canvas.width * scale),
+                                         pixelsHigh: Int(canvas.height * scale), bitsPerSample: 8, samplesPerPixel: 4,
+                                         hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                                         bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
+        rep.size = canvas
+        root.layoutSubtreeIfNeeded()
+        var result: NSBitmapImageRep?
+        root.appearance?.performAsCurrentDrawingAppearance {
+            root.cacheDisplay(in: root.bounds, to: rep)
+            result = rep
+        }
+        return result
     }
 
     /// Renders `state` with the morph at `stretch` (nil: settled for the state), the input
@@ -63,19 +127,7 @@ enum OrbSnapshot {
             }
         }
 
-        let scale: CGFloat = 2
-        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(canvas.width * scale),
-                                         pixelsHigh: Int(canvas.height * scale), bitsPerSample: 8, samplesPerPixel: 4,
-                                         hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
-                                         bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
-        rep.size = canvas
-        root.layoutSubtreeIfNeeded()
-        var result: NSBitmapImageRep?
-        root.appearance?.performAsCurrentDrawingAppearance {
-            root.cacheDisplay(in: root.bounds, to: rep)
-            result = rep
-        }
-        return result
+        return draw(root, canvas: canvas)
     }
 
     static func write(_ rep: NSBitmapImageRep, to url: URL) throws {
