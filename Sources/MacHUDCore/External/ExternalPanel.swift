@@ -40,22 +40,36 @@ final class ExternalPanel: Panel {
         health == .running && (descriptor.verbs.isEmpty || descriptor.verbs.contains("frame"))
     }
 
+    /// Plain shows (`panel show`, a loadout slot) record a miss quietly: a loadout may place
+    /// the panel on a desktop it is visiting. A HUD loadout sends its shows to the app
+    /// directly, unverified.
     func show() { visibility("show", assume: true) }
     func hide() { visibility("hide", assume: false) }
     func toggle() { visibility("toggle", assume: !isVisible) }
 
     /// `panel show` with how to appear: `HUDPanelTransition.options` (`from=`, `anchor=`,
-    /// `reason=`), so a panel can slide out of its dock button.
-    func show(_ transition: HUDPanelTransition, completion: ((Result<[String: Any], Error>) -> Void)? = nil) {
-        visibility("show", assume: true, options: transition.options, completion: completion)
+    /// `reason=`), so a panel can slide out of its dock button. `loud` (default: any reason
+    /// but `hover`) reports a panel that did not reach the screen (see `verifyShow`).
+    func show(_ transition: HUDPanelTransition, loud: Bool? = nil,
+              completion: ((Result<[String: Any], Error>) -> Void)? = nil) {
+        visibility("show", assume: true, loud: loud ?? (transition.reason != .hover), options: transition.options,
+                   completion: completion)
     }
     /// `panel hide` with `to=` (and `anchor=`, `reason=`).
     func hide(_ transition: HUDPanelTransition) { visibility("hide", assume: false, options: transition.options) }
 
-    private func visibility(_ verb: String, assume visible: Bool, options: [String: String] = [:],
+    /// A show the app accepted is checked against the window list once it has had time to
+    /// appear, since an app can answer `visible: true` for a window on another desktop.
+    private func visibility(_ verb: String, assume visible: Bool, loud: Bool = false, options: [String: String] = [:],
                             completion: ((Result<[String: Any], Error>) -> Void)? = nil) {
         supervisor.assume(app.id, panel: descriptor.id, visible: visible)
-        send("panel", options.merging(["action": verb, "id": descriptor.id]) { _, b in b }, completion: completion)
+        let appID = app.id, panelID = descriptor.id, supervisor = supervisor
+        send("panel", options.merging(["action": verb, "id": panelID]) { _, b in b }) { result in
+            if visible, case .success(let reply) = result, reply["ok"] as? Bool != false {
+                supervisor.verifyShow(appID, panel: panelID, loud: loud, hint: reply["onActiveSpace"] as? Bool)
+            }
+            completion?(result)
+        }
     }
 
     /// Takes files dropped on its dock button (`acceptsFileDrop`).
@@ -138,6 +152,10 @@ final class ExternalPanel: Panel {
                                 "cooperative": isCooperative]
         if let badge = state.badge { d["badge"] = badge }
         if let status = state.status { d["status"] = status }
+        if isVisible, let check = supervisor.record(app.id)?.showChecks[descriptor.id] {
+            d["onScreen"] = check.isOnScreen
+            if case .elsewhere(let place) = check { d["elsewhere"] = place }
+        }
         let frames = WindowList.frames(pids: Set(supervisor.livePIDs(app.id)))
         if !frames.isEmpty {
             d["frames"] = frames.map { ["x": Int($0.minX), "y": Int($0.minY), "w": Int($0.width), "h": Int($0.height)] }

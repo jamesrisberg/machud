@@ -54,13 +54,13 @@ Each tool carries `annotations` (`readOnlyHint`, `destructiveHint`, `idempotentH
 
 | Tool | Arguments | MacHUD commands |
 |---|---|---|
-| `machud_status` | | `apps`, `panels`, `screens`, `loadouts`, `status`, `tooldock`, `park list`, `voice status` and `voice state`: `apps[] {app, name, health, running, actions[], panels[] {id, title, kind, visible, capabilities, actions}}`, `screens[] {index, name, main, builtin, w, h, spaces, currentSpace}`, `loadouts` (as `list_loadouts`), `toolDock {enabled, position, visible, autoHide, screenName}`, `parked[]`, `voice {status, connected, muted, phase, brainAvailable, brainProblem, sessionKey, sessionProvider, wakeListening}`. A part MacHUD cannot give is named in `unavailable {part: why}`; MacHUD not running fails the call |
+| `machud_status` | | `apps`, `panels`, `screens`, `loadouts`, `status`, `tooldock`, `park list`, `voice status` and `voice state`: `apps[] {app, name, health, running, outdated, outdatedReason?, olderContract, actions[], panels[] {id, title, kind, visible, capabilities, actions}}`, `screens[] {index, name, main, builtin, w, h, spaces, currentSpace}`, `loadouts` (as `list_loadouts`), `toolDock {enabled, position, visible, autoHide, screenName}`, `parked[]`, `voice {status, connected, muted, phase, brainAvailable, brainProblem, sessionKey, sessionProvider, wakeListening}`. A part MacHUD cannot give is named in `unavailable {part: why}`; MacHUD not running fails the call |
 | `list_loadouts` | | `loadouts`, `status`: `loadouts[] {name, layout?, windows, screens?, hud, hotkey?, startup, lastApplied}` (`lastApplied` is `status`'s `activeLoadout`) |
 | `apply_loadout` | `name`, `clear?`, `screen?`, `dry_run?` | `apply loadout= [clear=1] [screen=] [plan=1]` |
 | `capture_loadout` | `name`, `all_screens?`, `screen?`, `hud?` (`none`, `include`, `only`) | `capture name= [screens=all \| screen=] [hud=1 \| hud=only]` |
 | `show_panel` / `hide_panel` | `app`, `panel?` | `summon` / `dismiss id=<app>/<panel>` (the tool dock's show and hide: remembered frames, hover panels by their button) |
 | `toggle_panel` | `app`, `panel?` | `panels`, then `summon` or `dismiss` by the panel's `visible` |
-| `list_app_actions` | `app` | none (the apps last read): `{app, name, health, running, actions[], panels[] {id, title, kind, capabilities, actions}}` |
+| `list_app_actions` | `app` | none (the apps last read): `{app, name, health, running, outdated, outdatedReason?, olderContract, actions[], panels[] {id, title, kind, capabilities, actions}}` |
 | `app_action` | `app`, `verb`, `args?` (an object; values sent as strings) | `apps perform app= verb= <args>`. `verb` must be one of the app's action verbs, else a tool error that lists them; `args` may not use `action`, `_`, `perform`, `app`, `verb` or `name` |
 | `tool_dock` | `action?` (`state`, `show`, `hide`, `position`), `position?` (the eight `HUDDockPosition`s), `screen?` | `tooldock action=…` |
 | `park_window` | exactly one of `region`, `window`, `app` (+ `title?`); `edge?`, `peek?` | `park id=<region> \| window= \| app= [title=] [edge=] [peek=]` |

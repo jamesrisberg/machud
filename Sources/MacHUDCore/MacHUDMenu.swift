@@ -2,9 +2,10 @@ import AppKit
 import HUDKit
 
 /// The umbrella bits of MacHUD that sit on top of the external panel registry:
-/// the shared settings window (`settings-window`) and the status menu's "Apps" section
-/// (Launch All and Quit All, then each discovered app with Show, its own status menu fetched
-/// live, park/reveal, its settings and Quit/Launch).
+/// the shared settings window (`settings-window`), the status menu's "Apps" section
+/// (Launch All, Quit All and Relaunch Outdated, then each discovered app with Show, its own
+/// status menu fetched live, park/reveal, its settings, Relaunch and Quit/Launch), and the
+/// toast for a panel that opened somewhere the user cannot see it.
 @MainActor
 final class MacHUDServices: NSObject {
     let externals: ExternalPanels
@@ -20,6 +21,16 @@ final class MacHUDServices: NSObject {
             guard let self, let app = self.externals.app(matching: id) else { return }
             _ = self.externals.launch(app, manual: true)
         }
+        externals.supervisor.onShowMissed = { [weak self] appID, _, outcome in self?.showMissed(appID, outcome) }
+    }
+
+    /// A clicked or summoned panel is not on this desktop: say where it went and what fixes it.
+    private func showMissed(_ appID: String, _ outcome: ShowOutcome) {
+        let name = externals.app(matching: appID)?.name ?? appID
+        let outdated = externals.supervisor.buildStatus(appID)?.outdated != nil
+        Toast.show(MacHUDMenuModel.missedText(name, outcome),
+                   detail: "Fix: Relaunch \(name) (MacHUD menu › \(name))" + (outdated ? ", it runs an older build" : ""),
+                   seconds: 4)
     }
 
     /// MacHUD itself first, then every discovered app by name.
@@ -72,25 +83,39 @@ final class MacHUDServices: NSObject {
     var liveMenus: () -> Bool = { true }
     /// Per-app submenu delegates of the menu currently built, by app id.
     private var submenus: [String: AppSubmenu] = [:]
+    /// Each running app's build status, read once per menu build (it reads files) and
+    /// reused as its submenu is filled and refilled.
+    private var buildStatuses: [String: AppBuildStatus] = [:]
+    private func cachedStatus(_ id: String) -> AppBuildStatus? { buildStatuses[id] }
 
-    /// The status menu's Apps section: Launch All and Quit All, then a submenu per
+    /// The status menu's Apps section: Launch All and Quit All (and Relaunch Outdated Apps
+    /// while an app runs an older build than its bundle on disk), then a submenu per
     /// discovered app with "Show <App>", the app's own status menu (fetched live), MacHUD's
-    /// controls for it, and Quit or Launch.
+    /// controls for it, Relaunch, and Quit or Launch.
     func menuItems() -> [NSMenuItem] {
         var items: [NSMenuItem] = []
         let header = NSMenuItem(title: "Apps", action: nil, keyEquivalent: "")
         header.isEnabled = false
         items.append(header)
         let bulk = MacHUDMenuModel.bulk(externals: externals)
-        for (title, enabled, selector) in [("Launch All Apps", bulk.canLaunch, #selector(launchAll)),
-                                           ("Quit All Apps", bulk.canQuit, #selector(quitAll))] {
+        buildStatuses = [:]
+        for app in externals.apps {
+            if let status = externals.supervisor.buildStatus(app.id) { buildStatuses[app.id] = status }
+        }
+        var bulkItems = [("Launch All Apps", bulk.canLaunch, #selector(launchAll)),
+                         ("Quit All Apps", bulk.canQuit, #selector(quitAll))]
+        if MacHUDMenuModel.hasOutdated(externals: externals, buildStatus: cachedStatus) {
+            bulkItems.append(("Relaunch Outdated Apps", true, #selector(relaunchOutdated)))
+        }
+        for (title, enabled, selector) in bulkItems {
             let mi = NSMenuItem(title: title, action: selector, keyEquivalent: "")
             mi.target = self
             mi.isEnabled = enabled
             items.append(mi)
         }
         let live = liveMenus()
-        let entries = MacHUDMenuModel.entries(externals: externals, liveMenus: live, mode: { [host] in host.mode(of: $0) })
+        let entries = MacHUDMenuModel.entries(externals: externals, liveMenus: live, buildStatus: cachedStatus,
+                                              mode: { [host] in host.mode(of: $0) })
         if entries.isEmpty {
             let none = NSMenuItem(title: "No MacHUD apps found", action: nil, keyEquivalent: "")
             none.isEnabled = false
@@ -121,7 +146,7 @@ final class MacHUDServices: NSObject {
     func fill(_ menu: NSMenu, appID: String) {
         menu.removeAllItems()
         let live = liveMenus()
-        guard let entry = MacHUDMenuModel.entries(externals: externals, liveMenus: live,
+        guard let entry = MacHUDMenuModel.entries(externals: externals, liveMenus: live, buildStatus: cachedStatus,
                                                   mode: { [host] in host.mode(of: $0) }).first(where: { $0.appID == appID })
         else { return }
         for action in entry.actions {
@@ -148,6 +173,7 @@ final class MacHUDServices: NSObject {
                 mi.target = self
                 mi.representedObject = action
                 if let on = action.isOn { mi.state = on ? .on : .off }
+                mi.isEnabled = action.isEnabled
                 menu.addItem(mi)
             }
         }
@@ -179,6 +205,18 @@ final class MacHUDServices: NSObject {
 
     @objc private func quitAll() { externals.quitAll() }
 
+    @objc private func relaunchOutdated() {
+        externals.relaunchAll(outdatedOnly: true) { [weak self] results in self?.reportRelaunch(results) }
+    }
+
+    /// Toasts the apps a relaunch could not bring back; a clean relaunch is its own feedback.
+    private func reportRelaunch(_ results: [String: [String: Any]]) {
+        let failed = results.compactMapValues { $0["error"] as? String }
+        guard !failed.isEmpty else { return }
+        let names = failed.keys.map { externals.app(matching: $0)?.name ?? $0 }.sorted()
+        Toast.show("Could not relaunch \(names.joined(separator: ", "))", detail: failed.values.sorted().joined(separator: "\n"))
+    }
+
     @objc private func appMenuAction(_ sender: NSMenuItem) {
         guard let ref = sender.representedObject as? AppMenuRef else { return }
         let name = externals.app(matching: ref.appID)?.name ?? ref.appID
@@ -197,6 +235,7 @@ final class MacHUDServices: NSObject {
         case .status, .separator, .appMenu: break
         case .launch: _ = externals.launch(app, manual: true)
         case .quit: externals.supervisor.quit(app.id) { _ in }
+        case .relaunch: externals.relaunch(app.id) { [weak self] in self?.reportRelaunch([app.id: $0]) }
         case .summon:
             if let summon { summon(action.panelID ?? "") } else { externals.registry.show(action.panelID ?? "") }
         case .show: externals.registry.show(action.panelID ?? "")
@@ -244,7 +283,7 @@ final class AppSubmenu: NSObject, NSMenuDelegate {
 enum MacHUDMenuModel {
     final class Action: NSObject {
         enum Kind: Equatable {
-            case status, launch, quit, summon, show, hide, park, reveal, settings
+            case status, launch, quit, relaunch, summon, show, hide, park, reveal, settings
             /// "Show on Tool Dock": a checkmark item.
             case dockToggle
             /// Where the app's own menu goes; `separator` between groups.
@@ -256,13 +295,16 @@ enum MacHUDMenuModel {
         let panelID: String?
         /// Checkmark state, for toggles.
         let isOn: Bool?
+        let isEnabled: Bool
 
-        init(_ kind: Kind, _ title: String, appID: String, panelID: String? = nil, isOn: Bool? = nil) {
+        init(_ kind: Kind, _ title: String, appID: String, panelID: String? = nil, isOn: Bool? = nil,
+             isEnabled: Bool = true) {
             self.kind = kind
             self.title = title
             self.appID = appID
             self.panelID = panelID
             self.isOn = isOn
+            self.isEnabled = isEnabled
         }
     }
 
@@ -280,12 +322,29 @@ enum MacHUDMenuModel {
         var actions: [Action]
     }
 
-    /// Per app: "Show <App>" (summon) per panel; a status line unless simply running or
-    /// stopped; the app's own menu (`liveMenus`, running apps only); hide/park/reveal per
-    /// panel; whether it is on the tool dock; its settings; then Quit or Launch.
+    /// Whether any app runs an older build than its bundle on disk (Relaunch Outdated Apps).
+    /// `buildStatus` defaults to reading it now.
     @MainActor
-    static func entries(externals: ExternalPanels, liveMenus: Bool = true, mode: (Panel) -> HUDPanelMode) -> [Entry] {
+    static func hasOutdated(externals: ExternalPanels, buildStatus: ((String) -> AppBuildStatus?)? = nil) -> Bool {
+        let status = buildStatus ?? externals.supervisor.buildStatus
+        return externals.apps.contains { status($0.id)?.outdated != nil }
+    }
+
+    /// The toast for a shown panel that is not on this desktop.
+    static func missedText(_ name: String, _ outcome: ShowOutcome) -> String {
+        outcome == .anotherDesktop ? "\(name)'s panel opened on another desktop" : "\(name)'s panel did not reach the screen"
+    }
+
+    /// Per app: "Show <App>" (summon) per panel; status lines (health unless simply running
+    /// or stopped, an update waiting for a relaunch, an older contract, a panel that opened
+    /// out of sight); the app's own menu (`liveMenus`, running apps only); hide/park/reveal
+    /// per panel; whether it is on the tool dock; its settings; then Relaunch (while it is
+    /// up, disabled while one runs) and Quit, or Launch. `buildStatus` defaults to reading it now.
+    @MainActor
+    static func entries(externals: ExternalPanels, liveMenus: Bool = true,
+                        buildStatus: ((String) -> AppBuildStatus?)? = nil, mode: (Panel) -> HUDPanelMode) -> [Entry] {
         let hiddenFromDock = externals.config().hiddenFromDock
+        let buildStatus = buildStatus ?? externals.supervisor.buildStatus
         return externals.apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }.map { app in
             let health = externals.supervisor.record(app.id)?.health ?? .notRunning
             let running = health == .running
@@ -299,6 +358,16 @@ enum MacHUDMenuModel {
             }
             if health != .running && health != .notRunning {
                 actions.append(Action(.status, statusText(health), appID: app.id))
+            }
+            if let build = buildStatus(app.id) {
+                if build.outdated != nil { actions.append(Action(.status, "Update ready, relaunch to apply", appID: app.id)) }
+                if build.contract?.older == true { actions.append(Action(.status, "Built for an older MacHUD", appID: app.id)) }
+            }
+            let checks = externals.supervisor.record(app.id)?.showChecks ?? [:]
+            for panel in panels where panel.isVisible {
+                guard let check = checks[panel.panelID], !check.isOnScreen else { continue }
+                actions.append(Action(.status, check == .anotherDesktop ? "Panel opened on another desktop" : "Panel is off screen",
+                                      appID: app.id, panelID: panel.id))
             }
             actions.append(Action(.separator, "", appID: app.id))
             if liveMenus && running {
@@ -318,9 +387,13 @@ enum MacHUDMenuModel {
             actions.append(Action(.dockToggle, "Show on Tool Dock", appID: app.id, isOn: !hiddenFromDock.contains(app.id)))
             actions.append(Action(.settings, "\(app.name) Settings…", appID: app.id))
             actions.append(Action(.separator, "", appID: app.id))
-            actions.append(externals.isUp(app.id)
-                           ? Action(.quit, "Quit \(app.name)", appID: app.id)
-                           : Action(.launch, "Launch \(app.name)", appID: app.id))
+            if externals.isUp(app.id) {
+                actions.append(Action(.relaunch, "Relaunch \(app.name)", appID: app.id,
+                                      isEnabled: externals.supervisor.record(app.id)?.relaunching != true))
+                actions.append(Action(.quit, "Quit \(app.name)", appID: app.id))
+            } else {
+                actions.append(Action(.launch, "Launch \(app.name)", appID: app.id))
+            }
             let dot = running ? "●" : "○"
             return Entry(appID: app.id, title: "\(dot) \(app.name)",
                          symbol: app.manifest.panels.first?.symbol ?? "app", actions: actions)

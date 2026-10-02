@@ -46,7 +46,7 @@ final class AppSupervisorTests: XCTestCase {
         connector.stateReply = ["ok": true, "panels": [["id": "portal", "visible": true, "mode": "compact", "badge": 3]]]
         supervisor.update(apps: [app], autoLaunch: [])
         XCTAssertEqual(health, .running)
-        XCTAssertEqual(connector.requests.map(\.command), ["state"], "state is seeded after subscribing")
+        XCTAssertEqual(connector.requests.map(\.command), ["state", "hello"], "state is seeded and hello asked after subscribing")
         XCTAssertEqual(supervisor.record(id)?.panels["portal"], HUDPanelState(id: "portal", visible: true, mode: .compact, badge: "3"))
 
         // Pushed partial update.
@@ -90,8 +90,8 @@ final class AppSupervisorTests: XCTestCase {
         XCTAssertEqual(health, .socketUnreachable)
         clock.runQueued()                                    // the post-launch connect
         XCTAssertEqual(health, .running)
-        XCTAssertEqual(connector.requests.map(\.command), ["state", "panel"])
-        XCTAssertEqual(connector.requests.last?.args["action"], "show")
+        XCTAssertEqual(connector.requests.map(\.command), ["state", "panel", "hello"], "queued commands before hello")
+        XCTAssertEqual(connector.requests.first { $0.command == "panel" }?.args["action"], "show")
         if case .success = reply {} else { XCTFail("queued command should have been sent") }
     }
 

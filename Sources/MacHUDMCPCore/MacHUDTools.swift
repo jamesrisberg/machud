@@ -333,14 +333,17 @@ public final class MacHUDTools: @unchecked Sendable {
     }
 
     static func describe(_ app: DiscoveredApp) -> [String: Any] {
-        [
+        var d: [String: Any] = [
             "app": app.id, "name": app.name, "health": app.health, "running": app.running,
+            "outdated": app.outdated != nil, "olderContract": app.olderContract,
             "actions": app.actions,
             "panels": app.panels.map { panel -> [String: Any] in
                 ["id": panel.id, "title": panel.title, "kind": panel.kind.rawValue,
                  "capabilities": panel.capabilities, "actions": DiscoveredApp.actions(of: panel)]
             },
         ]
+        if let reason = app.outdated { d["outdatedReason"] = reason }
+        return d
     }
 
     /// Argument names MacHUD's `apps perform` keeps for itself, and `name` (the verb).

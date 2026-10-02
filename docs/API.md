@@ -32,8 +32,8 @@ display). Region geometry in `layouts` is fractions of the screen's visible area
 | `status` | `screen=<ref>` (optional) | `layout`, `activeLoadout`, `regions[] {region, name, x, y, w, h, screen, space, occupant?, window?, iou, fits}` — what sits in each region now, plus `redirected[]` when the last apply had to stand in for a missing display |
 | `screens` | | `screens[] {index, name, persistentID, main, builtin, x, y, w, h, spaces, currentSpace}`; `persistentID` (`<vendor>-<model>-<serial>`, hex) is what loadouts pin displays to |
 | `spaces` | `screen=<ref>` (optional) | desktop count, current desktop, which Mission Control shortcuts are enabled, `privateAPI` |
-| `panels` | | `panels[] {id, title, visible}` — MacHUD's own windows (`web:<url>`), `menubar` and `tooldock`, then sibling apps' panels with `app`, `panel` (the app's own id), `health`, `cooperative`, `mode`, `badge`/`status` when the app reports them, and `frames[] {x, y, w, h}` (its on-screen windows on any layer, largest first, parked ones included). External ids are `<app bundle id>/<panel id>` |
-| `apps` | | MacHUD-aware apps found by manifest: `apps[] {id, name, bundle, socket, health, running, reachable, autoLaunch, launchAttempts, panels[], manifest, lastError?, duplicates?}` (`panels` are the full panel ids, `manifest` the app's `machud.json` as MacHUD read it, each panel's `verbs` and `capabilities` included), plus `known[]` (announced bundles), `failures[]` for unreadable manifests and `duplicates {id: [bundle]}` for ids declared by several bundles. `health` is `running` (subscribed), `socketUnreachable`, `launching`, `notRunning` or `notInstalled` |
+| `panels` | | `panels[] {id, title, visible}` — MacHUD's own windows (`web:<url>`), `menubar` and `tooldock`, then sibling apps' panels with `app`, `panel` (the app's own id), `health`, `cooperative`, `mode`, `badge`/`status` when the app reports them, `frames[] {x, y, w, h}` (its on-screen windows on any layer, largest first, parked ones included), and for a visible panel MacHUD showed, `onScreen` plus `elsewhere` (`"another desktop"` or `"off screen"`) when it is not (see Show verification). External ids are `<app bundle id>/<panel id>` |
+| `apps` | | MacHUD-aware apps found by manifest: `apps[] {id, name, bundle, socket, health, running, reachable, autoLaunch, launchAttempts, panels[], manifest, lastError?, duplicates?, outdated?, outdatedReason?, newerCopy?, newerCopyVersion?, newerCopyBuilt?, contract?}` (`panels` are the full panel ids, `manifest` the app's `machud.json` as MacHUD read it, each panel's `verbs` and `capabilities` included), plus `known[]` (announced bundles), `failures[]` for unreadable manifests and `duplicates {id: [bundle]}` for ids declared by several bundles. `health` is `running` (subscribed), `socketUnreachable`, `launching`, `notRunning` or `notInstalled`. A running app also has `outdated`: the bundle it runs from is newer than the process (rebuilt after the process started, or a different `CFBundleShortVersionString` than its `hello` reported), so a relaunch picks something up; `outdatedReason` says which. `newerCopy` (with `newerCopyVersion` and `newerCopyBuilt`) names another bundle declaring the same id whose build is newer than the one running, for information only: a relaunch restarts the bundle the app runs from and never switches copies. Once it answered `hello` it also has `contract {app, machud, older}` (the HUDKit contracts as `major.minor`; `older` when the app's is behind MacHUD's; MacHUD still talks to it) |
 | `menu` | | radial wheel description: `wedges[] {index, title, digit, angleStart/Center/End, kind, rings[]}` (the ring labels inside out), `rings` (radii), `visible`, current `selection`. A loadout wedge's rings are Preview / Apply / Clear this screen + Apply (P over a loadout wedge previews it too); the capture wedge's are Capture this screen / Capture all screens / Draw a new layout; the park wedge has two: Park front window / Restore parked |
 
 ## Layouts and loadouts
@@ -281,6 +281,8 @@ its `Info.plist` and `machud.json`), else the first found. `apps` reports every 
 | `apps place` | `id=<bundle id or name>` | apply the app's configured placement now |
 | `apps quit` | `id=<bundle id or name>` | `quit` over the app's socket, else a terminate event; returns `wasRunning`. An app quit this way is not relaunched |
 | `apps quit-all` | | quit every running (or launching, or unanswering) app as `apps quit` does; answers once all have replied with `quit {id: "quit" or error}` |
+| `apps relaunch` | `id=<bundle id or name>` | refuses, leaving the app running, when the bundle it runs from is gone (a build in progress); else quits the app, waits up to 10 s for its process to exit and its termination to be announced (an app that ignores the quit is then force-quit, with 3 s more), launches the bundle it was running from again (as `apps launch`; never another copy declaring the id) and waits up to 10 s for it to listen. Returns `id`, `pid` (the new process), `previousPID`, `health` and `app` (its `apps` row), or `ok: false` with `error`: already relaunching, the bundle is gone, did not quit even when forced, could not launch, or "did not come back" with why (the launch failed, the new process quit, or it was not listening in time). An app that is not running is just launched. The app stays supervised (an `autoLaunch` app is respawned as usual) whatever the outcome |
+| `apps relaunch-all` | `outdated=1` (optional) | relaunch every app that is up (running, launching or not answering), or with `outdated=1` only the `outdated` ones, as `apps relaunch` does; answers once each has finished with `relaunched {id: {id, pid, previousPID, health} or {id, previousPID, error}}` |
 | `apps menu` / `apps menu-invoke` | `id=`, `item=` | the app's own status menu and performing one of its items (see Menu bar consolidation) |
 | `apps perform` | `app=<bundle id or name>`, `verb=<action verb>`, any other `key=value` | sends the app `action name=<verb>` with the other keys (launching it first if it is not running; commands wait for its socket as for `panel show`); returns the app's reply plus `app` (its bundle id), or the app's own `ok: false`. The target is `app=`, not `id=`, so an action's own `id=` passes through; `name`, `app`, `verb` and `action` cannot be passed to the app this way |
 
@@ -290,6 +292,18 @@ after 2 s, then 4 s, and given up on after 3 launches (`lastError: "gave up …"
 60 s of uptime resets the count. A lost subscription while the process lives is
 retried with backoff (0.5 s doubling to 8 s). Commands for an app whose socket is
 not up yet are queued for 20 s.
+
+Show verification: an app's `visible: true` is not taken as proof that its panel is on
+screen. Half a second after an app accepts a `panel show` (a dock hover or click, a summon,
+the menu's Show, `panel show`, a loadout slot), MacHUD looks for one of the app's windows
+(normal layer or above) on screen over a display. Not found, the panel is recorded as
+`elsewhere: "another desktop"` (a window on a desktop that is not showing) or `"off screen"`
+(ordered out, or past every display) in `panels`, and the app's submenu says so. A tool dock
+click or a summon (the menu's Show <App>, `summon`) that missed also shows a toast naming the
+fix (Relaunch <App>); a passing hover, `panel show` and a loadout slot only record it. A
+parked panel is not checked, and a HUD loadout's panel shows go to the apps directly and are
+not verified. An app's own `onActiveSpace` in its show reply is used only when the window
+list cannot tell.
 
 Default placement: `apps.<bundle id>.placement` in layouts.json says where MacHUD puts an
 app's panel when *it* launches the app (`apps launch`, `autoLaunch`, the menu's Launch):
@@ -480,7 +494,10 @@ only that (`"layout": ""`, `"slots": []`):
 | `settings-window` | `show\|hide\|toggle\|state`, `tab=<bundle id, name, loadouts, voice, brain or apps>`, `activate=0` | the shared settings window: a tab for MacHUD and each discovered app, plus Loadouts (every loadout with a preview per display and desktop; `state` reports it as `loadouts {selected, desktop, loadouts[] {name, summary, startup, active, screens, desktops, regions, ownedLayouts[], problems[]}}`), Voice and Brain (see Voice; `state` reports them as `voice {status, settings?}`) and Apps (see App catalog; `state` reports it as `apps {rows[], selected[], selfUpdate?}`), rendering the app's settings schema (`settings schema` over its socket, else the file its manifest names) and reading/writing through `settings get/set` on its socket. Keys without a schema show as text rows. `show` answers once every tab has loaded with `tabs[] {id, title, status, schema, sections[{group?, rows[{key, title, control, value}]}]}`; `activate=0` shows it without taking focus |
 
 The status menu's MacHUD section lists the discovered apps (● running, ○ not) with Show/Hide,
-Park/Reveal, Launch/Quit and a Settings… item per app, plus Settings… for the window.
+Park/Reveal, Relaunch, Launch/Quit and a Settings… item per app, plus Settings… for the
+window. An app's submenu notes "Update ready, relaunch to apply" when it is `outdated` and
+"Built for an older MacHUD" when its contract is older; Relaunch Outdated Apps appears next to
+Launch All Apps and Quit All Apps while any app is outdated.
 
 ## Onboarding
 
