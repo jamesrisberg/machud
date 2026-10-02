@@ -38,13 +38,15 @@ public struct VoiceHostSettings: Codable, Equatable, Sendable {
     public var feedTranscripts: Bool
     /// Each finished agent reply goes to the text feed too (source "Agent").
     public var feedAgentReplies: Bool
+    /// When a hands-free take (orb, wake word, socket `ask`) is over.
+    public var handsFree: HandsFreeSettings
 
     public init(enabled: Bool = true, keyMode: KeyMode = .hold, agentGesture: Bool = true,
                 brainEnabled: Bool = true, brainPort: Int = 8791,
                 brain: BrainSettings = BrainSettings(), machudTools: Bool = true,
                 machudToolsRequireApproval: Bool = false, voice: VoiceSettings = VoiceSettings(),
                 history: DictationHistorySettings? = nil, feedTranscripts: Bool = true,
-                feedAgentReplies: Bool = false) {
+                feedAgentReplies: Bool = false, handsFree: HandsFreeSettings = HandsFreeSettings()) {
         self.enabled = enabled
         self.keyMode = keyMode
         self.agentGesture = agentGesture
@@ -57,11 +59,12 @@ public struct VoiceHostSettings: Codable, Equatable, Sendable {
         self.history = history
         self.feedTranscripts = feedTranscripts
         self.feedAgentReplies = feedAgentReplies
+        self.handsFree = handsFree
     }
 
     private enum CodingKeys: String, CodingKey {
         case enabled, keyMode, agentGesture, brainEnabled, brainPort, brain, voice, history, feedTranscripts,
-             feedAgentReplies
+             feedAgentReplies, handsFree
     }
 
     /// The keys this host adds to the `brain` object.
@@ -87,6 +90,7 @@ public struct VoiceHostSettings: Codable, Equatable, Sendable {
         history = try? c.decodeIfPresent(DictationHistorySettings.self, forKey: .history)
         feedTranscripts = (try? c.decode(Bool.self, forKey: .feedTranscripts)) ?? d.feedTranscripts
         feedAgentReplies = (try? c.decode(Bool.self, forKey: .feedAgentReplies)) ?? d.feedAgentReplies
+        handsFree = (try? c.decode(HandsFreeSettings.self, forKey: .handsFree)) ?? d.handsFree
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -106,6 +110,56 @@ public struct VoiceHostSettings: Codable, Equatable, Sendable {
         try c.encodeIfPresent(history, forKey: .history)
         try c.encode(feedTranscripts, forKey: .feedTranscripts)
         try c.encode(feedAgentReplies, forKey: .feedAgentReplies)
+        try c.encode(handsFree, forKey: .handsFree)
+    }
+}
+
+/// How a hands-free take ends (`handsFree` in `voice.json`). Key-held takes end with the key.
+public struct HandsFreeSettings: Codable, Equatable, Sendable {
+    public enum EndOfTurn: String, Codable, Equatable, Sendable {
+        /// A pause after speech ends the take (`SilenceEndpointer`).
+        case auto
+        /// Only a tap (the orb, the fn key, `voice action stop`) or the maximum length ends it.
+        case manual
+    }
+
+    /// How readily a sound counts as speech over the room's noise.
+    public enum Sensitivity: String, Codable, Equatable, Sendable {
+        case low, medium, high
+    }
+
+    /// The choices for `pause`, in seconds.
+    public static let pauseRange: ClosedRange<TimeInterval> = 1...4
+    public static let pauseStep: TimeInterval = 0.5
+
+    public var endOfTurn: EndOfTurn
+    /// Quiet after speech, in seconds, before an automatic take is sent: `pauseRange` in steps
+    /// of `pauseStep`, other values are brought to the nearest choice.
+    public var pause: TimeInterval {
+        didSet { pause = Self.pauseChoice(pause) }
+    }
+    public var sensitivity: Sensitivity
+
+    public init(endOfTurn: EndOfTurn = .auto, pause: TimeInterval = 2, sensitivity: Sensitivity = .medium) {
+        self.endOfTurn = endOfTurn
+        self.pause = Self.pauseChoice(pause)
+        self.sensitivity = sensitivity
+    }
+
+    static func pauseChoice(_ seconds: TimeInterval) -> TimeInterval {
+        guard seconds.isFinite else { return 2 }
+        let stepped = (seconds / pauseStep).rounded() * pauseStep
+        return min(max(stepped, pauseRange.lowerBound), pauseRange.upperBound)
+    }
+
+    private enum CodingKeys: String, CodingKey { case endOfTurn, pause, sensitivity }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = HandsFreeSettings()
+        self.init(endOfTurn: (try? c.decode(EndOfTurn.self, forKey: .endOfTurn)) ?? d.endOfTurn,
+                  pause: (try? c.decode(TimeInterval.self, forKey: .pause)) ?? d.pause,
+                  sensitivity: (try? c.decode(Sensitivity.self, forKey: .sensitivity)) ?? d.sensitivity)
     }
 }
 

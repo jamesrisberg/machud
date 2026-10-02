@@ -572,9 +572,9 @@ see Running several instances).
 
 | Command | Args | Effect |
 | --- | --- | --- |
-| `voice state` | | `state {phase, inputLevel, partialTranscript, card?, hiddenForFullScreen, brainAvailable, brainProblem?, sessionKey?, sessionProvider?, activeRuntime?, wakeListening, wakeProblem?, muted, gesturePending}` |
+| `voice state` | | `state {phase, inputLevel, partialTranscript, card?, hiddenForFullScreen, brainAvailable, brainProblem?, sessionKey?, sessionProvider?, activeRuntime?, wakeListening, wakeProblem?, muted, gesturePending, lastTakeEnd?}` |
 | `voice hello` | | the voice host's `name` (`MacHUDVoice`), `version`, `pid` |
-| `voice status` | | MacHUD's view of the process: `status` (`running`, `restarting`, `disabled`, `stopped`, `failed`, `notInstalled`), `pid` while running, `socket`, `connected`, `muted` once connected, `error` (why it gave up) when `failed` |
+| `voice status` | | MacHUD's view of the process: `status` (`running`, `restarting`, `disabled`, `stopped`, `failed`, `notInstalled`), `pid` while running, `socket`, `connected`, `muted` and `lastTakeEnd` (see below) once connected, `error` (why it gave up) when `failed` |
 | `voice action` | `name=` `click`, `ask`, `dictate`, `stop`, `cancel`, `approve`, `deny`, `dismiss`, `mute`, `unmute`, `open-session`, `say`; `id=` for `approve`/`deny`; `text=` for `say` | performs it (`machud voice action mute` works too) |
 | `voice brain status` | | the voice host's `brain status` (below): whether the brain can take a turn, why not, the workspace, the runtime chosen and the one running, the runtimes found and MacHUD's tools |
 | `voice models` | `status` (default) / `download id=kokoro\|parakeet\|hey-jarvis` | the voice host's `models` (below): whether the Parakeet speech model, the Kokoro reply voice and the wake models are installed or downloading, or start a download |
@@ -587,6 +587,8 @@ When the voice host is not answering, `voice` replies `ok: false` with why (`sta
 The settings window's Voice tab (on/off, fn key mode, the agent gesture, the Parakeet speech
 model's Download button and progress, dictation history (Off, Text only, Text and audio; Share
 history with SpeakFree while SpeakFree is installed; where it is kept), the text feed toggles,
+Hands-free (End of turn: Automatically / When I tap; Pause before sending, 1–4 s; Microphone
+sensitivity, low/medium/high; the last two disabled while ending on a tap),
 wake word on/off with why it is not listening (`wakeProblem`), the phrase (only phrases there is
 a model for, each marked when its model is not installed), that model's Download button,
 progress and terms, and sensitivity, reply voice, spoken replies, Test Voice (`action say`), the Kokoro voice's
@@ -659,9 +661,31 @@ control socket, which hands them to the apps that provide `text-feed` (Stash); `
 (default false) sends each finished agent reply as `source=Agent` with the prompt as `title`.
 Sending never waits on MacHUD or fails a take.
 
+`handsFree` (`{endOfTurn, pause, sensitivity}`) sets when a hands-free take (the orb, the wake
+word, `action ask`) ends; a take held on the fn key ends when the key says so. With `endOfTurn`
+`auto` (the default) the take is sent after `pause` seconds of quiet once speech was heard
+(default 2; 1 to 4 in steps of 0.5, other values are brought to the nearest), plus 1.5 s while the
+latest partial transcript ends mid-thought (a trailing and, but, so, because, or, um, uh, like,
+the, a, to, with, …, a comma or a dash) or none has arrived yet. Silence before any speech never
+ends a take. Speech is a level above the room's noise floor times a margin (`sensitivity` `low`,
+`medium` (default) or `high`: ×3, ×2, ×1.5, never below 0.08, 0.05, 0.03 on SpeakFree's 0…1 level
+scale); the floor is measured over the first 0.3 s and then follows the room while nobody speaks.
+Speech starts above that threshold, is quiet only below halfway back to the floor, and a rise
+shorter than 150 ms is not speech. With `manual` silence never ends the take: a tap on the orb or
+the fn key, or `action stop`, sends it. Either way a take stops after 120 s. Missing or invalid
+keys take their defaults.
+
+`lastTakeEnd` says how the latest hands-free take ended: `{reason, seconds, quietMs?, floor?,
+threshold?, pause?, grace}`. `reason` is `pause`, `maximum`, `stop` (a tap or `action stop`),
+`cancelled`, `failed` (the dictation failed) or `dictation` (it ended by itself); `seconds` is
+the take's length; `quietMs` the quiet since the last speech; `floor` and `threshold` the levels
+at the end; `pause` the quiet the take needed (absent with `manual`) and `grace` whether it
+included the unfinished-sentence 1.5 s. The voice host also logs one line per take
+(`MacHUDVoice: hands-free take ended: …`).
+
 `state` is `{phase, inputLevel, partialTranscript, card?, hiddenForFullScreen, brainAvailable,
 brainProblem?, sessionKey?, sessionProvider?, activeRuntime?, wakeListening, wakeProblem?, muted,
-gesturePending}`. `activeRuntime` is the runtime the brain companion reports running (`codex`,
+gesturePending, lastTakeEnd?}`. `activeRuntime` is the runtime the brain companion reports running (`codex`,
 `claude`, `hermes`, `mclaude`), absent while none is connected.
 `wakeListening` is true while the wake word is armed; it pauses while a take records and listens
 again after. While the wake word is on (and voice is on and not muted) but not listening,

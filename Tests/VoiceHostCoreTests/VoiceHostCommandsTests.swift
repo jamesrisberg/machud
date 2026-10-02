@@ -62,6 +62,27 @@ final class VoiceHostCommandsTests: XCTestCase {
         XCTAssertEqual((get["settings"] as? [String: Any])?["keyMode"] as? String, "toggle")
     }
 
+    func testHandsFreeSettingsGoThroughTheSocket() throws {
+        let json = #"{"handsFree":{"endOfTurn":"manual","pause":3,"sensitivity":"high"}}"#
+        let reply = commands.handle("settings", ["action": "set", "settings": json])
+        let handsFree = try XCTUnwrap((reply["settings"] as? [String: Any])?["handsFree"] as? [String: Any])
+        XCTAssertEqual(handsFree["endOfTurn"] as? String, "manual")
+        XCTAssertEqual(handsFree["pause"] as? Double, 3)
+        XCTAssertEqual(handsFree["sensitivity"] as? String, "high")
+        XCTAssertEqual(controller.settings.handsFree, HandsFreeSettings(endOfTurn: .manual, pause: 3, sensitivity: .high))
+        let get = try XCTUnwrap(commands.handle("settings", ["action": "get"])["settings"] as? [String: Any])
+        XCTAssertEqual((get["handsFree"] as? [String: Any])?["endOfTurn"] as? String, "manual")
+    }
+
+    func testStateReportsHowTheLastTakeEnded() throws {
+        _ = commands.handle("action", ["name": "ask"])
+        _ = commands.handle("action", ["name": "stop"])
+        let state = try XCTUnwrap(commands.handle("state", [:])["state"] as? [String: Any])
+        let end = try XCTUnwrap(state["lastTakeEnd"] as? [String: Any])
+        XCTAssertEqual(end["reason"] as? String, "stop")
+        XCTAssertNotNil(end["seconds"])
+    }
+
     func testTurningVoiceOnThroughTheSocketTakesEffect() {
         _ = commands.handle("settings", ["action": "set", "settings": #"{"enabled":false}"#])
         XCTAssertNil(brain.configurations.last ?? nil)

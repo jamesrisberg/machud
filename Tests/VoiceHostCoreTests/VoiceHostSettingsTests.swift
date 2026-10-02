@@ -40,6 +40,43 @@ final class VoiceHostSettingsTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(VoiceHostSettings.self, from: JSONEncoder().encode(settings)), settings)
     }
 
+    func testHandsFreeDefaults() throws {
+        let settings = try JSONDecoder().decode(VoiceHostSettings.self, from: Data("{}".utf8))
+        XCTAssertEqual(settings.handsFree, HandsFreeSettings(endOfTurn: .auto, pause: 2, sensitivity: .medium))
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as? [String: Any])
+        let handsFree = try XCTUnwrap(object["handsFree"] as? [String: Any])
+        XCTAssertEqual(handsFree["endOfTurn"] as? String, "auto")
+        XCTAssertEqual(handsFree["pause"] as? Double, 2)
+        XCTAssertEqual(handsFree["sensitivity"] as? String, "medium")
+    }
+
+    func testHandsFreeDecodesLenientlyAndKeepsThePauseInRange() throws {
+        func decode(_ json: String) throws -> HandsFreeSettings {
+            try JSONDecoder().decode(VoiceHostSettings.self, from: Data(json.utf8)).handsFree
+        }
+        XCTAssertEqual(try decode(#"{"handsFree":{"endOfTurn":"manual"}}"#),
+                       HandsFreeSettings(endOfTurn: .manual, pause: 2, sensitivity: .medium))
+        XCTAssertEqual(try decode(#"{"handsFree":{"endOfTurn":"never","pause":"long","sensitivity":"max"}}"#),
+                       HandsFreeSettings())
+        XCTAssertEqual(try decode(#"{"handsFree":{"pause":9}}"#).pause, 4)
+        XCTAssertEqual(try decode(#"{"handsFree":{"pause":0.2}}"#).pause, 1)
+        XCTAssertEqual(try decode(#"{"handsFree":{"pause":2.3}}"#).pause, 2.5, "steps of half a second")
+        XCTAssertEqual(try decode(#"{"handsFree":{"sensitivity":"high"}}"#).sensitivity, .high)
+        XCTAssertEqual(try decode(#"{"handsFree":7}"#), HandsFreeSettings())
+        let settings = VoiceHostSettings(handsFree: HandsFreeSettings(endOfTurn: .manual, pause: 3.5, sensitivity: .low))
+        XCTAssertEqual(try JSONDecoder().decode(VoiceHostSettings.self, from: JSONEncoder().encode(settings)), settings)
+    }
+
+    func testTakeEndRoundTripsInTheState() throws {
+        let end = VoiceTakeEnd(reason: .pause, seconds: 6.4, quietMs: 2050, floor: 0.021, threshold: 0.05,
+                               pause: 3.5, grace: true)
+        let state = VoiceHostState(lastTakeEnd: end)
+        XCTAssertEqual(try JSONDecoder().decode(VoiceHostState.self, from: JSONEncoder().encode(state)), state)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(end)) as? [String: Any])
+        XCTAssertEqual(object["reason"] as? String, "pause")
+        XCTAssertEqual(object["quietMs"] as? Int, 2050)
+    }
+
     func testPhaseEncodesWithPlainNames() throws {
         let data = try JSONEncoder().encode(VoicePhase.listening(.agent))
         let object = try JSONSerialization.jsonObject(with: data) as? [String: String]

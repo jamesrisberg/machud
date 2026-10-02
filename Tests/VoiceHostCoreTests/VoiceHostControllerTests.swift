@@ -157,20 +157,124 @@ final class VoiceHostControllerTests: XCTestCase {
 
     // MARK: Orb click and endpointing
 
+    /// Levels every 50 ms from `start` up to (not including) `end`, as SpeakFree sends them.
+    private func levels(_ value: Double, from start: Double, to end: Double) {
+        var time = start
+        while time < end - 1e-9, dictation.isCapturing {
+            clock.now = time
+            dictation.level(value)
+            time += 0.05
+        }
+    }
+
     func testOrbClickStartsAnAgentTakeThatEndsOnSilence() {
         let controller = makeController()
         controller.perform(.orbClicked)
         XCTAssertEqual(dictation.starts, [.caller])
         XCTAssertEqual(controller.state.phase, .listening(.agent))
-        clock.now = 0.1
-        dictation.level(0.6)
+        levels(0.6, from: 0, to: 1)
         XCTAssertEqual(controller.state.inputLevel, 0.6)
-        clock.now = 0.5
-        dictation.level(0.01)
-        XCTAssertEqual(dictation.stops, 0)
-        clock.now = 2.0
-        dictation.level(0.01)
+        dictation.partial("What is on my calendar today?")
+        levels(0.01, from: 1, to: 2.9)
+        XCTAssertEqual(dictation.stops, 0, "a pause shorter than 2 s keeps listening")
+        levels(0.01, from: 2.9, to: 3.1)
         XCTAssertEqual(dictation.stops, 1)
+        XCTAssertEqual(clock.now, 3, accuracy: 0.001)
+    }
+
+    func testAnUnfinishedSentenceWaitsLonger() {
+        let controller = makeController()
+        defer { withExtendedLifetime(controller) {} }
+        controller.perform(.orbClicked)
+        levels(0.6, from: 0, to: 1)
+        dictation.partial("Open the browser and")
+        levels(0.01, from: 1, to: 4.4)
+        XCTAssertEqual(dictation.stops, 0)
+        levels(0.01, from: 4.4, to: 4.6)
+        XCTAssertEqual(dictation.stops, 1)
+    }
+
+    func testThePauseSettingAppliesToTheNextTake() {
+        var settings = VoiceHostSettings()
+        settings.handsFree.pause = 1
+        let controller = makeController(settings)
+        defer { withExtendedLifetime(controller) {} }
+        controller.perform(.orbClicked)
+        levels(0.6, from: 0, to: 1)
+        dictation.partial("Stop.")
+        levels(0.01, from: 1, to: 2.1)
+        XCTAssertEqual(dictation.stops, 1)
+        XCTAssertEqual(clock.now, 2, accuracy: 0.001)
+    }
+
+    func testManualEndOfTurnWaitsForTheTap() throws {
+        var settings = VoiceHostSettings()
+        settings.handsFree.endOfTurn = .manual
+        let controller = makeController(settings)
+        controller.perform(.orbClicked)
+        levels(0.6, from: 0, to: 1)
+        dictation.partial("Done.")
+        levels(0.01, from: 1, to: 60)
+        XCTAssertEqual(dictation.stops, 0)
+        controller.perform(.orbClicked)
+        XCTAssertEqual(dictation.stops, 1)
+        XCTAssertEqual(try XCTUnwrap(controller.state.lastTakeEnd).reason, .stop)
+    }
+
+    func testAHandsFreeTakeSaysWhyItEnded() throws {
+        var logged: [String] = []
+        let controller = makeController()
+        controller.logTakeEnd = { logged.append($0) }
+        controller.perform(.orbClicked)
+        levels(0.01, from: 0, to: 0.5)
+        levels(0.6, from: 0.5, to: 1.5)
+        dictation.partial("Mute the music.")
+        levels(0.01, from: 1.5, to: 5)
+        let end = try XCTUnwrap(controller.state.lastTakeEnd)
+        XCTAssertEqual(end.reason, .pause)
+        XCTAssertEqual(end.seconds, 3.5, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(end.quietMs), 2000)
+        XCTAssertEqual(try XCTUnwrap(end.floor), 0.01, accuracy: 0.002)
+        XCTAssertEqual(try XCTUnwrap(end.threshold), 0.05, accuracy: 0.001)
+        XCTAssertEqual(end.pause, 2)
+        XCTAssertEqual(end.grace, false)
+        XCTAssertEqual(logged.count, 1)
+        XCTAssertTrue(logged[0].contains("pause"), logged[0])
+        XCTAssertTrue(logged[0].contains("2000 ms"), logged[0])
+        dictation.finish("Mute the music.")
+        XCTAssertEqual(logged.count, 1, "one line per take")
+    }
+
+    func testTakeEndsAreReportedForEveryWayATakeEnds() throws {
+        let controller = makeController()
+        controller.perform(.start(.agent))
+        controller.perform(.stop)
+        XCTAssertEqual(controller.state.lastTakeEnd?.reason, .stop)
+        dictation.finish("")
+
+        controller.perform(.start(.agent))
+        controller.perform(.cancel)
+        XCTAssertEqual(controller.state.lastTakeEnd?.reason, .cancelled)
+
+        clock.now = 200
+        controller.perform(.orbClicked)
+        levels(0.6, from: 200, to: 321)
+        XCTAssertEqual(dictation.stops, 2)
+        let end = try XCTUnwrap(controller.state.lastTakeEnd)
+        XCTAssertEqual(end.reason, .maximum)
+        XCTAssertEqual(end.seconds, 120, accuracy: 0.001)
+        dictation.finish("")
+
+        controller.perform(.orbClicked)
+        dictation.onUpdate?(dictation.takeID, .failed(.tooShort))
+        XCTAssertEqual(controller.state.lastTakeEnd?.reason, .failed)
+    }
+
+    func testKeyTakesReportNoTakeEnd() {
+        let controller = makeController()
+        keys.send(.begin(.primary))
+        keys.send(.end)
+        XCTAssertNil(controller.state.lastTakeEnd)
     }
 
     func testFnTakesAreNotEndpointed() {
