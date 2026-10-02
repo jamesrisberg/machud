@@ -24,8 +24,12 @@ final class FakeWorkspace: WorkspaceControl {
     /// Called as each launch is asked for, before it completes.
     var onLaunchCall: (() -> Void)?
 
+    /// The bundle each launch asked for.
+    var launchedBundles: [URL] = []
+
     func launch(_ app: ExternalApp, completion: @escaping (Error?) -> Void) {
         launches.append(app.id)
+        launchedBundles.append(app.bundleURL)
         onLaunchCall?()
         completion(launchError)
     }

@@ -39,7 +39,6 @@ final class AppHealthTests: XCTestCase {
         supervisor.onShowMissed = { [unowned self] in self.missed.append(($0, $1, $2)) }
         externals = ExternalPanels(registry: PanelRegistry(), supervisor: supervisor) { AppsConfig() }
         externals.install([app], autoLaunch: [])
-        externals.rediscover = { [unowned self] in self.events.append("rediscover") }
         workspace.onLaunchCall = { [unowned self] in self.events.append("launch") }
     }
 
@@ -199,25 +198,36 @@ final class AppHealthTests: XCTestCase {
         XCTAssertEqual(entry?.actions.last?.kind, .launch)
     }
 
-    func testANewerBundleBesideTheRunningOneIsTheUpdate() {
-        // Running an old dev build while a newer install of the same id sits in /Applications.
+    func testANewerCopyElsewhereIsReportedButIsNotAnUpdate() throws {
+        // Running a dev build on purpose while a newer install of the same id sits in /Applications.
         let dev = URL(fileURLWithPath: "/Users/me/dev/pad/build/Pad.app")
         let installed = URL(fileURLWithPath: "/Applications/Pad.app")
         let started = clock.now
+        let newer = started.addingTimeInterval(86_400)
         workspace.processInfo[4242] = AppProcess(pid: 4242, launchDate: started, bundleURL: dev,
                                                  executableURL: dev.appendingPathComponent("Contents/MacOS/Pad"))
         supervisor.bundles = { _ in [dev, installed] }
-        supervisor.nextBundle = { $0.first { $0 == installed } ?? $0[0] }
         supervisor.bundleExecutable = { $0.appendingPathComponent("Contents/MacOS/Pad") }
-        supervisor.fileDate = { $0.path.hasPrefix(installed.path) ? started.addingTimeInterval(86_400) : started.addingTimeInterval(-60) }
+        supervisor.fileDate = { $0.path.hasPrefix(installed.path) ? newer : started.addingTimeInterval(-60) }
         supervisor.bundleVersion = { $0 == installed ? "0.2.0" : "0.1.0" }
         connector.replies["hello"] = ["ok": true, "hudkit": "0.2.0", "version": "0.1.0"]
         startApp()
-        XCTAssertEqual(row["outdatedReason"] as? String,
-                       "running 0.1.0, 0.2.0 on disk; rebuilt after it started (/Applications/Pad.app)")
+        XCTAssertEqual(row["outdated"] as? Bool, false, "a relaunch restarts the dev build, so nothing to pick up")
+        XCTAssertEqual(row["newerCopy"] as? String, installed.path)
+        XCTAssertEqual(row["newerCopyVersion"] as? String, "0.2.0")
+        XCTAssertEqual(row["newerCopyBuilt"] as? String, ISO8601DateFormatter().string(from: newer))
+        XCTAssertFalse(MacHUDMenuModel.hasOutdated(externals: externals), "no Relaunch Outdated Apps for it")
+        XCTAssertEqual(entry?.actions.filter { $0.kind == .status }.map(\.title), [], "no update-ready line")
 
-        supervisor.nextBundle = { $0[0] }                    // the dev build is the newest
-        XCTAssertEqual(row["outdated"] as? Bool, false)
+        // An older copy elsewhere is not mentioned.
+        supervisor.fileDate = { $0.path.hasPrefix(installed.path) ? started.addingTimeInterval(-600) : started.addingTimeInterval(-60) }
+        XCTAssertNil(row["newerCopy"])
+
+        // Relaunch restarts the dev build, never the other copy.
+        externals.relaunch(id) { _ in }
+        workspace.stop(id)
+        clock.runQueued()
+        XCTAssertEqual(workspace.launchedBundles, [dev])
     }
 
     func testOutdatedReasonAndContractRules() {
@@ -247,7 +257,7 @@ final class AppHealthTests: XCTestCase {
         workspace.stop(id)
         clock.runQueued()
         XCTAssertEqual(workspace.launches, [id])
-        XCTAssertEqual(events, ["rediscover", "launch"], "discovery picks the bundle before it is launched")
+        XCTAssertEqual(events, ["launch"])
         XCTAssertNil(result)
         workspace.start(id, pid: 200)
         clock.runQueued()                                    // connect and the next poll

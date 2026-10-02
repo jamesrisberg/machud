@@ -34,6 +34,15 @@ struct AppBuildStatus: Equatable {
     var outdated: String?
     /// The app's and MacHUD's contract, when the app said `hello`.
     var contract: Contract?
+    /// Another bundle declaring the same id with a newer build than the one running.
+    /// Informational: a relaunch restarts the bundle the app runs from.
+    var newerCopy: Copy?
+
+    struct Copy: Equatable {
+        var path: String
+        var version: String?
+        var built: Date
+    }
 
     /// Contracts as `major.minor`; `older` when the app's is behind MacHUD's.
     struct Contract: Equatable {
@@ -78,6 +87,11 @@ struct AppBuildStatus: Equatable {
         var d: [String: Any] = ["outdated": outdated != nil]
         if let outdated { d["outdatedReason"] = outdated }
         if let contract { d["contract"] = ["app": contract.app, "machud": contract.machud, "older": contract.older] }
+        if let newerCopy {
+            d["newerCopy"] = newerCopy.path
+            d["newerCopyBuilt"] = ISO8601DateFormatter().string(from: newerCopy.built)
+            if let version = newerCopy.version { d["newerCopyVersion"] = version }
+        }
         return d
     }
 }

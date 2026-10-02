@@ -55,15 +55,6 @@ final class ExternalPanels {
         supervisor.bundles = { [weak self] id in self?.duplicates[id] ?? [] }
     }
 
-    /// Runs between a relaunch's quit and its launch: a rescan, so with the old process gone
-    /// discovery picks the newest bundle declaring the app (an installed update over an older
-    /// dev build) and that is the one launched. Tests replace it.
-    lazy var rediscover: () -> Void = { [unowned self] in
-        let before = self.apps
-        self.rescan()
-        if self.apps != before { self.onAppsChanged?() }
-    }
-
     // MARK: - Default placement
 
     /// Launches a discovered app (as `apps launch` does). A launch that starts the app
@@ -123,10 +114,11 @@ final class ExternalPanels {
     }
 
     /// Relaunches one app (`apps relaunch`, the menu's Relaunch): quit, wait for it to exit,
-    /// `rediscover`, launch, wait for it to listen. Completes with `{id, pid?, health}` or `{id, error}`.
+    /// launch the same bundle again, wait for it to listen. Completes with `{id, pid?, health}`
+    /// or `{id, error}`.
     func relaunch(_ id: String, completion: @escaping ([String: Any]) -> Void) {
         let previous = supervisor.livePIDs(id).first
-        supervisor.relaunch(id, beforeLaunch: { [weak self] in self?.rediscover() }) { result in
+        supervisor.relaunch(id) { result in
             var d: [String: Any] = ["id": id]
             if let previous { d["previousPID"] = Int(previous) }
             switch result {

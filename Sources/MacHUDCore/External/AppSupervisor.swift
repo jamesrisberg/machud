@@ -141,8 +141,6 @@ final class AppSupervisor {
     /// Every bundle declaring an app id (set from discovery's duplicates); empty when only
     /// the one in use does.
     var bundles: (String) -> [URL] = { _ in [] }
-    /// Which of several bundles declaring one id a launch would use now.
-    var nextBundle: ([URL]) -> URL = { $0[ExternalAppCatalog.preferred($0, running: [])] }
     /// Where an app's panel is, given its processes; nil when it cannot tell.
     var windowProbe: (Set<pid_t>) -> ShowOutcome? = { WindowPresence.probe($0) }
     /// A loud show (a click or summon, not a passing hover) did not reach the screen: app id,
@@ -224,13 +222,20 @@ final class AppSupervisor {
     }
 
     /// Launches the app if it is not running. `manual` (an explicit `apps launch`) resets the
-    /// attempt count; on-demand launches (panel show, loadouts) count against it.
+    /// attempt count; on-demand launches (panel show, loadouts) count against it. `bundle`
+    /// launches that copy instead of the discovered one (a relaunch restarts the bundle the
+    /// app was running from).
     @discardableResult
-    func launch(_ id: String, manual: Bool = false) -> LaunchError? {
+    func launch(_ id: String, manual: Bool = false, bundle: URL? = nil) -> LaunchError? {
         guard let record = records[id] else { return .unknown(id) }
         if manual { record.launchAttempts = 0; record.quitRequested = false }
         if !livePIDs(id).isEmpty { refresh(id); return nil }
-        guard workspace.isInstalled(record.app) else { set(record, .notInstalled); return .notInstalled(id) }
+        var app = record.app
+        if let bundle { app.bundleURL = bundle }
+        guard workspace.isInstalled(app) else {
+            if bundle == nil { set(record, .notInstalled) }
+            return .notInstalled(id)
+        }
         if record.launchInFlight || record.health == .launching { return nil }
         guard record.launchAttempts < Self.maxLaunchAttempts else {
             record.lastError = LaunchError.gaveUp(id, record.launchAttempts).description
@@ -240,7 +245,7 @@ final class AppSupervisor {
         record.launchInFlight = true
         record.quitRequested = false
         set(record, .launching)
-        workspace.launch(record.app) { [weak self] error in
+        workspace.launch(app) { [weak self] error in
             guard let self, let record = self.records[id] else { return }
             record.launchInFlight = false
             if let error {
@@ -451,10 +456,10 @@ final class AppSupervisor {
 
     // MARK: - Health
 
-    /// Whether the running app is behind MacHUD's contract, or behind the bundle a relaunch
-    /// would start: the bundle it runs from, or a newer one declaring the same id (an
-    /// installed update beside a dev build), chosen as discovery chooses when the app is not
-    /// running (`ExternalAppCatalog.preferred`). nil while it is not running.
+    /// Whether the running app is behind the bundle it runs from (rebuilt since it started,
+    /// or a different version on disk than `hello` reported: a relaunch picks that up) or
+    /// behind MacHUD's contract, and whether another bundle declaring the id holds a newer
+    /// build (informational: a relaunch never switches copies). nil while it is not running.
     func buildStatus(_ id: String) -> AppBuildStatus? {
         guard let record = records[id] else { return nil }
         let live = Set(livePIDs(id))
@@ -463,24 +468,25 @@ final class AppSupervisor {
         // The oldest process decides: it is the one that may be running an old build.
         let oldest = processes.min { ($0.launchDate ?? .distantFuture) < ($1.launchDate ?? .distantFuture) }
         let running = oldest?.bundleURL ?? record.app.bundleURL
-        var candidates = [running]
-        for bundle in bundles(id) where !candidates.contains(where: { Self.sameBundle($0, bundle) }) {
-            candidates.append(bundle)
-        }
-        let next = candidates.count == 1 ? running : nextBundle(candidates)
-        let elsewhere = !Self.sameBundle(next, running)
-        let executable = elsewhere ? bundleExecutable(next) : oldest?.executableURL ?? bundleExecutable(running)
+        let built = (oldest?.executableURL ?? bundleExecutable(running)).flatMap(fileDate)
         var status = AppBuildStatus()
-        status.outdated = AppBuildStatus.outdatedReason(launched: oldest?.launchDate, built: executable.flatMap(fileDate),
-                                                        running: record.hello?.version, onDisk: bundleVersion(next))
-            .map { elsewhere ? "\($0) (\(next.path))" : $0 }
+        status.outdated = AppBuildStatus.outdatedReason(launched: oldest?.launchDate, built: built,
+                                                        running: record.hello?.version, onDisk: bundleVersion(running))
+        let copies = bundles(id).filter { !Self.sameBundle($0, running) }.compactMap { bundle -> AppBuildStatus.Copy? in
+            guard let date = bundleExecutable(bundle).flatMap(fileDate) else { return nil }
+            return AppBuildStatus.Copy(path: bundle.path, version: bundleVersion(bundle), built: date)
+        }
+        if let newest = copies.max(by: { $0.built < $1.built }),
+           newest.built.timeIntervalSince(built ?? .distantPast) > AppBuildStatus.tolerance {
+            status.newerCopy = newest
+        }
         if let contract = record.hello?.contract {
             status.contract = AppBuildStatus.contract(app: contract, machud: contractVersion)
         }
         return status
     }
 
-    /// Ids of the running apps whose bundle on disk is newer than the running process.
+    /// Ids of the running apps a relaunch would update (their own bundle is newer than the process).
     var outdatedIDs: [String] { order.filter { buildStatus($0)?.outdated != nil } }
 
     /// `CFBundleShortVersionString` read from the Info.plist on disk (not `Bundle`, which
@@ -534,26 +540,23 @@ final class AppSupervisor {
         }
     }
 
-    /// Quits the app, waits for its process to exit, launches it again (as `apps launch`) and
-    /// waits for it to listen. Completes with the new process's pid (nil if none came up in
-    /// time) and health. An app that is not running is just launched.
-    ///
-    /// `beforeLaunch` runs once the old process is gone (discovery then picks the newest
-    /// bundle declaring the id, which is the one launched).
-    func relaunch(_ id: String, beforeLaunch: (() -> Void)? = nil,
-                  completion: @escaping (Result<(pid: pid_t?, health: Health), RelaunchError>) -> Void) {
+    /// Quits the app, waits for its process to exit, launches the bundle it was running from
+    /// again (as `apps launch`; never another copy declaring the id) and waits for it to
+    /// listen. Completes with the new process's pid (nil if none came up in time) and health.
+    /// An app that is not running is just launched.
+    func relaunch(_ id: String, completion: @escaping (Result<(pid: pid_t?, health: Health), RelaunchError>) -> Void) {
         guard let record = records[id] else { completion(.failure(.launch(.unknown(id)))); return }
         guard !record.relaunching else { completion(.failure(.busy(id))); return }
         record.relaunching = true
         let old = Set(livePIDs(id))
+        let bundle = workspace.processes(bundleID: id).first { old.contains($0.pid) }?.bundleURL
         let finish: (Result<(pid: pid_t?, health: Health), RelaunchError>) -> Void = { [weak record] result in
             record?.relaunching = false
             completion(result)
         }
         let start = { [weak self] in
             guard let self else { return }
-            beforeLaunch?()
-            if let error = self.launch(id, manual: true) { finish(.failure(.launch(error))); return }
+            if let error = self.launch(id, manual: true, bundle: bundle) { finish(.failure(.launch(error))); return }
             self.awaitListening(id, old: old, deadline: self.now().addingTimeInterval(Self.relaunchTimeout), finish)
         }
         guard !old.isEmpty else { start(); return }
