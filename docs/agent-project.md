@@ -32,7 +32,7 @@ development Mac; an item marked n/a does not apply to this project.
 | Worktree parent directory and branch prefix | `../worktrees/<repo>-<lane>`, branch `wave/<wave>/<lane>`. A `../worktrees/hudkit` symlink makes `../hudkit` path dependencies resolve from a worktree |
 | Dependency/worktree preparation command | None beyond `git worktree add`; SwiftPM resolves on first build |
 | Local services start and health check | n/a for most lanes. MacHUD test instance: `MACHUD_SOCKET=<tmp>.sock MACHUD_CONFIG=<tmp dir>/layouts.json MACHUD_NO_HOTKEYS=1 build/MacHUD.app/Contents/MacOS/MacHUD`, health `MACHUD_SOCKET=<tmp>.sock scripts/machud hello`. Its voice host runs with no microphone, brain, orb or real Keychain item (`MACHUD_VOICE_LIVE=1` opts back in; see README's isolation table) on `<tmp>-voice.sock`, checked with `MACHUD_SOCKET=<tmp>.sock scripts/machud voice status`. It applies no startup loadout, re-applies nothing on display changes and launches no `autoLaunch` app unless `MACHUD_APPLY_STARTUP=1`. Add `HUD_NO_ANNOUNCE=1` to `./build.sh` so the build does not announce itself to the live MacHUD |
-| Backend identity check | n/a (no backend). The live instance is `/Applications/MacHUD.app` on `/tmp/machud-<uid>.sock`; tests never target it |
+| Backend identity check | n/a (no backend). The live instance is the dev build `build/MacHUD.app` of the integration checkout on `/tmp/machud-<uid>.sock` (check with `ps`); tests never target it |
 | Local test fixture setup and reset authority | Temp dirs per test instance; no shared fixtures |
 | Shared resource coordinator | Orchestrator (live MacHUD, microphone, fn event tap, privacy grants) |
 | Generation and freshness commands | n/a |
@@ -44,7 +44,7 @@ development Mac; an item marked n/a does not apply to this project.
 | Migration procedure | n/a |
 | Schema dump/derived documentation command | n/a |
 | Git hooks and files they modify | `scripts/install-hooks.sh` (per repo, via HUDKit) |
-| Signing | `./build.sh` signs with the Apple Development identity (stable, so privacy grants survive rebuilds); releases use Developer ID through `../hudkit/scripts/hud-release.sh` |
+| Signing | `./build.sh` signs with the Apple Development identity unless `HUD_SIGN_IDENTITY` names another. The live instance's Accessibility grant is tied to its Developer ID signature, so the orchestrator rebuilds it with `HUD_SIGN_IDENTITY="Developer ID Application: <name> (<team>)"`; an Apple Development rebuild comes up with Accessibility off. Lanes' own builds keep the default. Releases use Developer ID through `../hudkit/scripts/hud-release.sh` |
 | Available agents and maximum active | Claude Code Agent tool; up to 6 implementers plus reviewers |
 | Model selection | Opus for interactive, cross-cutting or stateful lanes; Sonnet for contained ports and mechanical lanes |
 | Practical lane concurrency | 4 to 6 lanes, one repo area each |
@@ -56,7 +56,7 @@ development Mac; an item marked n/a does not apply to this project.
 
 Nothing talks to a remote backend. What is shared across worktrees on this Mac:
 
-- The live MacHUD (`/Applications/MacHUD.app`) and its socket, config (`~/.config/machud`)
+- The live MacHUD (the dev build `build/MacHUD.app`) and its socket, config (`~/.config/machud`)
   and UserDefaults domain (`com.jrisberg.machud`). A test instance must set
   `MACHUD_SOCKET` and `MACHUD_CONFIG`, and must not run `settings set`, since it shares
   the UserDefaults domain.
