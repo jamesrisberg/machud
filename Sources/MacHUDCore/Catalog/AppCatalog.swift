@@ -52,7 +52,7 @@ struct CatalogEntry: Codable, Equatable, Identifiable {
     /// `owner/name` on GitHub.
     var repo: String?
     var name: String
-    /// `windowed`, `hover` or `umbrella` (MacHUD itself).
+    /// `windowed`, `hover`, `widget` (an app serving only widgets) or `umbrella` (MacHUD itself).
     var kind: String
     var summary: String?
     var version: String
@@ -335,4 +335,9 @@ final class AppCatalog {
         if let lastError { d["error"] = lastError }
         return d
     }
+}
+
+extension CatalogEntry {
+    /// `kind` as the catalog shows it: "Widgets" for a widget-only app.
+    var kindLabel: String { kind == "widget" ? "Widgets" : kind }
 }

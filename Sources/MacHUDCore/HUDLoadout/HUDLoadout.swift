@@ -57,7 +57,7 @@ struct HUDLoadout: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         dock = try c.decodeIfPresent(Dock.self, forKey: .dock)
         apps = try c.decodeIfPresent([String: App].self, forKey: .apps)
-        widgets = try c.decodeIfPresent([WidgetRecord].self, forKey: .widgets)
+        widgets = (try? c.decodeIfPresent(LossyList<WidgetRecord>.self, forKey: .widgets))?.map(\.items)
     }
 
     /// Settings keys an app exposes for its own dock strip; captured when present.
@@ -89,6 +89,7 @@ final class HUDLoadoutEngine {
     /// mode from its pushed state, the frame it reports (or its window's frame), and its
     /// `dock.position`/`dock.edge` settings when it has them; and the widgets, when any are placed.
     func capture(completion: @escaping (HUDLoadout) -> Void) {
+        // None placed: the key stays out, so applying the loadout leaves the widgets alone.
         let placed = widgets?.capture() ?? []
         var hud = HUDLoadout(dock: dockPosition().map(HUDLoadout.Dock.init(position:)), apps: [:],
                              widgets: placed.isEmpty ? nil : placed)

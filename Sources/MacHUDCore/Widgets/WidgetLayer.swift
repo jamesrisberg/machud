@@ -125,6 +125,11 @@ final class WidgetLayer {
         return records.filter { $0.app == app }.compactMap { placed[$0.instance]?.frame }
     }
 
+    /// Whether a window at `frame` is one of the widgets MacHUD placed (any app's).
+    func isWidgetFrame(_ frame: CGRect) -> Bool {
+        placements().values.contains { WindowPresence.sameFrame($0.frame, frame) }
+    }
+
     /// What `app` should show now, in record order.
     func desired(_ app: String) -> [(id: String, shown: Shown)] {
         let placed = placements()
@@ -174,8 +179,9 @@ final class WidgetLayer {
             d["instance"] = item.id
             return d
         }
-        let args = ["action": "sync", "instances": Self.jsonText(list), "editing": editing ? "on" : "off",
-                    "revealed": revealed ? "on" : "off"]
+        let modes = (editing: editing, revealed: revealed)
+        let args = ["action": "sync", "instances": Self.jsonText(list), "editing": modes.editing ? "on" : "off",
+                    "revealed": modes.revealed ? "on" : "off"]
         supervisor.send(id, command: "widget", args: args) { [weak self] result in
             guard let self else { return }
             defer { done?() }
@@ -212,6 +218,13 @@ final class WidgetLayer {
                 }
             }
             self.sent[id] = accepted
+            // A mode that changed while the sync was on its way skipped this app (not synced yet).
+            if self.editing != modes.editing {
+                self.supervisor.send(id, command: "widget", args: ["action": "edit", "state": self.editing ? "on" : "off"])
+            }
+            if self.revealed != modes.revealed {
+                self.supervisor.send(id, command: "widget", args: ["action": "reveal", "state": self.revealed ? "on" : "off"])
+            }
             self.report(app: id, rejected: rejected, dropped: dropped)
             self.onChange?()
             // Anything that changed while the sync was on its way.
@@ -253,7 +266,7 @@ final class WidgetLayer {
                 if was.size != shown.size { args["size"] = shown.size.rawValue }
                 if !Self.sameFrame(was.frame, shown.frame) || was.size != shown.size { args["frame"] = Self.frameText(shown.frame) }
                 if was.layer != shown.layer { args["layer"] = shown.layer.rawValue }
-                if was.settings != shown.settings { args["settings"] = Self.jsonText(HUDWidgetInstance.settingsJSON(shown.settings)) }
+                if !Self.sameSettings(was.settings, shown.settings) { args["settings"] = Self.jsonText(HUDWidgetInstance.settingsJSON(shown.settings)) }
                 if args.count > 2 { commands.append((app, id, args, shown, was)) }
             }
         }
@@ -614,6 +627,20 @@ final class WidgetLayer {
     }
 
     private static func number(_ d: Double) -> String { d == d.rounded() ? String(Int(d)) : String(d) }
+
+    /// Equal, counting a whole-number double and the same int as equal (`1.0` is saved as `1`
+    /// and reads back as an int).
+    static func sameSettings(_ a: [String: HUDSettingValue], _ b: [String: HUDSettingValue]) -> Bool {
+        guard a.count == b.count else { return false }
+        return a.allSatisfy { key, value in
+            guard let other = b[key] else { return false }
+            if value == other { return true }
+            switch (value, other) {
+            case (.int, .double), (.double, .int): return value.doubleValue == other.doubleValue
+            default: return false
+            }
+        }
+    }
 
     /// Within half a point: frames come back from the window server rounded.
     static func sameFrame(_ a: CGRect, _ b: CGRect) -> Bool {

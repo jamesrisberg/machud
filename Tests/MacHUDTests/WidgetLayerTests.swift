@@ -48,12 +48,14 @@ final class WidgetGridTests: XCTestCase {
     }
 
     func testConfigRoundTripsAndReadsLeniently() throws {
-        let json = #"{"widgets": {"cell": 150, "instances": [{"instance": "A", "app": "x", "type": "clock", "size": "huge", "#
-            + #""col": 2, "row": -1, "layer": "float", "screen": {"builtin": true}, "settings": {"zone": "UTC", "seconds": true}}]}}"#
+        let json = #"{"widgets": {"cell": 150, "gap": "wide", "instances": [{"instance": "A", "app": "x", "type": "clock", "size": "huge", "#
+            + #""col": 2, "row": -1, "layer": "float", "screen": {"builtin": true}, "settings": {"zone": "UTC", "seconds": true}}, "#
+            + #"{"instance": "B", "app": "x"}, 7, {"instance": "C", "app": "x", "type": "clock"}]}}"#
         let config = try JSONDecoder().decode(Config.self, from: Data(json.utf8))
         let w = try XCTUnwrap(config.widgets)
+        XCTAssertEqual(w.instances.map(\.instance), ["A", "C"], "entries that do not decode are skipped")
         XCTAssertEqual(w.cellSize, 150)
-        XCTAssertEqual(w.gapSize, 16)
+        XCTAssertEqual(w.gapSize, 16, "a bad gap reads as the default")
         XCTAssertEqual(w.instances.first?.size, .small, "an unknown size reads as small")
         XCTAssertEqual(w.instances.first?.row, 0)
         XCTAssertEqual(w.instances.first?.layer, .float)
@@ -61,6 +63,8 @@ final class WidgetGridTests: XCTestCase {
         XCTAssertEqual(w.instances.first?.settings, ["zone": .string("UTC"), "seconds": .bool(true)])
         let again = try JSONDecoder().decode(Config.self, from: JSONEncoder().encode(config))
         XCTAssertEqual(again.widgets, w)
+        let hud = try JSONDecoder().decode(HUDLoadout.self, from: Data(#"{"widgets": [{"instance": "A", "app": "x", "type": "t"}, "bad"]}"#.utf8))
+        XCTAssertEqual(hud.widgets?.map(\.instance), ["A"])
     }
 }
 
@@ -396,6 +400,47 @@ final class WidgetLayerTests: XCTestCase {
         XCTAssertEqual(layer.frames(app: otherID), [])
     }
 
+    func testAnAppThatComesBackIsKeptRunningAtOnce() {
+        stored.instances = [WidgetRecord(instance: "A", app: appID, type: "clock", size: .small, col: 0, row: 0)]
+        externals.install([other], autoLaunch: [])            // gone for a moment (a rebuild swaps the bundle)
+        externals.install([app, other], autoLaunch: [])
+        XCTAssertEqual(externals.supervisor.record(appID)?.autoLaunch, true)
+    }
+
+    func testAModeChangedDuringTheSyncIsSentAfterIt() {
+        connector.deferred = []
+        startApp()
+        XCTAssertEqual(connector.deferred?.map(\.command).contains("widget"), true)
+        layer.setEditing(true)
+        XCTAssertTrue(widgetRequests.filter { $0["action"] == "edit" }.isEmpty, "not synced yet")
+        let held = connector.deferred ?? []
+        connector.deferred = nil
+        for item in held { item.reply() }
+        XCTAssertEqual(widgetRequests.last, ["action": "edit", "state": "on"])
+    }
+
+    func testAWholeNumberSettingReadBackAsAnIntIsNotResent() {
+        startApp()
+        _ = call(["action": "add", "type": "clock"])
+        event(["instance": "W1", "change": "settings", "settings": ["scale": 1.0]])
+        connector.requests = []
+        stored.instances[0].settings = ["scale": .int(1)]      // layouts.json writes 1.0 as 1
+        layer.configChanged()
+        XCTAssertTrue(widgetRequests.isEmpty)
+    }
+
+    func testArgumentsWithoutASubVerbAreAnError() {
+        XCTAssertEqual(call([:])["ok"] as? Bool, true, "bare widgets lists")
+        XCTAssertEqual(call(["instance": "W1", "size": "small"])["error"] as? String,
+                       "widgets action must be one of list, types, add, remove, move, resize, layer, settings, edit, reveal")
+    }
+
+    func testWidgetFramesAreRecognisedForDragSnapping() {
+        stored.instances = [WidgetRecord(instance: "A", app: appID, type: "clock", size: .small, col: 0, row: 0)]
+        XCTAssertTrue(layer.isWidgetFrame(CGRect(x: 24, y: 681, width: 170, height: 170)))
+        XCTAssertFalse(layer.isWidgetFrame(CGRect(x: 24, y: 681, width: 400, height: 170)))
+    }
+
     // MARK: Menu
 
     func testWidgetsMenuOffersRevealEditAddAndEachWidget() throws {
@@ -431,9 +476,11 @@ final class WidgetLayerTests: XCTestCase {
         let hud = HUDLoadoutEngine(externals: externals, dockPosition: { nil }, setDockPosition: { _ in })
         var captured: HUDLoadout?
         hud.capture { captured = $0 }
-        XCTAssertNil(captured?.widgets, "no widgets placed: the loadout leaves them alone")
-        stored.instances = [WidgetRecord(instance: "A", app: appID, type: "clock", size: .small, col: 2, row: 0)]
+        XCTAssertNil(captured?.widgets, "no widget layer")
         hud.widgets = layer
+        hud.capture { captured = $0 }
+        XCTAssertNil(captured?.widgets, "none placed: the loadout leaves the widgets alone")
+        stored.instances = [WidgetRecord(instance: "A", app: appID, type: "clock", size: .small, col: 2, row: 0)]
         hud.capture { captured = $0 }
         XCTAssertEqual(captured?.widgets, stored.instances)
         let data = try JSONEncoder().encode(try XCTUnwrap(captured))

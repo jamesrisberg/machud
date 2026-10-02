@@ -14,11 +14,15 @@ extension WidgetLayer {
 
     /// `widgets [list]`, `widgets types`, `widgets add [app=] type= [size=] [screen=] [col= row=]
     /// [layer=] [settings=]`, `widgets remove|move|resize|layer|settings instance= …`,
-    /// `widgets edit|reveal on|off|toggle`.
+    /// `widgets edit|reveal on|off|toggle`. A bare `widgets` lists; arguments without a sub-verb
+    /// are an error, so a change that lost its sub-verb cannot pass for a list.
     func handle(_ args: [String: String], done: @escaping ([String: Any]) -> Void) {
-        let action = args["action"] ?? args["_"].flatMap { Self.actions.contains($0) ? $0 : nil }
-            ?? Self.actions.first { args[$0] != nil && $0 != "layer" && $0 != "settings" } ?? "list"
         func fail(_ error: Any) { done(["ok": false, "error": "\(error)"]) }
+        let named = args["action"] ?? args["_"].flatMap { Self.actions.contains($0) ? $0 : nil }
+        guard let action = named ?? (args.isEmpty ? "list" : nil) else {
+            fail("widgets action must be one of \(Self.actions.joined(separator: ", "))")
+            return
+        }
         // The CLI's bare sub-verb arrives as `<word>=1`; it is not a value.
         var args = args
         if let word = args["_"], Self.actions.contains(word), args[word] == "1" { args[word] = nil }

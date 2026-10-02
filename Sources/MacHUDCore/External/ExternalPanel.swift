@@ -78,7 +78,7 @@ final class ExternalPanel: Panel {
     /// `action drop paths=<HUDDrop.encode>` (plus `id=` when the app has several panels),
     /// launching the app first if needed.
     func drop(_ urls: [URL], completion: ((Result<[String: Any], Error>) -> Void)? = nil) {
-        var args = HUDDrop.args(for: urls, panel: app.manifest.panels.count > 1 ? descriptor.id : nil)
+        var args = HUDDrop.args(for: urls, panel: app.manifest.presentedPanels.count > 1 ? descriptor.id : nil)
         args["name"] = HUDDrop.action
         supervisor.send(app.id, command: "action", args: args, completion: completion)
     }

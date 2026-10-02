@@ -90,9 +90,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // An announced, forgotten or newly installed app: push `state` and rebuild the dock
         // now, even when no panel's visibility changed.
-        externals.onAppsChanged = { [weak router, weak toolDock] in
+        externals.onAppsChanged = { [weak self, weak router, weak toolDock] in
             router?.publishState()
             toolDock?.refresh()
+            // Types may have come or gone: the gallery, the reveal hotkey and every app's widgets.
+            self?.widgets.configChanged()
+            self?.registerWidgetsHotkey()
         }
         control.start()
         displays = DisplayWatcher { [weak self] in self?.displaysChanged() }
@@ -495,19 +498,26 @@ extension AppDelegate {
         layer.registerControl(control)
         let ui = WidgetUI(layer: layer)
         layer.onChange = { [weak ui] in ui?.refresh() }
-        ui.registerHotkey(store.hotkeys.widgetsReveal)
+        monitor.isWidget = { [weak layer] frame in layer?.isWidgetFrame(frame) ?? false }
         let previous = store.onChange
-        store.onChange = { [weak layer, weak ui, weak store] in
+        store.onChange = { [weak self, weak layer] in
             previous?()
             MainActor.assumeIsolated {
                 layer?.configChanged()
-                ui?.registerHotkey(store?.hotkeys.widgetsReveal)
+                self?.registerWidgetsHotkey()
             }
         }
         widgets = layer
         widgetUI = ui
+        registerWidgetsHotkey()
         externals.refreshKeepRunning()
         engine.hudEngine?.widgets = layer
+    }
+
+    /// ⌃⌥W (`hotkeys.widgets`) only while some app serves widgets, so the chord stays free otherwise.
+    fileprivate func registerWidgetsHotkey() {
+        guard let widgets, let widgetUI else { return }
+        widgetUI.registerHotkey(widgets.servingApps.isEmpty ? nil : store.hotkeys.widgetsReveal)
     }
 
     /// The set of attached displays changed: pin by-name references to the displays now

@@ -1,7 +1,8 @@
 import AppKit
 import HUDKit
 
-/// `"widgets"` in layouts.json: the grid desktop widgets snap to and every placed widget.
+/// `"widgets"` in layouts.json: the grid desktop widgets snap to and every placed widget. Read
+/// leniently: a bad value reads as its default and a widget that does not decode is skipped.
 ///
 /// ```json
 /// "widgets": {"cell": 170, "gap": 16, "margin": 24,
@@ -34,10 +35,10 @@ struct WidgetsConfig: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        cell = try c.decodeIfPresent(Double.self, forKey: .cell)
-        gap = try c.decodeIfPresent(Double.self, forKey: .gap)
-        margin = try c.decodeIfPresent(Double.self, forKey: .margin)
-        instances = try c.decodeIfPresent([WidgetRecord].self, forKey: .instances) ?? []
+        cell = try? c.decodeIfPresent(Double.self, forKey: .cell)
+        gap = try? c.decodeIfPresent(Double.self, forKey: .gap)
+        margin = try? c.decodeIfPresent(Double.self, forKey: .margin)
+        instances = (try? c.decodeIfPresent(LossyList<WidgetRecord>.self, forKey: .instances))?.items ?? []
     }
 
     var cellSize: CGFloat { CGFloat(max(40, cell ?? Self.defaultCell)) }
@@ -49,6 +50,24 @@ struct WidgetsConfig: Codable, Equatable {
     }
 
     func record(_ id: String) -> WidgetRecord? { instances.first { $0.instance == id } }
+}
+
+/// A list that skips the entries that do not decode, so one hand-edited bad widget never
+/// costs the others (or the whole layouts.json).
+struct LossyList<Element: Decodable>: Decodable {
+    var items: [Element]
+
+    /// Takes any value without reading it, which moves the container past it.
+    private struct Skip: Decodable { init(from decoder: Decoder) {} }
+
+    init(from decoder: Decoder) throws {
+        var c = try decoder.unkeyedContainer()
+        var items: [Element] = []
+        while !c.isAtEnd {
+            if let item = try? c.decode(Element.self) { items.append(item) } else { _ = try? c.decode(Skip.self) }
+        }
+        self.items = items
+    }
 }
 
 /// One placed widget as MacHUD keeps it: which app draws it, where it sits on the grid and

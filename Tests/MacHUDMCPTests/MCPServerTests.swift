@@ -259,6 +259,8 @@ final class MCPServerTests: XCTestCase {
                                     "panels": [["id": "clock", "title": "Clock", "kind": "widget"]]]]])
         loadApps()
         XCTAssertEqual(text(call("show_panel", ["app": "widgetHUD"])), "widgetHUD serves only widgets (see list_widgets)")
+        let show = tools.definitions.first { $0["name"] as? String == "show_panel" }
+        XCTAssertFalse((show?["description"] as? String ?? "").contains("widgetHUD"), "a widget-only app has no panel to show")
     }
 
     func testDockParkingSessionsFeedAndVoiceTools() {

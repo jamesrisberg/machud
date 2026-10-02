@@ -73,6 +73,10 @@ public final class MacHUDTools: @unchecked Sendable {
             "type": "string",
             "description": "The panel id within the app (list_app_actions shows them). Default: the app's first panel.",
         ]
+        let panelApps = apps.filter { !$0.dockPanels.isEmpty }
+        let panelAppList = panelApps.isEmpty
+            ? "No HUD app with panels is discovered right now (call machud_status)."
+            : "Apps: " + panelApps.map { "\($0.name) (\($0.id))" }.joined(separator: ", ") + "."
         let appList = apps.isEmpty
             ? "No HUD apps are discovered right now (call machud_status)."
             : "Apps: " + apps.map { "\($0.name) (\($0.id))" }.joined(separator: ", ") + "."
@@ -113,13 +117,13 @@ public final class MacHUDTools: @unchecked Sendable {
                              "description": "none: windows only (default); include: windows and the HUD; only: just the HUD."],
                  ], required: ["name"], destructive: true),
             tool("show_panel",
-                 "Show an app's panel where the user last had it (launching the app if needed). " + appList,
+                 "Show an app's panel where the user last had it (launching the app if needed). " + panelAppList,
                  properties: ["app": appProperty("The app"), "panel": panelProperty], required: ["app"], idempotent: true),
             tool("hide_panel",
-                 "Hide an app's panel, remembering where it was. An app that is not running is left alone. " + appList,
+                 "Hide an app's panel, remembering where it was. An app that is not running is left alone. " + panelAppList,
                  properties: ["app": appProperty("The app"), "panel": panelProperty], required: ["app"], idempotent: true),
             tool("toggle_panel",
-                 "Show an app's panel if it is hidden, hide it if it shows. " + appList,
+                 "Show an app's panel if it is hidden, hide it if it shows. " + panelAppList,
                  properties: ["app": appProperty("The app"), "panel": panelProperty], required: ["app"]),
             tool("list_app_actions",
                  "List an app's panels, capabilities and the action verbs its manifest declares (for app_action), "
@@ -214,7 +218,7 @@ public final class MacHUDTools: @unchecked Sendable {
                  properties: [
                      "mode": ["type": "string", "enum": ["edit", "reveal"], "description": "Which mode."],
                      "state": ["type": "string", "enum": ["on", "off", "toggle"], "description": "Default toggle."],
-                 ], required: ["mode"], idempotent: true),
+                 ], required: ["mode"]),
         ]
     }
 
