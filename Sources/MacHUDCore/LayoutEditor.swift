@@ -16,6 +16,8 @@ final class LayoutEditorController: NSObject {
     /// Captures what is on screen for a layout (wired to the loadout engine), so new
     /// loadouts in the editor start with the current arrangement.
     var captureProvider: ((Layout) -> [Slot])?
+    /// The desktop widgets, shown and moved in the editor (the widget layer).
+    weak var widgets: LayoutEditorWidgets?
 
     var isOpen: Bool { window != nil }
 
@@ -76,6 +78,7 @@ final class LayoutEditorController: NSObject {
         v.layoutIndex = index
         v.panelChoices = panelChoicesProvider?() ?? []
         v.captureProvider = captureProvider
+        v.widgetSource = widgets
         let loadoutsAtOpen = config.loadouts
         v.onSave = { [weak self] config, layoutIndex in
             guard let self else { return }
@@ -97,7 +100,11 @@ final class LayoutEditorController: NSObject {
         w.makeKeyAndOrderFront(nil)
         w.makeFirstResponder(v)
         v.buildPanel()
+        v.reloadWidgets()
     }
+
+    /// The placed widgets or the widget types changed.
+    func widgetsChanged() { view?.reloadWidgets() }
 
     func close() {
         view?.stopAnimation()
@@ -200,6 +207,45 @@ enum LoadoutFixup {
     }
 }
 
+// MARK: - Widgets in the editor
+
+/// A placed desktop widget as the layout editor shows it.
+struct EditorWidget: Equatable {
+    var id: String
+    var title: String
+    var symbol: String
+    var size: HUDWidgetSize
+    /// Cocoa screen coordinates.
+    var frame: CGRect
+}
+
+/// A widget type the editor's Add Widget menu offers.
+struct EditorWidgetType: Equatable {
+    var app: String
+    var appName: String
+    var type: String
+    var title: String
+    var symbol: String
+    var sizes: [HUDWidgetSize]
+    /// False for a type that allows one instance and has it.
+    var canAdd: Bool
+}
+
+/// The desktop widgets as the layout editor works with them. Changes go through the widget
+/// layer at once, the same path as every other widget change, so they are not part of the
+/// editor's Save, Cancel or undo.
+@MainActor
+protocol LayoutEditorWidgets: AnyObject {
+    /// The widgets placed on the display whose frame is `screenFrame`.
+    func editorWidgets(on screenFrame: CGRect) -> [EditorWidget]
+    func editorWidgetTypes() -> [EditorWidgetType]
+    /// Moves a widget to the free spot nearest `frame` on `grid` (the one the editor shows).
+    /// Returns a note when it went elsewhere or could not move.
+    func editorMove(_ id: String, to frame: CGRect, grid: GridSize) -> String?
+    /// Adds a widget at the first free spot on that display; `done` gets a note or why not.
+    func editorAdd(app: String, type: String, size: HUDWidgetSize, screenFrame: CGRect, done: @escaping (String?) -> Void)
+}
+
 // MARK: - Editor view
 
 final class EditorView: NSView {
@@ -213,6 +259,13 @@ final class EditorView: NSView {
     var captureProvider: ((Layout) -> [Slot])?
     /// Registered panel ids (dock, dev servers, ...), offered by the occupant picker.
     var panelChoices: [PanelChoice] = []
+    /// The desktop widgets: shown as fixed-size blocks, moved and added live.
+    weak var widgetSource: LayoutEditorWidgets?
+    /// The widgets on this screen, Cocoa screen coordinates.
+    private var widgetBlocks: [EditorWidget] = []
+    private var widgetPreview: CGRect?
+    /// What the last widget move or add said (moved elsewhere, no room).
+    private var widgetNote: String?
 
     private var selected: Int?
     private var hovered: Int?
@@ -231,6 +284,8 @@ final class EditorView: NSView {
         case move(index: Int, start: FractionRect, startPoint: CGPoint)
         case resize(index: Int, edges: Set<Edge>, start: FractionRect)
         case hit(index: Int, anchor: CGPoint)
+        /// A widget, in view coordinates.
+        case widget(id: String, start: CGRect, startPoint: CGPoint)
     }
     private var drag: Drag?
     private var rawAnchor: CGPoint?
@@ -246,6 +301,8 @@ final class EditorView: NSView {
     private let layoutPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let loadoutPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let gridPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let widgetPopup = NSPopUpButton(frame: .zero, pullsDown: true)
+    private var widgetSeparator: NSView?
     private let gridPresets: [GridSize] = [
         GridSize(cols: 24, rows: 12), GridSize(cols: 48, rows: 27), GridSize(cols: 64, rows: 36),
         GridSize(cols: 96, rows: 54), GridSize(cols: 128, rows: 72), GridSize(cols: 192, rows: 108),
@@ -376,6 +433,16 @@ final class EditorView: NSView {
         window?.makeFirstResponder(self)
         let p = convert(event.locationInWindow, from: nil)
         guard visible.contains(p), layout != nil else { return }
+        if widgetNote != nil { widgetNote = nil; needsDisplay = true }
+        // Widgets lie over the regions; ⌘-drag (a new region) and hit-zone painting reach under them.
+        let underWidgets = hitPaintFor != nil || !event.modifierFlags.intersection([.command, .option]).isEmpty
+        if !underWidgets, let block = hitWidget(at: p) {
+            drag = .widget(id: block.id, start: block.rect, startPoint: p)
+            widgetPreview = block.rect
+            NSCursor.closedHand.push()
+            needsDisplay = true
+            return
+        }
         let fp = toFraction(p)
         rawAnchor = fp
         rawCurrent = fp
@@ -420,8 +487,14 @@ final class EditorView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard let d = drag, var spring = live else { return }
         let p = convert(event.locationInWindow, from: nil)
+        if case .widget(_, let start, let startPoint) = drag {
+            widgetPreview = widgetGrid.dragged(start, by: CGSize(width: p.x - startPoint.x, height: p.y - startPoint.y))
+            requestPanelAvoidance()
+            needsDisplay = true
+            return
+        }
+        guard let d = drag, var spring = live else { return }
         let fp = CGPoint(x: clamp01(toFraction(p).x), y: clamp01(toFraction(p).y))
         rawCurrent = fp
 
@@ -446,6 +519,9 @@ final class EditorView: NSView {
             if edges.contains(.top) { top = min(snapY(fp.y), bottom - minH) }
             if edges.contains(.bottom) { bottom = max(snapY(fp.y), top + minH) }
             spring.target = FractionRect(x: left, y: top, w: right - left, h: bottom - top)
+
+        case .widget:
+            return
         }
         live = spring
         startAnimation()
@@ -454,6 +530,16 @@ final class EditorView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if case .widget(let id, let start, _) = drag {
+            NSCursor.pop()
+            let target = widgetPreview ?? start
+            drag = nil
+            widgetPreview = nil
+            if target != start { moveWidget(id, to: target) }
+            requestPanelAvoidance()
+            needsDisplay = true
+            return
+        }
         defer {
             drag = nil; rawAnchor = nil; rawCurrent = nil; live = nil
             requestPanelAvoidance(); needsDisplay = true
@@ -486,6 +572,9 @@ final class EditorView: NSView {
             layout = l
             dirty = true
 
+        case .widget:
+            return
+
         case .move(let index, let start, _), .resize(let index, _, let start):
             guard l.regions.indices.contains(index) else { return }
             if target == start { _ = undoStack.popLast(); return }
@@ -505,6 +594,8 @@ final class EditorView: NSView {
         var newHover: Int?
         if !visible.contains(p) {
             c = .arrow
+        } else if hitWidget(at: p) != nil {
+            c = .openHand
         } else if hitCardButton(at: p) != nil {
             c = .pointingHand
             newHover = hovered
@@ -644,6 +735,13 @@ final class EditorView: NSView {
     }
 
     private func cancelDrag() {
+        if case .widget = drag {
+            // Nothing was pushed for undo: widgets move live.
+            drag = nil; widgetPreview = nil
+            NSCursor.pop()
+            needsDisplay = true
+            return
+        }
         drag = nil; rawAnchor = nil; rawCurrent = nil; live = nil
         _ = undoStack.popLast()
         NSCursor.pop()
@@ -909,7 +1007,9 @@ final class EditorView: NSView {
         gridPopup.target = self
         gridPopup.action = #selector(gridChosen)
         for g in gridPresets { gridPopup.addItem(withTitle: "\(g.cols) × \(g.rows)") }
-        for popup in [layoutPopup, loadoutPopup, gridPopup] {
+        widgetPopup.toolTip = "Add a desktop widget on this screen (it is placed at once)"
+        widgetSeparator = separatorView()
+        for popup in [layoutPopup, loadoutPopup, gridPopup, widgetPopup] {
             popup.bezelStyle = .texturedRounded
             popup.controlSize = .regular
             popup.font = .systemFont(ofSize: 12, weight: .medium)
@@ -963,6 +1063,7 @@ final class EditorView: NSView {
             icon("camera.viewfinder", "Capture windows on screen into this loadout", #selector(captureIntoLoadout)),
             separatorView(),
             gridLabel, gridPopup,
+            widgetSeparator!, widgetPopup,
             separatorView(),
             icon("questionmark.circle", "Show shortcuts", #selector(toggleHelp)),
             text("Cancel", #selector(cancelTapped), key: ".", mods: .command),
@@ -1034,7 +1135,8 @@ final class EditorView: NSView {
         let half = CGSize(width: size.width / 2, height: size.height / 2)
         let inset: CGFloat = 12
         let pad: CGFloat = 14
-        let blocks: [CGRect] = l.regions.indices.compactMap { displayRect($0) }.map { toView($0).insetBy(dx: -pad, dy: -pad) }
+        let blocks: [CGRect] = (l.regions.indices.compactMap { displayRect($0) }.map(toView) + widgetRects.map(\.rect))
+            .map { $0.insetBy(dx: -pad, dy: -pad) }
 
         let minX = visible.minX + inset + half.width, maxX = visible.maxX - inset - half.width
         let minY = visible.minY + inset + half.height, maxY = visible.maxY - inset - half.height
@@ -1150,6 +1252,134 @@ final class EditorView: NSView {
         dirty = true
     }
 
+    // MARK: Widgets
+
+    /// The layout grid on this screen as widgets snap to it (the grid shown, in view coordinates).
+    private var widgetGrid: WidgetGrid { WidgetGrid(visible: visible, grid: grid) }
+
+    private var screenFrame: CGRect { CGRect(origin: screenOrigin, size: bounds.size) }
+
+    /// The widget blocks in view coordinates, the one being dragged at its preview.
+    private var widgetRects: [(widget: EditorWidget, rect: CGRect)] {
+        widgetBlocks.map { w in
+            if case .widget(let id, _, _) = drag, id == w.id, let widgetPreview { return (w, widgetPreview) }
+            return (w, w.frame.offsetBy(dx: -screenOrigin.x, dy: -screenOrigin.y))
+        }
+    }
+
+    private func hitWidget(at p: CGPoint) -> (id: String, rect: CGRect)? {
+        widgetRects.last { $0.rect.contains(p) }.map { ($0.widget.id, $0.rect) }
+    }
+
+    /// Reads the placed widgets and the widget types again.
+    func reloadWidgets() {
+        widgetBlocks = widgetSource?.editorWidgets(on: screenFrame) ?? []
+        syncWidgetPopup()
+        requestPanelAvoidance()
+        needsDisplay = true
+    }
+
+    private func moveWidget(_ id: String, to rect: CGRect) {
+        widgetNote = widgetSource?.editorMove(id, to: rect.offsetBy(dx: screenOrigin.x, dy: screenOrigin.y), grid: grid)
+        reloadWidgets()
+    }
+
+    /// The Add Widget pull-down: every widget type by app, a submenu of sizes when it has several.
+    private func syncWidgetPopup() {
+        guard panelBuilt else { return }
+        let types = widgetSource?.editorWidgetTypes() ?? []
+        widgetPopup.isHidden = types.isEmpty
+        widgetSeparator?.isHidden = types.isEmpty
+        let menu = NSMenu()
+        let head = NSMenuItem(title: "Add Widget", action: nil, keyEquivalent: "")
+        head.image = NSImage(systemSymbolName: "plus.square.on.square", accessibilityDescription: nil)
+        menu.addItem(head)
+        let apps = Set(types.map(\.app)).count
+        var lastApp: String?
+        for t in types {
+            if apps > 1, t.app != lastApp {
+                if lastApp != nil { menu.addItem(.separator()) }
+                let header = NSMenuItem(title: t.appName, action: nil, keyEquivalent: "")
+                header.isEnabled = false
+                menu.addItem(header)
+            }
+            lastApp = t.app
+            let item = NSMenuItem(title: t.title, action: nil, keyEquivalent: "")
+            item.image = NSImage(systemSymbolName: t.symbol, accessibilityDescription: nil)
+            item.isEnabled = t.canAdd
+            func sizeItem(_ title: String, _ size: HUDWidgetSize) -> NSMenuItem {
+                let mi = NSMenuItem(title: title, action: t.canAdd ? #selector(widgetChosen(_:)) : nil, keyEquivalent: "")
+                mi.target = self
+                mi.representedObject = [t.app, t.type, size.rawValue]
+                mi.isEnabled = t.canAdd
+                return mi
+            }
+            if t.sizes.count == 1 {
+                let mi = sizeItem(t.title, t.sizes[0])
+                mi.image = item.image
+                menu.addItem(mi)
+            } else {
+                let sub = NSMenu()
+                for size in t.sizes { sub.addItem(sizeItem(WidgetMenuModel.title(size), size)) }
+                item.submenu = sub
+                menu.addItem(item)
+            }
+        }
+        menu.autoenablesItems = false
+        widgetPopup.menu = menu
+        panel.layoutSubtreeIfNeeded()
+        let size = panel.fittingSize
+        if panel.frame.size != size { panel.setFrameSize(size); placePanel() }
+    }
+
+    @objc private func widgetChosen(_ item: NSMenuItem) {
+        guard let parts = item.representedObject as? [String], parts.count == 3,
+              let size = HUDWidgetSize(rawValue: parts[2]) else { return }
+        widgetSource?.editorAdd(app: parts[0], type: parts[1], size: size, screenFrame: screenFrame) { [weak self] note in
+            self?.widgetNote = note
+            self?.reloadWidgets()
+        }
+    }
+
+    /// Each widget as a fixed-size block with its symbol and title; the one being dragged is
+    /// accented, with its starting place dashed.
+    private func drawWidgets() {
+        let accent = NSColor.controlAccentColor
+        let radius = HUDWidgetStyle.cornerRadius
+        if case .widget(_, let start, _) = drag {
+            let ghost = NSBezierPath(roundedRect: start.insetBy(dx: 1, dy: 1), xRadius: radius, yRadius: radius)
+            ghost.setLineDash([6, 4], count: 2, phase: 0)
+            ghost.lineWidth = 1
+            NSColor.white.withAlphaComponent(0.5).setStroke()
+            ghost.stroke()
+        }
+        for (widget, rect) in widgetRects {
+            var dragging = false
+            if case .widget(let id, _, _) = drag, id == widget.id { dragging = true }
+            let path = NSBezierPath(roundedRect: rect.insetBy(dx: 1, dy: 1), xRadius: radius, yRadius: radius)
+            NSColor(calibratedWhite: 0.13, alpha: 0.85).setFill()
+            path.fill()
+            if dragging { accent.withAlphaComponent(0.3).setFill(); path.fill() }
+            (dragging ? accent : NSColor.white.withAlphaComponent(0.6)).setStroke()
+            path.lineWidth = dragging ? 2.5 : 1.5
+            path.stroke()
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: NSColor.white]
+            let title = NSAttributedString(string: widget.title, attributes: attrs)
+            let ts = title.size()
+            let icon = symbol(widget.symbol, size: 20)
+            let iconHeight = icon?.size.height ?? 0
+            let total = iconHeight + 6 + ts.height
+            var y = rect.midY + total / 2
+            if let icon {
+                y -= iconHeight
+                icon.draw(in: CGRect(x: rect.midX - icon.size.width / 2, y: y, width: icon.size.width, height: icon.size.height))
+                y -= 6
+            }
+            title.draw(at: CGPoint(x: rect.midX - min(ts.width, rect.width - 16) / 2, y: y - ts.height))
+        }
+    }
+
     // MARK: Drawing
 
     override func draw(_ dirtyRect: NSRect) {
@@ -1239,7 +1469,10 @@ final class EditorView: NSView {
                       at: CGPoint(x: visible.midX, y: visible.midY), emphasized: false)
         }
 
+        drawWidgets()
+
         if dirty { drawHint("● Unsaved changes") }
+        if let widgetNote { drawHint(widgetNote, color: .white, line: 1) }
         if showHelp { drawHelp() }
     }
 
@@ -1382,10 +1615,11 @@ final class EditorView: NSView {
         text.draw(at: CGPoint(x: pill.minX + 6, y: pill.minY + 2))
     }
 
-    private func drawHint(_ text: String) {
+    private func drawHint(_ text: String, color: NSColor = .systemYellow, line: Int = 0) {
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.systemYellow]
-        NSAttributedString(string: text, attributes: attrs).draw(at: CGPoint(x: visible.minX + 16, y: visible.maxY - 30))
+            .font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: color]
+        NSAttributedString(string: text, attributes: attrs)
+            .draw(at: CGPoint(x: visible.minX + 16, y: visible.maxY - 30 - CGFloat(line) * 18))
     }
 
     private func drawHelp() {
@@ -1393,6 +1627,7 @@ final class EditorView: NSView {
             "Drag on empty space: new region   ·   ⌘-drag: new region on top of others   ·   Drag region: move   ·   Drag edge/corner: resize",
             "Card buttons: ✕ delete · ✎ rename · ⊕ paint hit zone (⌥-drag also works; H toggles)   ·   ⌫ delete   ·   ⏎ rename   ·   Arrows nudge",
             "⌘↑ / ⌘↓ raise or lower a stacked region   ·   Tab: next layout   ·   ⌘Z undo   ·   ⌘S save   ·   ⌘. / Esc close   ·   ? toggles this help   ·   drag the ⋮⋮ panel to move it",
+            "Widgets: drag one to move it, or Add Widget in the panel; they snap to the grid and change at once (Save, Cancel and ⌘Z leave them)",
         ]
         let para = NSMutableParagraphStyle(); para.alignment = .center; para.lineSpacing = 3
         let attrs: [NSAttributedString.Key: Any] = [
