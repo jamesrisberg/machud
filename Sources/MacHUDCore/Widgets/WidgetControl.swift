@@ -12,7 +12,7 @@ extension WidgetLayer {
         }
     }
 
-    /// `widgets [list]`, `widgets types`, `widgets add [app=] type= [size=] [screen=] [col= row=]
+    /// `widgets [list]`, `widgets types`, `widgets add [app=] type= [size=] [screen=] [x= y= | col= row=]
     /// [layer=] [settings=]`, `widgets remove|move|resize|layer|settings instance= …`,
     /// `widgets edit|reveal on|off|toggle`. A bare `widgets` lists; arguments without a sub-verb
     /// are an error, so a change that lost its sub-verb cannot pass for a list.
@@ -44,7 +44,7 @@ extension WidgetLayer {
                     guard let ref = ScreenRef.parse(raw) else { throw Failure("screen must be main, builtin, a number or a name") }
                     return ref
                 }
-                let cell = try Self.cell(args)
+                let position = try Self.position(args, grid: grid())
                 let layer = try args["layer"].map(Self.layer) ?? .desktop
                 var settings: [String: HUDSettingValue] = [:]
                 if let raw = args["settings"] {
@@ -55,7 +55,7 @@ extension WidgetLayer {
                         settings[key] = try Self.checked(key, value, schema: s)
                     }
                 }
-                add(app: args["app"], type: type, size: size, screen: screen, cell: cell, layer: layer, settings: settings) { [weak self] result in
+                add(app: args["app"], type: type, size: size, screen: screen, position: position, layer: layer, settings: settings) { [weak self] result in
                     switch result {
                     case .failure(let error): fail(error)
                     case .success(let (record, note)):
@@ -70,14 +70,14 @@ extension WidgetLayer {
                 done(["ok": true, "removed": id])
             case "move":
                 let id = try instanceID()
-                guard let cell = try Self.cell(args) else { throw Failure("widgets move needs col= and row=") }
+                guard let position = try Self.position(args, grid: grid()) else { throw Failure("widgets move needs x= y= or col= row=") }
                 let screen = try args["screen"].map { raw -> ScreenRef in
                     guard let ref = ScreenRef.parse(raw) else { throw Failure("screen must be main, builtin, a number or a name") }
                     return ref
                 }
-                let (at, name) = try move(id, to: cell, screen: screen)
+                let note = try move(id, to: position, screen: screen)
                 var r: [String: Any] = ["ok": true, "instance": instanceJSON(id)]
-                if at != cell { r["note"] = "\(cell) is taken; placed at \(at) on \(name)" }
+                if let note { r["note"] = note }
                 done(r)
             case "resize":
                 let id = try instanceID()
@@ -125,18 +125,28 @@ extension WidgetLayer {
 
     // MARK: - JSON
 
+    /// The layout grid widgets snap to.
     var gridJSON: [String: Any] {
-        let c = config()
-        return ["cell": Double(c.cellSize), "gap": Double(c.gapSize), "margin": Double(c.marginSize)]
+        let g = grid()
+        return ["cols": g.cols, "rows": g.rows]
     }
+
+    /// `x`, `y` and the same in grid-line units (`col`, `row`).
+    func positionJSON(_ p: WidgetGrid.Position) -> [String: Any] {
+        let lines = WidgetGrid(visible: .zero, grid: grid()).lines(p)
+        return ["x": p.x, "y": p.y, "col": Self.jsonNumber(lines.col), "row": Self.jsonNumber(lines.row)]
+    }
+
+    /// A whole number as an int, so `col` reads as `12`, not `12.0`.
+    static func jsonNumber(_ d: Double) -> Any { d == d.rounded() && abs(d) < 1e9 ? Int(d) : d }
 
     /// One instance as `widgets list` shows it.
     func json(_ record: WidgetRecord, placed: WidgetPlacement.Placed? = nil, screens: [WidgetScreen]? = nil) -> [String: Any] {
         let screens = screens ?? self.screens()
         let placed = placed ?? placements()[record.instance]
         var d: [String: Any] = ["instance": record.instance, "app": record.app, "type": record.type,
-                                "size": record.size.rawValue, "layer": record.layer.rawValue,
-                                "col": record.col, "row": record.row, "settings": record.settingsJSON]
+                                "size": record.size.rawValue, "layer": record.layer.rawValue, "settings": record.settingsJSON]
+        if record.legacyCell == nil { d.merge(positionJSON(record.position)) { a, _ in a } }
         if let app = externals.app(matching: record.app) {
             d["appName"] = app.name
             d["health"] = supervisor.record(app.id)?.health.rawValue ?? "notRunning"
@@ -149,7 +159,7 @@ extension WidgetLayer {
             d["frame"] = HUDWidgetInstance.frameJSON(placed.frame)
             if screens.indices.contains(placed.screen) { d["display"] = screens[placed.screen].name }
             if placed.screenMissing { d["screenMissing"] = true }
-            if placed.moved { d["placedAt"] = ["col": placed.cell.col, "row": placed.cell.row] }
+            if placed.moved { d["placedAt"] = positionJSON(placed.position) }
             if placed.overlapping { d["overlapping"] = true }
         }
         if let problem = problems[record.instance] { d["problem"] = problem }
@@ -192,13 +202,30 @@ extension WidgetLayer {
         return layer
     }
 
-    /// `col=` and `row=` together, or neither.
-    static func cell(_ args: [String: String]) throws -> WidgetGrid.Cell? {
-        switch (args["col"], args["row"]) {
+    /// A widget's top-left: `x= y=` as fractions (0 to 1) of the display's visible frame from
+    /// its top-left corner, or `col= row=` as line indices of the layout grid (`grid` in
+    /// layouts.json; col 0 to cols, row 0 to rows); nil for neither. Snapped and kept inside
+    /// the display when placed.
+    static func position(_ args: [String: String], grid: GridSize) throws -> WidgetGrid.Position? {
+        let fractions = (args["x"], args["y"]), lines = (args["col"], args["row"])
+        if fractions != (nil, nil), lines != (nil, nil) { throw Failure("give x= y= or col= row=, not both") }
+        switch fractions {
+        case (nil, nil): break
+        case (let x?, let y?):
+            guard let fx = Double(x), let fy = Double(y), (0...1).contains(fx), (0...1).contains(fy) else {
+                throw Failure("x and y must be numbers from 0 to 1")
+            }
+            return WidgetGrid.Position(x: fx, y: fy)
+        default: throw Failure("give both x= and y=")
+        }
+        switch lines {
         case (nil, nil): return nil
         case (let c?, let r?):
-            guard let col = Int(c), let row = Int(r), col >= 0, row >= 0 else { throw Failure("col and row must be whole numbers from 0") }
-            return WidgetGrid.Cell(col: col, row: row)
+            let g = WidgetGrid(visible: .zero, grid: grid)
+            guard let col = Double(c), let row = Double(r), col >= 0, row >= 0, col <= Double(g.cols), row <= Double(g.rows) else {
+                throw Failure("col must be a grid line from 0 to \(g.cols) and row one from 0 to \(g.rows)")
+            }
+            return g.position(col: col, row: row)
         default: throw Failure("give both col= and row=")
         }
     }

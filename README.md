@@ -142,12 +142,17 @@ weather and a calendar; serversHUD, Stash and MechaHUD each add a widget beside 
 (Running Servers, Latest Clips, Claude Sessions).
 
 - **Add**: status menu › Widgets › Add Widget, or **Edit Widgets…**, which opens a gallery of
-  every widget by app with an Add button per size. Small is one grid cell, medium two side by
-  side, large two by two, extra large four by two. A widget can be placed several times, each
-  with its own settings.
-- **Arrange**: in edit mode the widgets unlock: drag one and it snaps to the nearest free cells
-  of the grid shown on each display; its corner controls remove it, open its settings and step
-  through its sizes. Done or Esc locks them again.
+  every widget by app with an Add button per size (small, medium, large, extra large; each a
+  fixed size). A widget can be placed several times, each with its own settings.
+- **Arrange**: widgets live on the same grid as your layouts, like small windows of a fixed
+  size. In edit mode they unlock and every display shows the layout editor's grid with your
+  layout's regions faintly under it: drag a widget and it snaps to the grid, its edges flush
+  with region edges and the screen edges, never on top of another widget. Its corner controls
+  remove it, open its settings and step through its sizes. Done or Esc locks them again.
+- **In the layout editor**: your widgets show as blocks you can drag on the grid, and the
+  panel's **Add Widget** menu places new ones. Widget changes apply right away and Save keeps
+  them (Save and Cancel are for the layout). Widgets snap to the saved grid; a new density
+  moves them onto it once you save.
 - **Layers**: widgets sit on the desktop under your windows. **⌃⌥W** raises them all above
   windows until you press it again or Esc; Float Above Windows keeps one on top for good.
 - They are on every desktop, come back where they were after a restart, a display change or the
@@ -201,12 +206,13 @@ the editor in a toast. The screen dims and shows a fine snap grid
 (96 × 54 by default; pick 24 × 12 up to 192 × 108 from the panel).
 
 Shapes always land exactly on grid lines and spring from line to line as you
-drag. Each region card shows glass buttons in its top-right corner when hovered
+drag. Desktop widgets on that screen show as blocks you can drag too; they snap to
+the same grid and move right away (see Desktop widgets). Each region card shows glass buttons in its top-right corner when hovered
 or selected: **✕** delete, **✎** rename, **⊕** paint a hit zone (click it, then
 drag anywhere; click again on a region that has one to clear it).
 
 The floating glass panel holds the layout picker (+ new, ✎ rename, 🗑 delete),
-the grid density, help, Cancel and Save. It slides out of the way of regions on
+the grid density, **Add Widget** (when an app serves widgets), help, Cancel and Save. It slides out of the way of regions on
 its own. Drag it by its ⋮⋮ grip to move it somewhere else; that spot becomes
 its new home and it keeps dodging regions from there.
 
@@ -233,7 +239,7 @@ the JSON is there if you prefer to type it.
 {
   "gap": 8,                       // optional points of space between regions / screen edges
   "trigger": "shift",             // shift | option | control | command | always
-  "grid": { "cols": 96, "rows": 54 },   // editor snap grid
+  "grid": { "cols": 96, "rows": 54 },   // snap grid for regions and widgets
   "layouts": [
     {
       "name": "Sidebar + Main",

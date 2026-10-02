@@ -178,35 +178,40 @@ public final class MacHUDTools: @unchecked Sendable {
                  "Speak text aloud with the voice host's reply voice, replacing anything being said.",
                  properties: ["text": ["type": "string", "description": "What to say."]], required: ["text"]),
             tool("list_widgets",
-                 "List the desktop widgets: every placed widget (id, app, type, size, grid cell, display, frame, "
+                 "List the desktop widgets: every placed widget (id, app, type, size, position on the layout grid, display, frame, "
                  + "layer, settings, and problems such as a type its app no longer serves), every widget type the "
                  + "apps serve (sizes, whether it can be placed more than once, its settings schema), and whether "
                  + "edit or reveal mode is on.",
                  properties: [:], readOnly: true),
             tool("add_widget",
-                 "Place a desktop widget (launching its app if needed). Without col/row it takes the first free "
-                 + "grid cells; with them, the nearest free ones. list_widgets shows the types.",
+                 "Place a desktop widget (launching its app if needed). Widgets keep a fixed size and snap to the "
+                 + "layout grid (the one regions use). Without a position it takes the first free spot down the left "
+                 + "edge; with x/y or col/row, the free spot nearest it. list_widgets shows the types.",
                  properties: [
                      "type": ["type": "string", "description": "The widget type (e.g. clock)."],
                      "app": ["type": "string", "description": "The serving app's bundle id or name; needed only when two apps serve the type."],
                      "size": ["type": "string", "enum": HUDWidgetSize.allCases.map(\.rawValue),
                               "description": "One of the type's sizes. Default: its default size."],
                      "screen": ["type": "string", "description": "Display name, main, builtin or index. Default: the main display."],
-                     "col": ["type": "integer", "description": "Grid column from the left (0-based)."],
-                     "row": ["type": "integer", "description": "Grid row from the top (0-based)."],
+                     "x": ["type": "number", "description": "Left edge as a fraction (0-1) of the display's visible width, from the left."],
+                     "y": ["type": "number", "description": "Top edge as a fraction (0-1) of the display's visible height, from the top."],
+                     "col": ["type": "number", "description": "Left edge as a layout-grid line index (0 to the grid's columns); instead of x/y."],
+                     "row": ["type": "number", "description": "Top edge as a layout-grid line index (0 to the grid's rows)."],
                      "layer": ["type": "string", "enum": ["desktop", "float"],
                                "description": "desktop (under windows, the default) or float (above windows)."],
                      "settings": ["type": "object", "description": "The widget's own settings (its type's schema)."],
                  ], required: ["type"]),
             tool("change_widget",
-                 "Change or remove one placed widget: remove it, move it to grid cells, resize it, float it above "
+                 "Change or remove one placed widget: remove it, move it on the layout grid, resize it, float it above "
                  + "windows or put it back on the desktop, or merge settings into its own.",
                  properties: [
                      "instance": ["type": "string", "description": "The widget's id (list_widgets)."],
                      "action": ["type": "string", "enum": ["remove", "move", "resize", "layer", "settings"],
                                 "description": "What to do."],
-                     "col": ["type": "integer", "description": "For move: grid column (0-based)."],
-                     "row": ["type": "integer", "description": "For move: grid row (0-based)."],
+                     "x": ["type": "number", "description": "For move: left edge as a fraction (0-1) of the visible width."],
+                     "y": ["type": "number", "description": "For move: top edge as a fraction (0-1) of the visible height."],
+                     "col": ["type": "number", "description": "For move: left edge as a layout-grid line index; instead of x/y."],
+                     "row": ["type": "number", "description": "For move: top edge as a layout-grid line index."],
                      "screen": ["type": "string", "description": "For move: another display (name, main, builtin or index)."],
                      "size": ["type": "string", "enum": HUDWidgetSize.allCases.map(\.rawValue), "description": "For resize."],
                      "layer": ["type": "string", "enum": ["desktop", "float"], "description": "For layer."],
@@ -432,9 +437,7 @@ public final class MacHUDTools: @unchecked Sendable {
     private func addWidget(_ args: Arguments) throws -> ToolResult {
         var a = ["action": "add", "type": try args.required("type")]
         for key in ["app", "size", "screen", "layer"] { if let v = try args.string(key) { a[key] = v } }
-        let col = try args.int("col"), row = try args.int("row")
-        guard (col == nil) == (row == nil) else { throw InvalidArgument("give both col and row, or neither") }
-        if let col, let row { a["col"] = String(col); a["row"] = String(row) }
+        a.merge(try widgetPosition(args)) { $1 }
         let settings = try args.object("settings")
         if !settings.isEmpty { a["settings"] = Arguments.stringify(settings) }
         return try machud("widgets", a)
@@ -447,9 +450,9 @@ public final class MacHUDTools: @unchecked Sendable {
         case "remove":
             break
         case "move":
-            guard let col = try args.int("col"), let row = try args.int("row") else { throw InvalidArgument("move needs col and row") }
-            a["col"] = String(col)
-            a["row"] = String(row)
+            let position = try widgetPosition(args)
+            guard !position.isEmpty else { throw InvalidArgument("move needs x and y or col and row") }
+            a.merge(position) { $1 }
             if let screen = try args.string("screen") { a["screen"] = screen }
         case "resize":
             a["size"] = try args.required("size")
@@ -463,6 +466,20 @@ public final class MacHUDTools: @unchecked Sendable {
             throw InvalidArgument("action must be remove, move, resize, layer or settings, not \(action)")
         }
         return try machud("widgets", a)
+    }
+
+    /// A widget position for `widgets add|move`: `x`/`y` (fractions) or `col`/`row` (grid
+    /// lines), each pair both or neither, never both pairs; empty when none is given.
+    private func widgetPosition(_ args: Arguments) throws -> [String: String] {
+        func text(_ d: Double) -> String { d == d.rounded() && abs(d) < 1e9 ? String(Int(d)) : String(d) }
+        var out: [String: String] = [:]
+        for (a, b) in [("x", "y"), ("col", "row")] {
+            let first = try args.number(a), second = try args.number(b)
+            guard (first == nil) == (second == nil) else { throw InvalidArgument("give both \(a) and \(b), or neither") }
+            if let first, let second { out[a] = text(first); out[b] = text(second) }
+        }
+        guard out.count < 4 else { throw InvalidArgument("give x and y or col and row, not both") }
+        return out
     }
 
     private func toolDock(_ args: Arguments) throws -> ToolResult {
