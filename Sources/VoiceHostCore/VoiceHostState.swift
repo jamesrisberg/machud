@@ -218,12 +218,22 @@ public struct VoiceCard: Codable, Equatable, Sendable {
     public var progress: [String]
     /// An approval the brain is waiting on.
     public var approval: VoiceApproval?
+    /// While the reply is spoken, how much of it the card shows: up to the end of the chunk
+    /// playing, in `Character`s of `reply`; nil shows all of it.
+    public var spokenUpTo: Int?
 
-    public init(prompt: String = "", reply: String = "", progress: [String] = [], approval: VoiceApproval? = nil) {
+    public init(prompt: String = "", reply: String = "", progress: [String] = [], approval: VoiceApproval? = nil,
+                spokenUpTo: Int? = nil) {
         self.prompt = prompt
         self.reply = reply
         self.progress = progress
         self.approval = approval
+        self.spokenUpTo = spokenUpTo
+    }
+
+    /// The reply as the card shows it: in step with the voice while it is spoken.
+    public var shownReply: String {
+        spokenUpTo.map { String(reply.prefix($0)) } ?? reply
     }
 }
 

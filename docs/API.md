@@ -833,7 +833,11 @@ brain's current session when its runtime drives one other apps show too (mechacl
 one (`sessions providers`); the reply card then offers "Open in <app>". `phase` is `{"name": …}`, one of `idle`, `listening`, `transcribing`,
 `working`, `awaitingApproval`, `speaking`, `failed`, plus `"mode": "dictation"|"agent"` for
 `listening` and `transcribing` and `"message"` for `failed`. `card` is `{prompt, reply,
-progress[], approval?: {id, summary, detail}}`. `gesturePending` is true from the fn press that
+progress[], approval?: {id, summary, detail}, spokenUpTo?}`: while the reply is spoken the card shows
+it only up to `spokenUpTo` (`Character`s of `reply`, the end of the part being said), so the text
+appears in step with the voice; `reply` is always the whole reply so far, and the pinned and
+expanded conversation always show all of it. When a turn that will be spoken is submitted, the
+reply voice is warmed up (Kokoro loads its model) while the brain thinks. `gesturePending` is true from the fn press that
 begins a take until the gesture is decided: the press outlasts a tap (dictation), the double-tap
 window after a tap lapses (dictation, or a discarded tap in hold mode), a second press moves the
 take to the agent, or the take ends. The orb shows its armed look meanwhile and commits to the

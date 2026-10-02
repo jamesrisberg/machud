@@ -146,5 +146,10 @@ final class OrbSnapshotTests: XCTestCase {
             prompt: "Clean up the build folder", reply: "I can remove the stale build outputs.",
             approval: VoiceApproval(id: "a2", summary: "Delete ~/dev/machud/.build (2.4 GB)?", detail: "rm -rf ~/dev/machud/.build")))))
         try OrbSnapshot.write(peek, to: out.appendingPathComponent("30-peek.png"))
+        // A reply being spoken: the peek shows it up to the part being said.
+        let reply = "You have two things: the design review at 2 pm with Priya, and a dentist appointment at 4:30."
+        let paced = try XCTUnwrap(OrbSnapshot.render(VoiceHostState(phase: .speaking, card: VoiceCard(
+            prompt: "What's on my calendar this afternoon?", reply: reply, spokenUpTo: 58))))
+        try OrbSnapshot.write(paced, to: out.appendingPathComponent("40-peek-spoken-so-far.png"))
     }
 }

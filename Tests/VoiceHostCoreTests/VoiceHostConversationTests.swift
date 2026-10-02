@@ -249,6 +249,97 @@ final class VoiceHostConversationTests: XCTestCase {
         XCTAssertTrue(controller.conversation.rows.isEmpty)
         XCTAssertEqual(store.saved.last?.rows.count, 0)
     }
+
+    // MARK: Speech in step with the card
+
+    private func spokenSettings() -> VoiceHostSettings {
+        var settings = VoiceHostSettings()
+        settings.voice.speakReplies = true
+        return settings
+    }
+
+    func testTheVoiceWarmsUpWhenATurnThatWillBeSpokenIsSubmitted() async {
+        let controller = makeController(spokenSettings())
+        XCTAssertEqual(speaker.warmUps, 0)
+        await voiceTurn(controller, "hello")
+        XCTAssertEqual(speaker.warmUps, 1)
+        brain.push(status: "idle", output: "Hi.")
+        speaker.complete()
+        _ = controller.send(typed: "and you?")
+        await settled(controller)
+        XCTAssertEqual(speaker.warmUps, 1, "a typed turn's reply is not spoken by default")
+    }
+
+    func testATypedTurnWarmsUpWhenItsReplyIsSpoken() async {
+        var settings = VoiceHostSettings()
+        settings.speakTypedReplies = true
+        let controller = makeController(settings)
+        _ = controller.send(typed: "hello")
+        XCTAssertEqual(speaker.warmUps, 1)
+        withExtendedLifetime(controller) {}
+    }
+
+    func testNothingWarmsUpWhenRepliesAreNotSpoken() async {
+        let controller = makeController()
+        await voiceTurn(controller, "hello")
+        XCTAssertEqual(speaker.warmUps, 0)
+    }
+
+    func testThePeekRevealsTheReplyInStepWithTheVoice() async {
+        let controller = makeController(spokenSettings())
+        await voiceTurn(controller, "hello")
+        let reply = "Hi there. How are you today?"
+        brain.push(status: "running", output: reply)
+        XCTAssertEqual(controller.state.card?.reply, reply, "the card keeps the whole reply")
+        XCTAssertEqual(controller.state.card?.shownReply, "", "nothing before the voice starts")
+        speaker.startChunk(0, 0..<9)
+        XCTAssertEqual(controller.state.card?.shownReply, "Hi there.")
+        speaker.startChunk(1, 9..<28)
+        XCTAssertEqual(controller.state.card?.shownReply, reply)
+        XCTAssertEqual(controller.conversation.rows.last?.text, reply, "the conversation is never paced")
+        brain.push(status: "idle", output: reply + " Bye.")
+        XCTAssertEqual(controller.state.card?.shownReply, reply)
+        speaker.complete()
+        XCTAssertEqual(controller.state.card?.shownReply, reply + " Bye.", "all of it once the voice is done")
+        XCTAssertNil(controller.state.card?.spokenUpTo)
+    }
+
+    func testStoppingTheVoiceShowsTheWholeReply() async {
+        let controller = makeController(spokenSettings())
+        await voiceTurn(controller, "hello")
+        brain.push(status: "running", output: "One. Two. Three.")
+        speaker.startChunk(0, 0..<4)
+        XCTAssertEqual(controller.state.card?.shownReply, "One.")
+        controller.perform(.orbClicked)
+        XCTAssertEqual(controller.state.card?.shownReply, "One. Two. Three.")
+    }
+
+    func testAFailedOrInterruptedTurnShowsTheWholeReply() async {
+        let controller = makeController(spokenSettings())
+        await voiceTurn(controller, "hello")
+        brain.push(status: "running", output: "One. Two.")
+        speaker.startChunk(0, 0..<4)
+        brain.push(status: "interrupted", output: "One. Two.")
+        XCTAssertEqual(controller.state.card?.shownReply, "One. Two.")
+    }
+
+    func testAReplyThatIsNotSpokenIsShownWhole() async {
+        let controller = makeController()
+        await voiceTurn(controller, "hello")
+        brain.push(status: "running", output: "Hi there.")
+        XCTAssertEqual(controller.state.card?.shownReply, "Hi there.")
+        speaker.startChunk(0, 0..<2)
+        XCTAssertEqual(controller.state.card?.shownReply, "Hi there.", "a preview's chunks do not pace the card")
+    }
+
+    func testAChunkNeverHidesTextAlreadyShown() async {
+        let controller = makeController(spokenSettings())
+        await voiceTurn(controller, "hello")
+        brain.push(status: "running", output: "One. Two.")
+        speaker.startChunk(1, 5..<9)
+        speaker.startChunk(0, 0..<4)
+        XCTAssertEqual(controller.state.card?.shownReply, "One. Two.")
+    }
 }
 
 /// The conversation file, in memory.

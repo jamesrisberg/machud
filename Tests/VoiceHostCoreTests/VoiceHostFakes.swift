@@ -162,7 +162,15 @@ final class FakeSpeaker: ReplySpeaking {
     var finishes = 0
     var stops = 0
 
+    var onChunkStarted: ((SpeechChunk) -> Void)?
+    var warmUps = 0
+
     func configure(_ voice: VoiceSettings) { voices.append(voice) }
+    func warmUp() { warmUps += 1 }
+    /// The voice starts the chunk spanning `range` of the reply's text.
+    func startChunk(_ index: Int, _ range: Range<Int>) {
+        onChunkStarted?(SpeechChunk(text: "", index: index, rawRange: range))
+    }
     func append(_ text: String) {
         spoken += text
         if !text.isEmpty { isSpeaking = true }

@@ -12,7 +12,10 @@ final class SilentSpeaker: ReplySpeaking {
     private var pending = ""
     private var generation = 0
 
+    var onChunkStarted: ((SpeechChunk) -> Void)?
+
     func configure(_ voice: VoiceSettings) {}
+    func warmUp() {}
 
     func append(_ text: String) {
         pending += text
