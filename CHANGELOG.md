@@ -38,6 +38,35 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - An app that serves only widgets is listed under Apps like any other, without a tool dock
   button, and a panel kind MacHUD does not know is skipped instead of being shown as a window.
 
+### Quitting an app yourself keeps it quit
+- Quitting a HUD app with ⌘Q or its own Quit menu item now counts as you meaning it: MacHUD no
+  longer brings the app back, including apps it keeps running for their widgets. Open the app
+  again and it is kept up as before. An app that is killed or crashes is still relaunched.
+  Needs apps built on HUDKit 0.3 or newer.
+
+### widgetHUD and the other widget apps
+- widgetHUD is a new HUD app that puts a clock, the weather and a calendar on your desktop as
+  widgets. serversHUD (Running Servers), Stash (Latest Clips) and MechaHUD (Claude Sessions) now
+  offer widgets too, and the README lists them.
+
+### The orb lets you finish your sentence
+- Talking to the agent through the orb, the wake word or `ask` no longer stops at the first
+  pause. It waits 2 seconds of quiet by default (was 1.2), and a further 1.5 seconds when your
+  last words sound unfinished ("and", "um", a trailing comma) or have not been transcribed yet.
+  Speech is judged against the room's own noise, measured continuously, so soft speech in a quiet
+  room counts and a click or a knock does not; a fan that starts mid-take can read as speech for
+  up to 3 seconds. A take can run up to two minutes.
+- If it hears nothing that could be speech for 10 seconds (no words transcribed, nothing above a
+  whisper), the orb stops listening and says "Didn't hear anything" instead of keeping the
+  microphone open.
+- New **Hands-free** settings in the Voice tab: **End of turn** (Automatically, or When I tap),
+  **Pause before sending** (1 to 4 seconds) and **Microphone sensitivity** (low, medium, high).
+  Scripts use `machud voice settings set handsFree.pause=3` and friends; a value that is not one
+  of a setting's choices (`handsFree.endOfTurn=never`) is now refused with an error.
+- Every hands-free take records why it ended (the pause, the two-minute limit, a tap, a cancel)
+  with what the microphone measured, in `machud voice state` and `machud voice status`
+  (`lastTakeEnd`) and in the log, so a take that ends too soon can be diagnosed.
+
 ### MacHUD checks that a panel really appeared
 - When you click or summon a HUD app's panel and it opens on another desktop (or nowhere on
   screen), MacHUD no longer takes the app's word that it is showing: it says where the panel

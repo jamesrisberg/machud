@@ -20,8 +20,9 @@ apps that make up the rest of the HUD:
 - **Radial wheel**: hold **⌃⌥Space**, drag toward a loadout, release. Three rings: preview,
   apply, clear this screen and apply.
 - **Tool dock**: a Dock-like strip of the sibling apps (**⌃⌥D**).
-- **Widgets**: glass tiles on the desktop (a clock, the weather, your servers) that any sibling
-  can serve, placed on a grid, under your windows until **⌃⌥W** raises them.
+- **Widgets**: glass tiles on the desktop that any sibling can serve (widgetHUD's clock, weather
+  and calendar, serversHUD's running dev servers, Stash's latest clips, MechaHUD's Claude
+  sessions), placed on a grid, under your windows until **⌃⌥W** raises them.
 - **Parking**: tuck windows off an edge behind a hover orb.
 - **Menu bar**: hide menu bar items behind a separator, Hidden Bar style.
 - **Voice**: MacHUD runs its voice host (dictation and the agent brain) as a helper process,
@@ -136,7 +137,9 @@ script). See docs/API.md.
 ### Desktop widgets
 
 Any sibling app can serve widgets: small glass tiles on the desktop, such as a clock or the
-dev servers that are up. MacHUD places them and remembers where.
+dev servers that are up. MacHUD places them and remembers where. widgetHUD serves a clock, the
+weather and a calendar; serversHUD, Stash and MechaHUD each add a widget beside their panel
+(Running Servers, Latest Clips, Claude Sessions).
 
 - **Add**: status menu › Widgets › Add Widget, or **Edit Widgets…**, which opens a gallery of
   every widget by app with an Add button per size. Small is one grid cell, medium two side by
@@ -148,8 +151,9 @@ dev servers that are up. MacHUD places them and remembers where.
 - **Layers**: widgets sit on the desktop under your windows. **⌃⌥W** raises them all above
   windows until you press it again or Esc; Float Above Windows keeps one on top for good.
 - They are on every desktop, come back where they were after a restart, a display change or the
-  app relaunching, and never take focus. An app with widgets is kept running. A HUD loadout saves
-  the widgets with it and puts them back when applied.
+  app relaunching, and never take focus. An app with widgets is kept running, unless you quit it
+  yourself (its own Quit, ⌘Q or MacHUD's Quit); open it again and it is kept up again. A HUD
+  loadout saves the widgets with it and puts them back when applied.
 - Script them with `machud widgets …` (`list`, `types`, `add type=clock`, `move`, `resize`,
   `layer`, `settings`, `remove`, `edit on`, `reveal on`); see docs/API.md.
 
@@ -304,7 +308,8 @@ The repos sit next to this one (`~/dev/<name>`); `workspace.json` lists them.
 | [mechahud](../mechahud) | windowed app | Hosts the mechaclaude dashboard in a glass panel |
 | [ffmpeghud](../ffmpeghud) | hover app | ffmpeg presets (GIF, compress, trim, extract audio) for dropped files |
 | [magickhud](../magickhud) | hover app | ImageMagick presets for dropped images |
-| [servershud](../servershud) | hover app | Every dev server listening on your Mac, with stop and open |
+| [servershud](../servershud) | hover app | Every dev server listening on your Mac, with stop and open, and a Running Servers widget |
+| [widgethud](../widgethud) | widget app | Desktop widgets: a clock, the weather and a calendar (bundle `xyz.machud.widgethud`) |
 | [wormhole](../wormhole) | menu bar app (Xcode) | Glowing drop target that sends files with Magic Wormhole |
 | [archibald](../archibald) | menu bar app (Xcode) | Wake-phrase voice agent with an orb and transcript panel |
 
@@ -340,7 +345,9 @@ One JSON object per line in, one out: `{"command": "ping", "args": {}}` →
   Duplicate, Apply at Startup, Delete and New. The same edits from the shell: `machud
   loadouts rename name=Work to=Studio`, `duplicate`, `delete`, `startup`.
 - Voice settings live with the voice host: the Voice and Brain tabs, or `machud voice
-  settings get` and `machud voice settings set voice.speakReplies=true`. See
+  settings get` and `machud voice settings set voice.speakReplies=true`. The Voice tab's
+  Hands-free section sets when a take started by the orb or the wake word is sent: after a
+  pause (Pause before sending, Microphone sensitivity) or only when you tap. See
   [docs/API.md#voice](docs/API.md#voice).
 - MacHUD's own settings over the socket: `machud settings get`, `machud settings set
   gap=12 trigger=option`, `machud settings schema`. Keys: `enabled`, `trigger`

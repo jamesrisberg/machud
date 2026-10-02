@@ -293,7 +293,9 @@ its `Info.plist` and `machud.json`), else the first found. `apps` reports every 
 Supervision: launches are on demand (`panel show`, a loadout slot, `widgets add`) or at
 startup for `apps.autoLaunch` and apps with widgets placed. An `autoLaunch` app that exits unexpectedly is relaunched
 after 2 s, then 4 s, and given up on after 3 launches (`lastError: "gave up …"`);
-60 s of uptime resets the count. A lost subscription while the process lives is
+60 s of uptime resets the count. An app that pushed `quitting` before it exited (HUDKit 0.3+:
+its own Quit, ⌘Q, the `quit` verb) was quit by the user and is not relaunched, by a crash
+relaunch, a rescan or widget keep-running; opening it again supervises it as before. A lost subscription while the process lives is
 retried with backoff (0.5 s doubling to 8 s). Commands for an app whose socket is
 not up yet are queued for 20 s.
 
@@ -500,8 +502,10 @@ what the user does to a widget into placement.
   itself are saved; a widget asking to open its app summons the app's first panel.
 - **Running**: an app with widgets placed is kept running like an `autoLaunch` app: launched at
   startup and relaunched when it stops, unless it was quit through MacHUD (`apps quit`, the menu's
-  Quit). ⌘Q in the app itself or a kill counts as a crash and it comes back. An app quit through
-  MacHUD is kept running again once it is opened, from MacHUD or by hand. An isolated instance
+  Quit). For apps on HUDKit 0.3+, ⌘Q or the app's own Quit counts as the same user quit: the app
+  announces `quitting` before it exits and is not relaunched. A kill, a crash, or an app on older
+  HUDKit (which sends no `quitting`) counts as a crash and it comes back. An app quit by the user
+  is kept running again once it is opened, from MacHUD or by hand. An isolated instance
   launches nothing at startup (`MACHUD_APPLY_STARTUP`).
 - **Reveal hotkey**: ⌃⌥W is registered only while some app serves widgets; otherwise the chord
   is left to other apps. Esc is taken only while widgets are revealed or being edited.
@@ -653,9 +657,9 @@ see Running several instances).
 
 | Command | Args | Effect |
 | --- | --- | --- |
-| `voice state` | | `state {phase, inputLevel, partialTranscript, card?, hiddenForFullScreen, brainAvailable, brainProblem?, sessionKey?, sessionProvider?, activeRuntime?, wakeListening, wakeProblem?, muted, gesturePending, cardMode}` |
+| `voice state` | | `state {phase, inputLevel, partialTranscript, card?, hiddenForFullScreen, brainAvailable, brainProblem?, sessionKey?, sessionProvider?, activeRuntime?, wakeListening, wakeProblem?, muted, gesturePending, cardMode, lastTakeEnd?}` |
 | `voice hello` | | the voice host's `name` (`MacHUDVoice`), `version`, `pid` |
-| `voice status` | | MacHUD's view of the process: `status` (`running`, `restarting`, `disabled`, `stopped`, `failed`, `notInstalled`), `pid` while running, `socket`, `connected`, `muted` once connected, `error` (why it gave up) when `failed` |
+| `voice status` | | MacHUD's view of the process: `status` (`running`, `restarting`, `disabled`, `stopped`, `failed`, `notInstalled`), `pid` while running, `socket`, `connected`, `muted` and `lastTakeEnd` (see below) once connected, `error` (why it gave up) when `failed` |
 | `voice action` | `name=` `click`, `ask`, `dictate`, `stop`, `cancel`, `approve`, `deny`, `dismiss`, `mute`, `unmute`, `open-session`, `say`; `id=` for `approve`/`deny`; `text=` for `say` | performs it (`machud voice action mute` works too) |
 | `voice brain status` | | the voice host's `brain status` (below): whether the brain can take a turn, why not, the workspace, the runtime chosen and the one running, the runtimes found and MacHUD's tools |
 | `voice models` | `status` (default) / `download id=kokoro\|parakeet\|hey-jarvis` | the voice host's `models` (below): whether the Parakeet speech model, the Kokoro reply voice and the wake models are installed or downloading, or start a download |
@@ -671,6 +675,8 @@ When the voice host is not answering, `voice` replies `ok: false` with why (`sta
 The settings window's Voice tab (on/off, fn key mode, the agent gesture, the Parakeet speech
 model's Download button and progress, dictation history (Off, Text only, Text and audio; Share
 history with SpeakFree while SpeakFree is installed; where it is kept), the text feed toggles,
+Hands-free (End of turn: Automatically / When I tap; Pause before sending, 1–4 s; Microphone
+sensitivity, low/medium/high; the last two disabled while ending on a tap),
 wake word on/off with why it is not listening (`wakeProblem`), the phrase (only phrases there is
 a model for, each marked when its model is not installed), that model's Download button,
 progress and terms, and sensitivity, reply voice, spoken replies, spoken replies to typed messages, Test Voice (`action say`), the Kokoro voice's
@@ -693,7 +699,7 @@ HUDKit's JSON-lines socket, one request per connection, served by `MacHUDVoice` 
 | `state` | | `state`: the host's state (below) |
 | `subscribe` | `events=state,models` (optional) | keeps the connection open and pushes `{"event": "state", "state": {…}}` on every change (many times a second while listening) and `{"event": "models", "kokoro": {…}, "parakeet": {…}, "wake": […]}` as a model's status changes (its download progress) |
 | `settings` | `action=get` | `settings`: the whole settings object |
-| `settings` | `action=set settings=<JSON object>` | replaces the whole object (decoded leniently: missing or invalid keys take their defaults), saves `voice.json`, applies it and returns the stored `settings`. With `voice.wakeWordEnabled` true, a `voice.wakePhrase` no model detects (the default "Hey Computer") is saved as the first phrase there is a model for; while the wake word is off the phrase is kept as given |
+| `settings` | `action=set settings=<JSON object>` | replaces the whole object (decoded leniently: missing or invalid keys take their defaults, except that a choice setting (`keyMode`, `handsFree.endOfTurn`, `handsFree.sensitivity`, `history.mode`, `brain.runtime`, `voice.replyVoice`) with a value not among its choices is refused with `{ok: false, error}` and nothing is saved), saves `voice.json`, applies it and returns the stored `settings`. With `voice.wakeWordEnabled` true, a `voice.wakePhrase` no model detects (the default "Hey Computer") is saved as the first phrase there is a model for; while the wake word is off the phrase is kept as given |
 | `action` | `name=<click\|ask\|dictate\|stop\|cancel\|approve\|deny\|dismiss\|mute\|unmute>`, `id=` for `approve`/`deny` | performs it; returns `state` |
 | `action` | `name=say text=<text>` | speaks `text` with the configured reply voice, whether or not `voice.speakReplies` is on (previews in settings and onboarding), replacing anything being said; `{ok, state}`, or `{ok: false, error}` without `text`, while a take is recording, or without a voice. Silent under `MACHUD_VOICE_NO_SPEECH=1` |
 | `action` | `name=open-session` | asks MacHUD to show the brain's current session (`sessions open id=<sessionKey>` on MacHUD's control socket, `$MACHUD_SOCKET` else `/tmp/machud-<uid>.sock`); replies once MacHUD has, `{ok, app, state}`, or `{ok: false, error}` (also shown briefly under the orb) |
@@ -775,9 +781,41 @@ control socket, which hands them to the apps that provide `text-feed` (Stash); `
 (default false) sends each finished agent reply as `source=Agent` with the prompt as `title`.
 Sending never waits on MacHUD or fails a take.
 
+`handsFree` (`{endOfTurn, pause, sensitivity}`) sets when a hands-free take (the orb, the wake
+word, `action ask`) ends; a take held on the fn key ends when the key says so. With `endOfTurn`
+`auto` (the default) the take is sent after `pause` seconds of quiet once speech was heard
+(default 2; 1 to 4 in steps of 0.5, other values are brought to the nearest), plus 1.5 s while the
+sentence may not be over: the latest partial transcript ends mid-thought (a trailing and, but, so,
+because, or, um, uh, like, the, a, to, with, …, a comma or a dash), speech was heard after it
+arrived, or none has arrived yet in the first 3 s of the take (streaming sends the first one
+about 2.3 s in; without streaming there is no grace after that). The endpointer works on the
+levels SpeakFree reports every 50 ms (per-buffer RMS / 0.15, unsmoothed). The room's floor is the
+lowest level of the trailing 3 s times 1.2, updated on every level, so a quiet moment between
+words pulls it down at once and a room that gets louder lifts it within 3 s (until then the new
+noise can read as speech). Speech starts once the level has stayed at or above the threshold
+(the floor times 2, 2.5 or 3 for `sensitivity` `high`, `medium` (default) or `low`, never below
+0.018, 0.025 or 0.035) for 150 ms without falling below the quiet mark (halfway from the floor to
+the threshold); a shorter rise is not speech. Speech ends once the level has stayed below the
+quiet mark for 150 ms, and the quiet is counted from the start of that dip; a take never ends
+while a rise may be the start of a word. Silence before any speech never ends a take by a pause.
+With no speech detected 10 s into an automatic take it is thrown away (nothing is transcribed or
+sent) and the orb says "Didn't hear anything", unless there was evidence of speech the threshold
+missed (a loud start leaves no quiet to measure the floor by): a partial transcript with letters,
+or levels at or above the sensitivity's minimum for 0.3 s in all. Then the take counts as heard
+and ends by a pause from there. With `manual` silence never ends the take: a tap on the orb
+or the fn key, or `action stop`, sends it. Either way a take stops after 120 s.
+
+`lastTakeEnd` says how the latest hands-free take ended: `{reason, seconds, quietMs?, floor?,
+threshold?, pause?, grace}`. `reason` is `pause`, `maximum`, `nothingHeard`, `stop` (a tap or
+`action stop`), `cancelled`, `failed` (the dictation failed) or `dictation` (it ended by itself);
+`seconds` is the take's length; `quietMs` the quiet since the last speech; `floor` and `threshold`
+the levels at the end; `pause` the quiet the take needed (absent with `manual`) and `grace`
+whether it included the 1.5 s. The voice host also logs one line per take
+(`MacHUDVoice: hands-free take ended: …`).
+
 `state` is `{phase, inputLevel, partialTranscript, card?, hiddenForFullScreen, brainAvailable,
 brainProblem?, sessionKey?, sessionProvider?, activeRuntime?, wakeListening, wakeProblem?, muted,
-gesturePending, cardMode}`; `cardMode` is the reply card's state (see above). `activeRuntime` is the runtime the brain companion reports running (`codex`,
+gesturePending, cardMode, lastTakeEnd?}`; `cardMode` is the reply card's state (see above). `activeRuntime` is the runtime the brain companion reports running (`codex`,
 `claude`, `hermes`, `mclaude`), absent while none is connected.
 `wakeListening` is true while the wake word is armed; it pauses while a take records and listens
 again after. While the wake word is on (and voice is on and not muted) but not listening,

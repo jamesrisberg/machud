@@ -60,6 +60,8 @@ final class FakeDictation: DictationDriving {
     }
 
     func level(_ value: Double) { onUpdate?(takeID, .level(value)) }
+
+    func partial(_ text: String) { onUpdate?(takeID, .partial(text)) }
 }
 
 @MainActor

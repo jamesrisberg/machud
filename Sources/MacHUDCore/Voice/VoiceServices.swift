@@ -162,6 +162,7 @@ final class VoiceServices: NSObject {
         if let pid = supervisor.pid { d["pid"] = Int(pid) }
         if case .failed(let why) = supervisor.status { d["error"] = why }
         if let muted = connection.muted { d["muted"] = muted }
+        if let end = connection.state?["lastTakeEnd"] { d["lastTakeEnd"] = end }
         return d
     }
 

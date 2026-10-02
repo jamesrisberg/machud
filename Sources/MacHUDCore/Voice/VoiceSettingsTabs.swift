@@ -428,6 +428,9 @@ struct VoiceTabView: View {
                             help: "Each dictation's text joins the history of apps that keep a text feed, such as Stash.")
                 VoiceToggle(model: model, title: "Send agent replies too", path: "feedAgentReplies")
             }
+            Section("Hands-free") {
+                HandsFreeRows(model: model)
+            }
             Section("Wake word") {
                 VoiceToggle(model: model, title: "Listen for the wake word", path: "voice.wakeWordEnabled",
                             help: "Keeps the microphone open while on.")
@@ -601,6 +604,33 @@ struct ParakeetRow: View {
             }
         }
         Text("Parakeet turns speech into text on this Mac; dictation needs it. SpeakFree shares the same download.")
+            .font(.caption).foregroundStyle(.secondary)
+    }
+}
+
+/// When a take started by the orb, the wake word or `ask` is sent (`handsFree`): after a pause,
+/// or only on a tap. Pause and sensitivity apply to the automatic end only.
+struct HandsFreeRows: View {
+    @ObservedObject var model: VoiceSettingsModel
+
+    private var manual: Bool { model.string("handsFree.endOfTurn") == "manual" }
+
+    var body: some View {
+        VoicePicker(model: model, title: "End of turn", path: "handsFree.endOfTurn",
+                    options: [("auto", "Automatically"), ("manual", "When I tap")])
+        LabeledContent("Pause before sending") {
+            Stepper(value: Binding(get: { model.double("handsFree.pause") }, set: { model.set("handsFree.pause", $0) }),
+                    in: 1...4, step: 0.5) {
+                Text(String(format: "%.1f s", model.double("handsFree.pause"))).monospacedDigit()
+            }
+        }
+        .disabled(manual)
+        VoicePicker(model: model, title: "Microphone sensitivity", path: "handsFree.sensitivity",
+                    options: [("low", "Low"), ("medium", "Medium"), ("high", "High")])
+            .disabled(manual)
+        Text(manual
+             ? "Tap the orb or fn to send. Takes still stop after two minutes."
+             : "Sends once you stop talking, waiting a little longer when a sentence sounds unfinished. Higher sensitivity hears softer speech; lower ignores more background noise.")
             .font(.caption).foregroundStyle(.secondary)
     }
 }

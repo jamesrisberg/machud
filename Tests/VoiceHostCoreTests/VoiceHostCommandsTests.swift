@@ -62,6 +62,40 @@ final class VoiceHostCommandsTests: XCTestCase {
         XCTAssertEqual((get["settings"] as? [String: Any])?["keyMode"] as? String, "toggle")
     }
 
+    func testHandsFreeSettingsGoThroughTheSocket() throws {
+        let json = #"{"handsFree":{"endOfTurn":"manual","pause":3,"sensitivity":"high"}}"#
+        let reply = commands.handle("settings", ["action": "set", "settings": json])
+        let handsFree = try XCTUnwrap((reply["settings"] as? [String: Any])?["handsFree"] as? [String: Any])
+        XCTAssertEqual(handsFree["endOfTurn"] as? String, "manual")
+        XCTAssertEqual(handsFree["pause"] as? Double, 3)
+        XCTAssertEqual(handsFree["sensitivity"] as? String, "high")
+        XCTAssertEqual(controller.settings.handsFree, HandsFreeSettings(endOfTurn: .manual, pause: 3, sensitivity: .high))
+        let get = try XCTUnwrap(commands.handle("settings", ["action": "get"])["settings"] as? [String: Any])
+        XCTAssertEqual((get["handsFree"] as? [String: Any])?["endOfTurn"] as? String, "manual")
+    }
+
+    func testAChoiceSettingOutsideItsChoicesIsRefused() {
+        for json in [#"{"handsFree":{"endOfTurn":"never"}}"#, #"{"handsFree":{"sensitivity":3}}"#,
+                     #"{"keyMode":"edit"}"#, #"{"brain":{"runtime":"gpt"}}"#, #"{"voice":{"replyVoice":"x"}}"#,
+                     #"{"history":{"mode":"all"}}"#] {
+            let reply = commands.handle("settings", ["action": "set", "settings": json])
+            XCTAssertEqual(reply["ok"] as? Bool, false, json)
+            XCTAssertTrue((reply["error"] as? String ?? "").contains("must be one of"), "\(reply)")
+        }
+        XCTAssertEqual(controller.settings, VoiceHostSettings(), "nothing was saved")
+        let error = commands.handle("settings", ["action": "set", "settings": #"{"handsFree":{"endOfTurn":"never"}}"#])["error"]
+        XCTAssertEqual(error as? String, "handsFree.endOfTurn must be one of auto, manual, not never")
+    }
+
+    func testStateReportsHowTheLastTakeEnded() throws {
+        _ = commands.handle("action", ["name": "ask"])
+        _ = commands.handle("action", ["name": "stop"])
+        let state = try XCTUnwrap(commands.handle("state", [:])["state"] as? [String: Any])
+        let end = try XCTUnwrap(state["lastTakeEnd"] as? [String: Any])
+        XCTAssertEqual(end["reason"] as? String, "stop")
+        XCTAssertNotNil(end["seconds"])
+    }
+
     func testTurningVoiceOnThroughTheSocketTakesEffect() {
         _ = commands.handle("settings", ["action": "set", "settings": #"{"enabled":false}"#])
         XCTAssertNil(brain.configurations.last ?? nil)

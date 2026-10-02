@@ -33,6 +33,8 @@ final class FakeVoiceHost {
                                "note": "Personal, non-commercial use only. Downloaded when you ask, never bundled with MacHUD."]
     var wakeProblem: String?
     var activeRuntime: String?
+    /// The host's `lastTakeEnd`, when a hands-free take has ended.
+    var lastTakeEnd: [String: Any]?
     var historyRequests: [[String: String]] = []
     /// What `history status` resolves to while no `history` setting is saved.
     var historyDefault: [String: Any] = ["mode": "textAndAudio", "shareWithSpeakFree": true]
@@ -118,6 +120,7 @@ final class FakeVoiceHost {
         if let brainProblem { state["brainProblem"] = brainProblem }
         if let wakeProblem { state["wakeProblem"] = wakeProblem }
         if let activeRuntime { state["activeRuntime"] = activeRuntime }
+        if let lastTakeEnd { state["lastTakeEnd"] = lastTakeEnd }
         return state
     }
 }
@@ -307,6 +310,15 @@ final class VoiceControlTests: XCTestCase {
         XCTAssertEqual(reply["pid"] as? Int, 1000)
         XCTAssertEqual(reply["socket"] as? String, path)
         XCTAssertEqual(run(["hello"])["name"] as? String, "MacHUDVoice")
+    }
+
+    func testStatusCarriesHowTheLastTakeEnded() {
+        host.lastTakeEnd = ["reason": "pause", "seconds": 6.4, "quietMs": 2050, "grace": false]
+        supervisor.start()
+        XCTAssertTrue(spin(until: { self.voice.connection.isConnected }))
+        let end = run(["status"])["lastTakeEnd"] as? [String: Any]
+        XCTAssertEqual(end?["reason"] as? String, "pause")
+        XCTAssertEqual(end?["quietMs"] as? Int, 2050)
     }
 
     func testSecretValueCanComeFromStdin() {
