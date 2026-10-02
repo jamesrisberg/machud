@@ -70,6 +70,9 @@ final class ToolDock: NSObject, Panel {
     private(set) var isDragging = false
     private var menuOpen = false
     private var shownConfig: ToolDockConfig?
+    /// Set while a click or summon drives the hover machine, so the hover panel it shows
+    /// reports not reaching the screen; a passing hover only records it.
+    private var showsLoudly = false
 
     init(registry: PanelRegistry, externals: ExternalPanels, config: @escaping () -> ToolDockConfig,
          saveConfig: @escaping (ToolDockConfig) -> Void, stateURL: URL = ToolDockStore.defaultURL, ui: Bool = true) {
@@ -437,7 +440,9 @@ final class ToolDock: NSObject, Panel {
         hoverFrames[itemID] = frame
         let listening = panel.health == .running
         panel.requestFrame(frame)
-        panel.show(HUDPanelTransition(from: slot.edge, anchor: slot.frame, reason: .hover)) { _ in if listening { then?() } }
+        panel.show(HUDPanelTransition(from: slot.edge, anchor: slot.frame, reason: .hover), loud: showsLoudly) { _ in
+            if listening { then?() }
+        }
         if !listening { then?() }
     }
 
@@ -463,7 +468,7 @@ final class ToolDock: NSObject, Panel {
     func click(_ item: ToolDockItem, anchor: NSView?) {
         switch item.behaviour {
         case .hover:
-            perform(hover.click(item.id))
+            loudly { perform(hover.click(item.id)) }
         case .windowed:
             guard let id = item.panelIDs.first, let panel = registry.panel(id: id) else { return }
             toggle(panel, reason: .click)
@@ -478,6 +483,12 @@ final class ToolDock: NSObject, Panel {
             popUp(menu, anchor: anchor, event: nil)
         }
         updateIndicators()
+    }
+
+    private func loudly(_ body: () -> Void) {
+        showsLoudly = true
+        defer { showsLoudly = false }
+        body()
     }
 
     /// Summons a hidden (or parked) panel, dismisses a showing one.
@@ -521,7 +532,7 @@ final class ToolDock: NSObject, Panel {
     @discardableResult
     func summon(_ panel: Panel, reason: HUDPanelTransition.Reason = .summon) -> CGRect? {
         if let item = hoverItem(for: panel) {
-            perform(hover.open(item.id, pin: true))
+            loudly { perform(hover.open(item.id, pin: true)) }
             return hoverFrames[item.id]
         }
         if let host, host.mode(of: panel) == .parked {

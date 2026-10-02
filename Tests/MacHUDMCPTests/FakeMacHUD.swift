@@ -53,6 +53,8 @@ final class FakeMacHUD {
 
     static let pad: [String: Any] = [
         "id": "xyz.machud.scratch", "name": "Scratch", "health": "running", "running": true,
+        "outdated": true, "outdatedReason": "rebuilt after it started",
+        "contract": ["app": "0.1", "machud": "0.2", "older": true],
         "panels": ["xyz.machud.scratch/pad"],
         "manifest": ["id": "xyz.machud.scratch", "name": "Scratch", "socket": "scratch",
                      "panels": [["id": "pad", "title": "Scratch", "kind": "hover", "capabilities": ["acceptsFileDrop"],
