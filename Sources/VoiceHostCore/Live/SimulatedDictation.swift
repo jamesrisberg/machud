@@ -5,8 +5,9 @@ import SpeakFreeLib
 /// transcript, the post-capture phases) without opening the microphone, transcribing or typing,
 /// so MacHUD and the orchestrator can run an isolated voice host.
 ///
-/// Levels are speech for `speechDuration`, then silence, so a hands-free take ends through the
-/// endpointer as a real one would. Every take's text is `transcript`.
+/// Levels are speech for `speechDuration`, then silence, with `transcript` as the partial once
+/// the speech ends, so a hands-free take ends through the endpointer as a real one would. Every
+/// take's text is `transcript`.
 @MainActor
 final class SimulatedDictation: DictationDriving {
     var onUpdate: ((UUID, DictationUpdate) -> Void)?
@@ -82,9 +83,12 @@ final class SimulatedDictation: DictationDriving {
     private func tick(_ id: UUID, generation: Int) {
         schedule(levelInterval) { [weak self] in
             guard let self, self.generation == generation, isCapturing else { return }
+            let wasSpeaking = elapsed < speechDuration
             elapsed += levelInterval
             // A voice-like wobble while "speaking", then room noise.
-            let level = elapsed < speechDuration ? 0.35 + 0.25 * abs(sin(elapsed * 9)) : 0.02
+            let speaking = elapsed < speechDuration
+            if wasSpeaking, !speaking { onUpdate?(id, .partial(transcript)) }
+            let level = speaking ? 0.35 + 0.25 * abs(sin(elapsed * 9)) : 0.02
             onUpdate?(id, .level(level))
             tick(id, generation: generation)
         }

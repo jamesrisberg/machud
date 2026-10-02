@@ -6,6 +6,18 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 
 ## [Unreleased]
 
+### The orb lets you finish your sentence
+- Talking to the agent through the orb, the wake word or `ask` no longer stops at the first
+  pause. It waits 2 seconds of quiet by default (was 1.2), a further 1.5 seconds when your last
+  words sound unfinished ("and", "um", a trailing comma), and adapts to the room's noise, so soft
+  speech counts as speech and a click or a knock does not. A take can run up to two minutes.
+- New **Hands-free** settings in the Voice tab: **End of turn** (Automatically, or When I tap),
+  **Pause before sending** (1 to 4 seconds) and **Microphone sensitivity** (low, medium, high).
+  Scripts use `machud voice settings set handsFree.pause=3` and friends.
+- Every hands-free take records why it ended (the pause, the two-minute limit, a tap, a cancel)
+  with what the microphone measured, in `machud voice state` and `machud voice status`
+  (`lastTakeEnd`) and in the log, so a take that ends too soon can be diagnosed.
+
 ### MacHUD checks that a panel really appeared
 - When you click or summon a HUD app's panel and it opens on another desktop (or nowhere on
   screen), MacHUD no longer takes the app's word that it is showing: it says where the panel
