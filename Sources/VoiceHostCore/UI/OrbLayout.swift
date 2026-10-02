@@ -111,10 +111,58 @@ enum OrbLayout {
     /// The card's frame in screen coordinates: centered under the resting orb, height capped.
     static func cardFrame(size: CGSize, geometry: HUDNotchGeometry) -> CGRect {
         let height = min(size.height, cardMaxHeight)
-        let top = geometry.topAnchorY - orbTopGap - orbDiameter - cardGap
+        let top = cardTop(geometry: geometry)
         var x = geometry.screenFrame.midX - size.width / 2
         x = min(max(x, geometry.visibleFrame.minX), geometry.visibleFrame.maxX - size.width)
         return CGRect(x: x, y: top - height, width: size.width, height: height)
+    }
+
+    // MARK: Conversation
+
+    /// The pinned card: the whole conversation, scrollable, where the card hangs.
+    static let pinnedWidth: CGFloat = 400
+    static let pinnedMinHeight: CGFloat = 120
+    /// The pinned card is never taller than this, nor more than `pinnedScreenFraction` of the
+    /// visible screen.
+    static let pinnedMaxHeightCap: CGFloat = 560
+    static let pinnedScreenFraction: CGFloat = 0.6
+    /// The expanded card: about 640 points wide and 70% of the screen's height.
+    static let expandedWidth: CGFloat = 640
+    static let expandedHeightFraction: CGFloat = 0.7
+    /// The least room kept between the expanded card and the screen's edges.
+    static let expandedMargin: CGFloat = 16
+
+    /// The top of the card (and of the pinned and expanded conversation) in screen coordinates.
+    static func cardTop(geometry: HUDNotchGeometry) -> CGFloat {
+        geometry.topAnchorY - orbTopGap - orbDiameter - cardGap
+    }
+
+    static func pinnedMaxHeight(geometry: HUDNotchGeometry) -> CGFloat {
+        let room = cardTop(geometry: geometry) - geometry.visibleFrame.minY - expandedMargin
+        return max(pinnedMinHeight, floor(min(pinnedMaxHeightCap, geometry.visibleFrame.height * pinnedScreenFraction, room)))
+    }
+
+    /// The pinned conversation for content `contentHeight` tall: centered under the orb, its
+    /// top where the card's is, between `pinnedMinHeight` and `pinnedMaxHeight`.
+    static func pinnedFrame(contentHeight: CGFloat, geometry: HUDNotchGeometry) -> CGRect {
+        let height = min(max(ceil(contentHeight), pinnedMinHeight), pinnedMaxHeight(geometry: geometry))
+        return centeredUnderOrb(size: CGSize(width: pinnedWidth, height: height), geometry: geometry)
+    }
+
+    /// The expanded conversation: centered under the notch, its top where the card's is, as
+    /// large as `expandedWidth` × `expandedHeightFraction` of the screen while that fits.
+    static func expandedFrame(geometry: HUDNotchGeometry) -> CGRect {
+        let width = min(expandedWidth, geometry.visibleFrame.width - expandedMargin * 2)
+        let room = cardTop(geometry: geometry) - geometry.visibleFrame.minY - expandedMargin
+        let height = min((geometry.screenFrame.height * expandedHeightFraction).rounded(), room)
+        return centeredUnderOrb(size: CGSize(width: width, height: height), geometry: geometry)
+    }
+
+    private static func centeredUnderOrb(size: CGSize, geometry: HUDNotchGeometry) -> CGRect {
+        let top = cardTop(geometry: geometry)
+        var x = geometry.screenFrame.midX - size.width / 2
+        x = min(max(x, geometry.visibleFrame.minX), geometry.visibleFrame.maxX - size.width)
+        return CGRect(x: x, y: top - size.height, width: size.width, height: size.height)
     }
 
     // MARK: Card grow

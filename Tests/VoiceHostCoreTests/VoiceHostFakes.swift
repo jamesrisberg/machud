@@ -135,7 +135,7 @@ final class FakeBrain: BrainDriving {
     }
 
     static func snapshot(status: String, output: String, progress: String, approvals: [AgentApproval],
-                         error: String?, requestId: String?, turnId: String?,
+                         error: String?, requestId: String?, turnId: String?, threadId: String? = "thread",
                          sessionKey: String? = nil, runtime: String? = nil,
                          toolServers: AgentToolServerStatus? = nil) -> AgentSessionSnapshot {
         struct Wire: Encodable {
@@ -143,7 +143,7 @@ final class FakeBrain: BrainDriving {
             let approvals: [AgentApproval], error: String?, revision: Int, instanceId: String?, requestId: String?
             let sessionKey: String?, runtime: String?, toolServers: AgentToolServerStatus?
         }
-        let wire = Wire(threadId: "thread", turnId: turnId, status: status, output: output, progress: progress,
+        let wire = Wire(threadId: threadId, turnId: turnId, status: status, output: output, progress: progress,
                         approvals: approvals, error: error, revision: 1, instanceId: "i", requestId: requestId,
                         sessionKey: sessionKey, runtime: runtime, toolServers: toolServers)
         let data = try! JSONEncoder().encode(wire)
@@ -229,7 +229,9 @@ final class FakeWake: WakeDriving {
 @MainActor
 final class RecordingPresenter: VoiceHostPresenting {
     var states: [VoiceHostState] = []
+    var conversations: [[ConversationRow]] = []
     func render(_ state: VoiceHostState) { states.append(state) }
+    func renderConversation(_ rows: [ConversationRow]) { conversations.append(rows) }
 }
 
 /// A manual clock and scheduler.
