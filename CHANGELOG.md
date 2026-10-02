@@ -6,6 +6,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-02
+
 ### The orb's reply card becomes a conversation
 - Hover the reply card under the notch orb and it stays open and shows the whole conversation
   with the agent, scrollable, newest at the bottom.
