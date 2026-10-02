@@ -1,104 +1,177 @@
 import AppKit
 import HUDKit
 
-/// The widget grid on one display: square cells `cell` points wide, `gap` apart, inset
-/// `margin` from the visible frame. Column 0 is at the left, row 0 at the top. Pure, so it
-/// is unit tested.
+/// The layout grid on one display as widgets use it: `grid.cols` × `grid.rows` lines over the
+/// visible frame, the same lines the layout editor draws and regions snap to. A widget keeps
+/// its fixed size in points (`HUDWidgetSize.points()`); on each axis whichever of its edges is
+/// nearer a line snaps to it, so it can sit flush against a region's edge or the visible
+/// frame's. Pure, so it is unit tested.
 struct WidgetGrid: Equatable {
-    struct Cell: Hashable, Comparable, CustomStringConvertible {
-        var col: Int
-        var row: Int
-
-        /// Column-major: down the first column, then the next.
-        static func < (a: Cell, b: Cell) -> Bool { (a.col, a.row) < (b.col, b.row) }
-        var description: String { "\(col),\(row)" }
+    /// A widget's top-left corner as fractions of the visible frame, measured from its top-left
+    /// corner (the convention of regions' `FractionRect`).
+    struct Position: Equatable {
+        var x: Double
+        var y: Double
     }
 
     var visible: CGRect
-    var cell: CGFloat
-    var gap: CGFloat
-    var margin: CGFloat
+    var grid: GridSize
 
-    var pitch: CGFloat { cell + gap }
-    var columns: Int { max(0, Int(((visible.width - 2 * margin + gap) / pitch).rounded(.down))) }
-    var rows: Int { max(0, Int(((visible.height - 2 * margin + gap) / pitch).rounded(.down))) }
+    var cols: Int { max(1, grid.cols) }
+    var rows: Int { max(1, grid.rows) }
 
-    /// The frame of a widget of `size` whose top-left cell is `at`.
-    func frame(_ at: Cell, _ size: HUDWidgetSize) -> CGRect {
-        let points = size.points(cell: cell, gap: gap)
-        let top = visible.maxY - margin - CGFloat(at.row) * pitch
-        return CGRect(x: visible.minX + margin + CGFloat(at.col) * pitch, y: top - points.height,
-                      width: points.width, height: points.height)
+    /// The frame of a widget of `size` whose top-left is at `p`, as stored (not snapped).
+    func frame(_ p: Position, _ size: HUDWidgetSize) -> CGRect {
+        let s = size.points()
+        return CGRect(x: visible.minX + CGFloat(p.x) * visible.width, y: visible.maxY - CGFloat(p.y) * visible.height - s.height,
+                      width: s.width, height: s.height)
     }
 
-    /// The frame of one cell (for the edit-mode overlay).
-    func cellFrame(_ at: Cell) -> CGRect { frame(at, .small) }
-
-    /// Whether a widget of `size` at `at` lies inside the grid.
-    func fits(_ at: Cell, _ size: HUDWidgetSize) -> Bool {
-        at.col >= 0 && at.row >= 0 && at.col + size.cells.columns <= columns && at.row + size.cells.rows <= rows
+    /// Where `frame`'s top-left is, as fractions (to six places, which is well under a point).
+    func position(of frame: CGRect) -> Position {
+        Position(x: Self.fraction(frame.minX - visible.minX, of: visible.width),
+                 y: Self.fraction(visible.maxY - frame.maxY, of: visible.height))
     }
 
-    /// The cells a widget of `size` at `at` covers.
-    func cells(_ at: Cell, _ size: HUDWidgetSize) -> Set<Cell> {
-        var out: Set<Cell> = []
-        for c in 0..<size.cells.columns { for r in 0..<size.cells.rows { out.insert(Cell(col: at.col + c, row: at.row + r)) } }
+    /// The position of grid line `col` across and `row` down.
+    func position(col: Double, row: Double) -> Position {
+        Position(x: col / Double(cols), y: row / Double(rows))
+    }
+
+    /// `p` in grid-line units: whole numbers when the left and top edges sit on lines.
+    func lines(_ p: Position) -> (col: Double, row: Double) {
+        (Self.tidy(p.x * Double(cols)), Self.tidy(p.y * Double(rows)))
+    }
+
+    // MARK: - Snapping
+
+    /// `frame` snapped on each axis by whichever edge is nearer a line, kept inside the visible
+    /// frame. Exact (lines fall between points), so a stored position stays on its line.
+    func snap(_ frame: CGRect) -> CGRect {
+        place(left: Self.snapAxis(frame.minX - visible.minX, length: frame.width, extent: visible.width, lines: cols),
+              top: Self.snapAxis(visible.maxY - frame.maxY, length: frame.height, extent: visible.height, lines: rows),
+              size: frame.size)
+    }
+
+    /// Where a widget at `start` lands when dragged by `delta` (the layout editor's drag and an
+    /// app's frame event go through the same snap).
+    func dragged(_ start: CGRect, by delta: CGSize) -> CGRect {
+        snap(start.offsetBy(dx: delta.width, dy: delta.height))
+    }
+
+    /// One axis: `start` is the leading edge's offset into an `extent` cut by `lines` equal
+    /// steps. The leading edge goes to its nearest line unless the trailing edge is strictly
+    /// nearer to one; then the result is kept inside `0...extent - length` (0 when it is longer
+    /// than the extent), which puts it flush against that end.
+    static func snapAxis(_ start: CGFloat, length: CGFloat, extent: CGFloat, lines: Int) -> CGFloat {
+        let step = extent / CGFloat(max(1, lines))
+        guard step > 0 else { return 0 }
+        let lead = (start / step).rounded() * step
+        let trail = ((start + length) / step).rounded() * step - length
+        let snapped = abs(trail - start) < abs(lead - start) ? trail : lead
+        return min(max(snapped, 0), max(0, extent - length))
+    }
+
+    // MARK: - Free spots
+
+    /// Whether two widgets overlap; touching edges do not.
+    static func overlaps(_ a: CGRect, _ b: CGRect) -> Bool {
+        a.minX < b.maxX - 0.5 && b.minX < a.maxX - 0.5 && a.minY < b.maxY - 0.5 && b.minY < a.maxY - 0.5
+    }
+
+    /// The free snapped spot for `size` nearest `near` (by top-left corner; ties go left, then
+    /// up), or nil when none is free.
+    func nearestFree(_ size: HUDWidgetSize, near: CGRect, occupied: [CGRect]) -> CGRect? {
+        // Free where it is: no need to look at every spot (tens of thousands on a fine grid).
+        if near.size == size.points(), snap(near) == near, !occupied.contains(where: { Self.overlaps($0, near) }) {
+            return near
+        }
+        let anchor = CGPoint(x: near.minX, y: near.maxY)
+        var best: (frame: CGRect, distance: CGFloat)?
+        for frame in spots(size, trailing: true) where !occupied.contains(where: { Self.overlaps($0, frame) }) {
+            let d = hypot(frame.minX - anchor.x, frame.maxY - anchor.y)
+            if best == nil || d < best!.distance - 0.001 { best = (frame, d) }
+        }
+        return best?.frame
+    }
+
+    /// The first free spot for `size` with its left and top edges on lines (or flush with the
+    /// right and bottom ends), down the first column, then the next; nil when none is free.
+    func firstFree(_ size: HUDWidgetSize, occupied: [CGRect]) -> CGRect? {
+        spots(size, trailing: false).first { frame in !occupied.contains { Self.overlaps($0, frame) } }
+    }
+
+    /// Every snapped spot for `size`, left to right and top to bottom within each column.
+    /// `trailing` adds the spots whose right or bottom edge is on a line.
+    private func spots(_ size: HUDWidgetSize, trailing: Bool) -> [CGRect] {
+        let s = size.points()
+        let lefts = Self.stops(length: s.width, extent: visible.width, lines: cols, trailing: trailing)
+        let tops = Self.stops(length: s.height, extent: visible.height, lines: rows, trailing: trailing)
+        var seen = Set<[CGFloat]>()
+        var out: [CGRect] = []
+        for left in lefts {
+            for top in tops {
+                let frame = place(left: left, top: top, size: s)
+                if seen.insert([frame.minX, frame.minY]).inserted { out.append(frame) }
+            }
+        }
         return out
     }
 
-    /// `at` moved inside the grid for `size` (nil when the grid cannot hold `size` at all).
-    func clamp(_ at: Cell, _ size: HUDWidgetSize) -> Cell? {
-        let maxCol = columns - size.cells.columns, maxRow = rows - size.cells.rows
-        guard maxCol >= 0, maxRow >= 0 else { return nil }
-        return Cell(col: min(max(0, at.col), maxCol), row: min(max(0, at.row), maxRow))
-    }
-
-    /// The cell a widget dropped at `frame` snaps to: its top-left corner's nearest cell,
-    /// kept inside the grid.
-    func snap(_ frame: CGRect, _ size: HUDWidgetSize) -> Cell? {
-        let col = Int(((frame.minX - visible.minX - margin) / pitch).rounded())
-        let row = Int(((visible.maxY - margin - frame.maxY) / pitch).rounded())
-        return clamp(Cell(col: col, row: row), size)
-    }
-
-    /// The free position for `size` nearest `near` (by distance between top-left cells, ties
-    /// column-major), or nil when none is free.
-    func nearestFree(_ size: HUDWidgetSize, near: Cell, occupied: Set<Cell>) -> Cell? {
-        var best: (Cell, Int)?
-        for at in positions(size) where cells(at, size).isDisjoint(with: occupied) {
-            let dc = at.col - near.col, dr = at.row - near.row
-            let d = dc * dc + dr * dr
-            if best == nil || d < best!.1 { best = (at, d) }
+    /// The offsets along one axis a widget of `length` can snap to, ascending.
+    private static func stops(length: CGFloat, extent: CGFloat, lines: Int, trailing: Bool) -> [CGFloat] {
+        let n = max(1, lines)
+        let step = extent / CGFloat(n)
+        let room = max(0, extent - length)
+        var out: Set<CGFloat> = [room]
+        for i in 0...n {
+            let line = CGFloat(i) * step
+            if line <= room + 0.001 { out.insert(min(line, room)) }
+            if trailing, line - length >= -0.001 { out.insert(min(max(line - length, 0), room)) }
         }
-        return best?.0
+        return out.sorted()
     }
 
-    /// The first free position for `size`, column-major from the top-left, or nil.
-    func firstFree(_ size: HUDWidgetSize, occupied: Set<Cell>) -> Cell? {
-        positions(size).first { cells($0, size).isDisjoint(with: occupied) }
+    /// A snapped frame as a widget window gets it: its origin on whole points.
+    static func aligned(_ frame: CGRect) -> CGRect {
+        CGRect(x: frame.minX.rounded(), y: frame.minY.rounded(), width: frame.width, height: frame.height)
     }
 
-    /// Every position `size` fits at, column-major.
-    private func positions(_ size: HUDWidgetSize) -> [Cell] {
-        let maxCol = columns - size.cells.columns, maxRow = rows - size.cells.rows
-        guard maxCol >= 0, maxRow >= 0 else { return [] }
-        return (0...maxCol).flatMap { c in (0...maxRow).map { Cell(col: c, row: $0) } }
+    /// Cocoa frame for offsets from the visible frame's top-left, to a thousandth of a point
+    /// so float noise cannot tell two spots on the same line apart.
+    private func place(left: CGFloat, top: CGFloat, size: CGSize) -> CGRect {
+        func clean(_ v: CGFloat) -> CGFloat { (v * 1000).rounded() / 1000 }
+        return CGRect(x: clean(visible.minX + left), y: clean(visible.maxY - top - size.height),
+                      width: size.width, height: size.height)
     }
+
+    private static func fraction(_ v: CGFloat, of extent: CGFloat) -> Double {
+        guard extent > 0 else { return 0 }
+        return (Double(v / extent) * 1e6).rounded() / 1e6
+    }
+
+    /// Two places, so a line index reads as a whole number.
+    private static func tidy(_ v: Double) -> Double { (v * 100).rounded() / 100 }
 }
 
-/// Where every widget actually goes on the displays attached now. Records keep the cells
-/// they were given; a record whose display is missing goes to the main display, one beyond
-/// a smaller grid is pulled inside it, and one that would overlap a widget placed before it
-/// (in record order) moves to the nearest free cells. Pure, so it is unit tested.
+/// Where every widget actually goes on the displays attached now. Records keep the position
+/// they were given; each is snapped to its display's grid, a record whose display is missing
+/// goes to the main display, and one that would overlap a widget placed before it (in record
+/// order) moves to the nearest free spot. Pure, so it is unit tested.
 enum WidgetPlacement {
     struct Placed: Equatable {
         /// Index into the screens given.
         var screen: Int
-        var cell: WidgetGrid.Cell
+        /// The widget window's frame: `snapped` on whole points.
         var frame: CGRect
+        /// Exactly on the grid; collisions and positions are worked out on this.
+        var snapped: CGRect
+        /// The frame's top-left on its display.
+        var position: WidgetGrid.Position
         /// Its display is not attached; it stands in on the main display.
         var screenMissing: Bool
-        /// Placed somewhere else than its record says (pulled inside, or moved off another).
+        /// Placed somewhere else than its record says (pulled inside, moved off another, or a
+        /// display whose size changed).
         var moved: Bool
         /// No free room for it: it overlaps another widget.
         var overlapping: Bool
@@ -112,26 +185,66 @@ enum WidgetPlacement {
         return (main, ref != nil)
     }
 
-    /// `records` resolved on `screens`; records not in `shown` take no room (their type is
-    /// gone, so nothing draws them).
-    static func resolve(_ records: [WidgetRecord], screens: [WidgetScreen], config: WidgetsConfig,
+    /// `records` resolved on `screens` with the layout grid `grid`; records not in `shown` take
+    /// no room (their type is gone, so nothing draws them).
+    static func resolve(_ records: [WidgetRecord], screens: [WidgetScreen], grid: GridSize,
+                        legacy: WidgetsConfig.LegacyGrid = .standard,
                         shown: (WidgetRecord) -> Bool = { _ in true }) -> [String: Placed] {
         var out: [String: Placed] = [:]
-        var occupied: [Int: Set<WidgetGrid.Cell>] = [:]
+        var occupied: [Int: [CGRect]] = [:]
         for record in records where shown(record) {
             guard let (index, missing) = screenIndex(record.screen, screens: screens) else { continue }
-            let grid = config.grid(on: screens[index].visible)
-            var cell = grid.clamp(record.cell, record.size) ?? record.cell
+            let g = WidgetGrid(visible: screens[index].visible, grid: grid)
+            let stored = record.frame(on: g, legacy: legacy)
+            var frame = g.snap(stored)
             var overlapping = false
             let taken = occupied[index, default: []]
-            if !grid.cells(cell, record.size).isDisjoint(with: taken) {
-                if let free = grid.nearestFree(record.size, near: cell, occupied: taken) { cell = free }
+            if taken.contains(where: { WidgetGrid.overlaps($0, frame) }) {
+                if let free = g.nearestFree(record.size, near: frame, occupied: taken) { frame = free }
                 else { overlapping = true }
             }
-            occupied[index, default: []].formUnion(grid.cells(cell, record.size))
-            out[record.instance] = Placed(screen: index, cell: cell, frame: grid.frame(cell, record.size),
-                                          screenMissing: missing, moved: cell != record.cell, overlapping: overlapping)
+            occupied[index, default: []].append(frame)
+            let moved = abs(frame.minX - stored.minX) > 1 || abs(frame.maxY - stored.maxY) > 1
+            out[record.instance] = Placed(screen: index, frame: WidgetGrid.aligned(frame), snapped: frame,
+                                          position: g.position(of: frame), screenMissing: missing, moved: moved,
+                                          overlapping: overlapping)
         }
+        return out
+    }
+}
+
+/// Converts records saved on the older widget cell grid (`col`/`row` with `widgets.cell`, `gap`
+/// and `margin`) to positions on the layout grid, in layouts.json and in every HUD loadout.
+/// Run on load, before anything uses the config. A set is converted through the same
+/// placement that shows it (snapped, moved off the widgets before it), so what is saved is
+/// what is shown. A record whose display is not attached keeps its cell, and the old measures
+/// are kept with it, until a load finds the display.
+enum WidgetMigration {
+    static func migrate(_ config: Config, screens: [WidgetScreen]) -> Config {
+        guard !screens.isEmpty else { return config }
+        let legacy = config.widgets?.legacyGrid ?? .standard
+        let grid = config.grid ?? .default
+        var out = config
+        func convert(_ records: [WidgetRecord]) -> [WidgetRecord] {
+            guard records.contains(where: { $0.legacyCell != nil }) else { return records }
+            let placed = WidgetPlacement.resolve(records, screens: screens, grid: grid, legacy: legacy)
+            return records.map { record in
+                guard record.legacyCell != nil, let p = placed[record.instance], !p.screenMissing else { return record }
+                var r = record
+                r.position = p.position
+                r.legacyCell = nil
+                return r
+            }
+        }
+        if let instances = out.widgets?.instances { out.widgets?.instances = convert(instances) }
+        out.loadouts = out.loadouts?.map { loadout in
+            guard let set = loadout.hud?.widgets else { return loadout }
+            var l = loadout
+            l.hud?.widgets = convert(set)
+            return l
+        }
+        let left = (out.widgets?.instances ?? []) + (out.loadouts ?? []).flatMap { $0.hud?.widgets ?? [] }
+        if !left.contains(where: { $0.legacyCell != nil }) { out.widgets?.legacyGrid = nil }
         return out
     }
 }
