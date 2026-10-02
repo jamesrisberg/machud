@@ -119,7 +119,14 @@ final class ExternalPanel: Panel {
     /// largest on-screen window of the app. nil when neither finds one.
     var currentFrame: CGRect? {
         if Accessibility.isTrusted, let frame = axWindow()?.cocoaFrame { return frame }
-        return WindowList.frames(pids: Set(supervisor.livePIDs(app.id))).first
+        return windowFrames.first
+    }
+
+    /// The app's on-screen windows, largest first, minus its widgets MacHUD placed.
+    var windowFrames: [CGRect] {
+        let widgets = supervisor.widgetFrames(app.id)
+        return WindowList.frames(pids: Set(supervisor.livePIDs(app.id)))
+            .filter { frame in !widgets.contains { WindowPresence.sameFrame($0, frame) } }
     }
 
     private func send(_ command: String, _ args: [String: String],
@@ -136,8 +143,13 @@ final class ExternalPanel: Panel {
 
     /// The app's window for this panel: one titled like the panel, else its best window.
     func axWindow() -> AXWindow? {
+        let widgets = supervisor.widgetFrames(app.id)
         for pid in supervisor.workspace.runningPIDs(bundleID: app.id) {
-            let windows = AXWindow.all(pid: pid).filter { $0.exists && $0.isPlaceable }
+            let windows = AXWindow.all(pid: pid).filter { w in
+                guard w.exists, w.isPlaceable else { return false }
+                guard let frame = w.cocoaFrame else { return true }
+                return !widgets.contains { WindowPresence.sameFrame($0, frame) }
+            }
             if let titled = windows.first(where: { $0.title.caseInsensitiveCompare(descriptor.title) == .orderedSame }) {
                 return titled
             }
@@ -156,7 +168,7 @@ final class ExternalPanel: Panel {
             d["onScreen"] = check.isOnScreen
             if case .elsewhere(let place) = check { d["elsewhere"] = place }
         }
-        let frames = WindowList.frames(pids: Set(supervisor.livePIDs(app.id)))
+        let frames = windowFrames
         if !frames.isEmpty {
             d["frames"] = frames.map { ["x": Int($0.minX), "y": Int($0.minY), "w": Int($0.width), "h": Int($0.height)] }
         }

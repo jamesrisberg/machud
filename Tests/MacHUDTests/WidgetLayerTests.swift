@@ -384,6 +384,35 @@ final class WidgetLayerTests: XCTestCase {
         XCTAssertEqual(layer.frames(app: otherID), [])
     }
 
+    // MARK: Menu
+
+    func testWidgetsMenuOffersRevealEditAddAndEachWidget() throws {
+        startApp()
+        _ = call(["action": "add", "type": "weather"])
+        _ = call(["action": "reveal", "state": "on"])
+        typealias I = WidgetMenuModel.Item
+        let items = WidgetMenuModel.items(layer, hotkey: Hotkeys.defaultWidgets)
+        XCTAssertEqual(items.prefix(2), [.action("Reveal Widgets  ⌃⌥W", .reveal, on: true), .action("Edit Widgets…", .edit, on: false)])
+        guard case .submenu("Add Widget", _, let add) = items[2] else { return XCTFail("\(items[2])") }
+        XCTAssertEqual(add.map(\.title), ["Widgets", "Clock", "Weather"])
+        guard case .submenu(_, _, let weatherSizes) = add[2] else { return XCTFail() }
+        XCTAssertEqual(weatherSizes.first, .action("Small", .add(app: appID, type: "weather", size: .small), enabled: false),
+                       "weather allows one instance")
+        XCTAssertEqual(items[3], .separator)
+        guard case .submenu(let title, _, let actions) = items[4] else { return XCTFail() }
+        XCTAssertEqual(title, "Weather (Small, Main)")
+        XCTAssertEqual(actions, [.action("Settings…", .settings("W1")), .action("Float Above Windows", .layer("W1", .float), on: false),
+                                 .action("Remove", .remove("W1"))])
+    }
+
+    func testTheWheelHasATwoRingWidgetsWedge() {
+        XCTAssertEqual(RadialMenu.ringCount(for: .widgets), 2)
+        XCTAssertEqual(RadialMenu.ringLabel(.inner, for: .widgets), "Reveal widgets")
+        XCTAssertEqual(RadialMenu.ringLabel(.middle, for: .widgets), "Edit widgets")
+        XCTAssertEqual(Hotkeys.defaults.widgetsReveal, HotKey(key: "w", modifiers: ["control", "option"]))
+        XCTAssertNil(Hotkeys(loadoutMenu: nil, dock: nil, widgets: HotKey(key: "", modifiers: [])).widgetsReveal)
+    }
+
     // MARK: Loadouts
 
     func testHUDLoadoutsCaptureAndReplaceTheWidgetSet() throws {
