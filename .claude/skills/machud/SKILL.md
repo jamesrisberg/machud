@@ -1,6 +1,6 @@
 ---
 name: machud
-description: Control the user's MacHUD desktop from the shell — inspect window layouts, apply, preview or capture loadouts (which apps/pages go in which screen region, plus the HUD setup), move windows into regions, drive the MacHUD tool dock (position, summon/dismiss sibling apps, drop files on them), park windows behind orbs, manage the menu bar, and open panels and the shared settings window. Use whenever the user asks to arrange windows, set up or switch a workspace, or move/configure the tool dock or sibling HUD apps.
+description: Control the user's MacHUD desktop from the shell — inspect window layouts, apply, preview or capture loadouts (which apps/pages go in which screen region, plus the HUD setup), move windows into regions, drive the MacHUD tool dock (position, summon/dismiss sibling apps, drop files on them), place and arrange desktop widgets, park windows behind orbs, manage the menu bar, and open panels and the shared settings window. Use whenever the user asks to arrange windows, set up or switch a workspace, or move/configure the tool dock, desktop widgets or sibling HUD apps.
 ---
 
 # MacHUD control skill
@@ -73,8 +73,10 @@ re-applied on its own.
 
 ## HUD loadouts
 
-A loadout's `hud` part holds the MacHUD side of the desktop: the tool dock's position and
-each running sibling's panels (visible, mode, frame, dock setting). A loadout may be HUD
+A loadout's `hud` part holds the MacHUD side of the desktop: the tool dock's position,
+each running sibling's panels (visible, mode, frame, dock setting) and the placed widgets
+(`widgets`, only when some are placed; applying a loadout with that key replaces them, one
+without leaves them alone). A loadout may be HUD
 only (`"layout": ""`, `"slots": []`).
 
 ```sh
@@ -117,6 +119,28 @@ machud tooldock drop id=magickHUD paths=/path/a.png,/path/b.png   # hand files t
 
 Buttons list hover apps (Stash, Scratch, ffmpegHUD, …) first, then windowed apps
 (Sift, MechaHUD, …).
+
+## Desktop widgets
+
+Siblings serve widget types (`kind: widget` panels; widgetHUD's clock, weather, calendar).
+MacHUD places instances on a per-display grid (cells from the top-left; small 1×1, medium 2×1,
+large 2×2, extraLarge 4×2) and keeps the serving app running.
+
+```sh
+machud widgets types                          # every type: app, sizes, multiple, settingsSchema
+machud widgets                                # placed: instance, type, size, col/row, display, frame, layer, problems
+machud widgets add type=clock [size=medium] [col=0 row=0] [screen=builtin] [layer=float] [settings='{"zone":"UTC"}']
+machud widgets move instance=8F0C1E2A col=2 row=0   # nearest free cells; `note` says when it moved elsewhere
+machud widgets resize instance=8F0C1E2A size=medium
+machud widgets layer instance=8F0C1E2A float        # or desktop
+machud widgets settings instance=8F0C1E2A zone=Asia/Tokyo   # merged, checked by the type's schema
+machud widgets remove instance=8F0C1E2A
+machud widgets edit on|off|toggle             # unlock + gallery + grid overlay (visible to the user)
+machud widgets reveal on|off|toggle           # raise desktop widgets above windows (⌃⌥W)
+```
+
+An app that serves only widgets has no tool dock button. `missingType`: its app no longer
+serves the type (kept, not shown); `problem`: the app refused it.
 
 ## Parking and orbs
 

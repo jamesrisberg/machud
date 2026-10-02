@@ -11,6 +11,18 @@ struct ExternalApp: Equatable {
     var socketPath: String { manifest.socketPath }
 }
 
+extension HUDManifest {
+    /// The panels MacHUD presents (hover and windowed), in manifest order. Widget types and
+    /// kinds this MacHUD does not know are never registered, shown or placed as panels.
+    var presentedPanels: [Panel] { panels.filter(\.kind.isDockKind) }
+
+    /// The symbol that stands for the app in menus: its first presented panel's, else its
+    /// first widget's, else the manifest's icon.
+    var appSymbol: String {
+        presentedPanels.first?.symbol ?? widgetPanels.first?.symbol ?? iconName ?? "app"
+    }
+}
+
 /// `"apps"` in layouts.json: where to look for MacHUD-aware apps, which to keep running,
 /// and (keyed by bundle id) where each one goes when MacHUD launches it.
 ///

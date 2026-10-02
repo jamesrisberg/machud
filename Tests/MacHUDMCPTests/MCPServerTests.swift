@@ -116,7 +116,7 @@ final class MCPServerTests: XCTestCase {
         XCTAssertEqual(list.compactMap { $0["name"] as? String }, [
             "machud_status", "list_loadouts", "apply_loadout", "capture_loadout", "show_panel", "hide_panel",
             "toggle_panel", "list_app_actions", "app_action", "tool_dock", "park_window", "unpark",
-            "open_session", "feed_add", "say",
+            "open_session", "feed_add", "say", "list_widgets", "add_widget", "change_widget", "widget_mode",
         ])
         for tool in list {
             let schema = try XCTUnwrap(tool["inputSchema"] as? [String: Any], "\(tool["name"] ?? "")")
@@ -224,6 +224,43 @@ final class MCPServerTests: XCTestCase {
         let shown = call("show_panel", ["app": "Stash"])
         XCTAssertEqual(shown["isError"] as? Bool, false, text(shown))
         XCTAssertEqual(fake.requests("summon").last, ["id": "xyz.machud.stash/history"])
+    }
+
+    func testWidgetTools() {
+        fake.replies["widgets"] = { args in
+            args["action"] == "types" ? ["ok": true, "types": [["type": "clock"]]]
+                : ["ok": true, "editing": false, "revealed": false, "instances": [["instance": "A", "type": "clock"]]]
+        }
+        let listed = call("list_widgets")
+        let content = listed["structuredContent"] as? [String: Any]
+        XCTAssertEqual((content?["types"] as? [[String: Any]])?.first?["type"] as? String, "clock")
+        XCTAssertEqual((content?["instances"] as? [[String: Any]])?.count, 1)
+
+        call("add_widget", ["type": "clock", "size": "medium", "col": 2, "row": 1, "settings": ["zone": "UTC", "seconds": true]])
+        XCTAssertEqual(fake.requests("widgets").last, ["action": "add", "type": "clock", "size": "medium", "col": "2", "row": "1",
+                                                       "settings": #"{"seconds":true,"zone":"UTC"}"#])
+        XCTAssertEqual(text(call("add_widget", ["type": "clock", "col": 2])), "give both col and row, or neither")
+        call("change_widget", ["instance": "A", "action": "move", "col": 0, "row": 3, "screen": "builtin"])
+        XCTAssertEqual(fake.requests("widgets").last, ["action": "move", "instance": "A", "col": "0", "row": "3", "screen": "builtin"])
+        call("change_widget", ["instance": "A", "action": "layer", "layer": "float"])
+        XCTAssertEqual(fake.requests("widgets").last, ["action": "layer", "instance": "A", "layer": "float"])
+        call("change_widget", ["instance": "A", "action": "remove"])
+        XCTAssertEqual(fake.requests("widgets").last, ["action": "remove", "instance": "A"])
+        XCTAssertEqual(text(call("change_widget", ["instance": "A", "action": "resize"])), "size is required")
+        call("widget_mode", ["mode": "reveal", "state": "on"])
+        XCTAssertEqual(fake.requests("widgets").last, ["action": "reveal", "state": "on"])
+        call("widget_mode", ["mode": "edit"])
+        XCTAssertEqual(fake.requests("widgets").last, ["action": "edit", "state": "toggle"])
+    }
+
+    func testPanelToolsSkipWidgetTypes() {
+        fake.setApps([["id": "xyz.machud.widgethud", "name": "widgetHUD", "health": "running", "running": true,
+                       "manifest": ["id": "xyz.machud.widgethud", "name": "widgetHUD", "socket": "widgethud",
+                                    "panels": [["id": "clock", "title": "Clock", "kind": "widget"]]]]])
+        loadApps()
+        XCTAssertEqual(text(call("show_panel", ["app": "widgetHUD"])), "widgetHUD serves only widgets (see list_widgets)")
+        let show = tools.definitions.first { $0["name"] as? String == "show_panel" }
+        XCTAssertFalse((show?["description"] as? String ?? "").contains("widgetHUD"), "a widget-only app has no panel to show")
     }
 
     func testDockParkingSessionsFeedAndVoiceTools() {

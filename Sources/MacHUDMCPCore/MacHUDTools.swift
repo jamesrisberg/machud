@@ -73,6 +73,10 @@ public final class MacHUDTools: @unchecked Sendable {
             "type": "string",
             "description": "The panel id within the app (list_app_actions shows them). Default: the app's first panel.",
         ]
+        let panelApps = apps.filter { !$0.dockPanels.isEmpty }
+        let panelAppList = panelApps.isEmpty
+            ? "No HUD app with panels is discovered right now (call machud_status)."
+            : "Apps: " + panelApps.map { "\($0.name) (\($0.id))" }.joined(separator: ", ") + "."
         let appList = apps.isEmpty
             ? "No HUD apps are discovered right now (call machud_status)."
             : "Apps: " + apps.map { "\($0.name) (\($0.id))" }.joined(separator: ", ") + "."
@@ -113,13 +117,13 @@ public final class MacHUDTools: @unchecked Sendable {
                              "description": "none: windows only (default); include: windows and the HUD; only: just the HUD."],
                  ], required: ["name"], destructive: true),
             tool("show_panel",
-                 "Show an app's panel where the user last had it (launching the app if needed). " + appList,
+                 "Show an app's panel where the user last had it (launching the app if needed). " + panelAppList,
                  properties: ["app": appProperty("The app"), "panel": panelProperty], required: ["app"], idempotent: true),
             tool("hide_panel",
-                 "Hide an app's panel, remembering where it was. An app that is not running is left alone. " + appList,
+                 "Hide an app's panel, remembering where it was. An app that is not running is left alone. " + panelAppList,
                  properties: ["app": appProperty("The app"), "panel": panelProperty], required: ["app"], idempotent: true),
             tool("toggle_panel",
-                 "Show an app's panel if it is hidden, hide it if it shows. " + appList,
+                 "Show an app's panel if it is hidden, hide it if it shows. " + panelAppList,
                  properties: ["app": appProperty("The app"), "panel": panelProperty], required: ["app"]),
             tool("list_app_actions",
                  "List an app's panels, capabilities and the action verbs its manifest declares (for app_action), "
@@ -173,6 +177,48 @@ public final class MacHUDTools: @unchecked Sendable {
             tool("say",
                  "Speak text aloud with the voice host's reply voice, replacing anything being said.",
                  properties: ["text": ["type": "string", "description": "What to say."]], required: ["text"]),
+            tool("list_widgets",
+                 "List the desktop widgets: every placed widget (id, app, type, size, grid cell, display, frame, "
+                 + "layer, settings, and problems such as a type its app no longer serves), every widget type the "
+                 + "apps serve (sizes, whether it can be placed more than once, its settings schema), and whether "
+                 + "edit or reveal mode is on.",
+                 properties: [:], readOnly: true),
+            tool("add_widget",
+                 "Place a desktop widget (launching its app if needed). Without col/row it takes the first free "
+                 + "grid cells; with them, the nearest free ones. list_widgets shows the types.",
+                 properties: [
+                     "type": ["type": "string", "description": "The widget type (e.g. clock)."],
+                     "app": ["type": "string", "description": "The serving app's bundle id or name; needed only when two apps serve the type."],
+                     "size": ["type": "string", "enum": HUDWidgetSize.allCases.map(\.rawValue),
+                              "description": "One of the type's sizes. Default: its default size."],
+                     "screen": ["type": "string", "description": "Display name, main, builtin or index. Default: the main display."],
+                     "col": ["type": "integer", "description": "Grid column from the left (0-based)."],
+                     "row": ["type": "integer", "description": "Grid row from the top (0-based)."],
+                     "layer": ["type": "string", "enum": ["desktop", "float"],
+                               "description": "desktop (under windows, the default) or float (above windows)."],
+                     "settings": ["type": "object", "description": "The widget's own settings (its type's schema)."],
+                 ], required: ["type"]),
+            tool("change_widget",
+                 "Change or remove one placed widget: remove it, move it to grid cells, resize it, float it above "
+                 + "windows or put it back on the desktop, or merge settings into its own.",
+                 properties: [
+                     "instance": ["type": "string", "description": "The widget's id (list_widgets)."],
+                     "action": ["type": "string", "enum": ["remove", "move", "resize", "layer", "settings"],
+                                "description": "What to do."],
+                     "col": ["type": "integer", "description": "For move: grid column (0-based)."],
+                     "row": ["type": "integer", "description": "For move: grid row (0-based)."],
+                     "screen": ["type": "string", "description": "For move: another display (name, main, builtin or index)."],
+                     "size": ["type": "string", "enum": HUDWidgetSize.allCases.map(\.rawValue), "description": "For resize."],
+                     "layer": ["type": "string", "enum": ["desktop", "float"], "description": "For layer."],
+                     "settings": ["type": "object", "description": "For settings: keys to set (null removes one)."],
+                 ], required: ["instance", "action"], destructive: true),
+            tool("widget_mode",
+                 "Turn widget edit mode (widgets unlocked, a gallery to add more) or reveal mode (desktop widgets "
+                 + "raised above windows) on or off. Visible to the user.",
+                 properties: [
+                     "mode": ["type": "string", "enum": ["edit", "reveal"], "description": "Which mode."],
+                     "state": ["type": "string", "enum": ["on", "off", "toggle"], "description": "Default toggle."],
+                 ], required: ["mode"]),
         ]
     }
 
@@ -218,6 +264,19 @@ public final class MacHUDTools: @unchecked Sendable {
                 if let title = try args.string("title") { a["title"] = title }
                 return try machud("feed", a)
             case "say": return try machud("voice", ["_": "action", "name": "say", "text": try args.required("text")])
+            case "list_widgets":
+                var list = try send("widgets", ["action": "list"])
+                list["types"] = try send("widgets", ["action": "types"])["types"]
+                list["ok"] = nil
+                return .ok(list)
+            case "add_widget": return try addWidget(args)
+            case "change_widget": return try changeWidget(args)
+            case "widget_mode":
+                let mode = try args.required("mode")
+                guard ["edit", "reveal"].contains(mode) else { throw InvalidArgument("mode must be edit or reveal") }
+                let state = try args.string("state") ?? "toggle"
+                guard ["on", "off", "toggle"].contains(state) else { throw InvalidArgument("state must be on, off or toggle") }
+                return try machud("widgets", ["action": mode, "state": state])
             default: throw UnknownTool(name: name)
             }
         } catch let error as UnknownTool {
@@ -303,12 +362,15 @@ public final class MacHUDTools: @unchecked Sendable {
     }
 
     private func panelID(_ app: DiscoveredApp, _ args: Arguments) throws -> String {
-        guard let first = app.panels.first else { throw InvalidArgument("\(app.name) has no panels") }
+        let panels = app.dockPanels
+        guard let first = panels.first else {
+            throw InvalidArgument(app.widgetTypes.isEmpty ? "\(app.name) has no panels" : "\(app.name) serves only widgets (see list_widgets)")
+        }
         guard let key = try args.string("panel") else { return "\(app.id)/\(first.id)" }
         let short = key.hasPrefix(app.id + "/") ? String(key.dropFirst(app.id.count + 1)) : key
-        guard let panel = app.panels.first(where: { $0.id == short })
-                ?? app.panels.first(where: { $0.title.caseInsensitiveCompare(short) == .orderedSame }) else {
-            throw InvalidArgument("\(app.name) has no panel \(key); its panels: \(app.panels.map(\.id).joined(separator: ", "))")
+        guard let panel = panels.first(where: { $0.id == short })
+                ?? panels.first(where: { $0.title.caseInsensitiveCompare(short) == .orderedSame }) else {
+            throw InvalidArgument("\(app.name) has no panel \(key); its panels: \(panels.map(\.id).joined(separator: ", "))")
         }
         return "\(app.id)/\(panel.id)"
     }
@@ -337,11 +399,12 @@ public final class MacHUDTools: @unchecked Sendable {
             "app": app.id, "name": app.name, "health": app.health, "running": app.running,
             "outdated": app.outdated != nil, "olderContract": app.olderContract,
             "actions": app.actions,
-            "panels": app.panels.map { panel -> [String: Any] in
+            "panels": app.dockPanels.map { panel -> [String: Any] in
                 ["id": panel.id, "title": panel.title, "kind": panel.kind.rawValue,
                  "capabilities": panel.capabilities, "actions": DiscoveredApp.actions(of: panel)]
             },
         ]
+        if !app.widgetTypes.isEmpty { d["widgets"] = app.widgetTypes.map(\.id) }
         if let reason = app.outdated { d["outdatedReason"] = reason }
         return d
     }
@@ -364,6 +427,42 @@ public final class MacHUDTools: @unchecked Sendable {
             a[key] = Arguments.stringify(value)
         }
         return try machud("apps", a)
+    }
+
+    private func addWidget(_ args: Arguments) throws -> ToolResult {
+        var a = ["action": "add", "type": try args.required("type")]
+        for key in ["app", "size", "screen", "layer"] { if let v = try args.string(key) { a[key] = v } }
+        let col = try args.int("col"), row = try args.int("row")
+        guard (col == nil) == (row == nil) else { throw InvalidArgument("give both col and row, or neither") }
+        if let col, let row { a["col"] = String(col); a["row"] = String(row) }
+        let settings = try args.object("settings")
+        if !settings.isEmpty { a["settings"] = Arguments.stringify(settings) }
+        return try machud("widgets", a)
+    }
+
+    private func changeWidget(_ args: Arguments) throws -> ToolResult {
+        let action = try args.required("action")
+        var a = ["action": action, "instance": try args.required("instance")]
+        switch action {
+        case "remove":
+            break
+        case "move":
+            guard let col = try args.int("col"), let row = try args.int("row") else { throw InvalidArgument("move needs col and row") }
+            a["col"] = String(col)
+            a["row"] = String(row)
+            if let screen = try args.string("screen") { a["screen"] = screen }
+        case "resize":
+            a["size"] = try args.required("size")
+        case "layer":
+            a["layer"] = try args.required("layer")
+        case "settings":
+            let settings = try args.object("settings")
+            guard !settings.isEmpty else { throw InvalidArgument("settings needs settings") }
+            a["settings"] = Arguments.stringify(settings)
+        default:
+            throw InvalidArgument("action must be remove, move, resize, layer or settings, not \(action)")
+        }
+        return try machud("widgets", a)
     }
 
     private func toolDock(_ args: Arguments) throws -> ToolResult {
@@ -423,7 +522,7 @@ public final class MacHUDTools: @unchecked Sendable {
             }
         out["apps"] = apps.map { app -> [String: Any] in
             var d = Self.describe(app)
-            d["panels"] = app.panels.map { panel -> [String: Any] in
+            d["panels"] = app.dockPanels.map { panel -> [String: Any] in
                 ["id": panel.id, "title": panel.title, "kind": panel.kind.rawValue,
                  "visible": panelStates["\(app.id)/\(panel.id)"] ?? false,
                  "capabilities": panel.capabilities, "actions": DiscoveredApp.actions(of: panel)]
@@ -436,6 +535,12 @@ public final class MacHUDTools: @unchecked Sendable {
             }
         }
         part("loadouts") { try loadouts() }
+        part("widgets") {
+            let reply = try send("widgets", ["action": "list"])
+            let instances = reply["instances"] as? [[String: Any]] ?? []
+            return ["editing": reply["editing"] ?? false, "revealed": reply["revealed"] ?? false,
+                    "placed": instances.map { w in w.filter { ["instance", "app", "type", "size", "display", "layer", "missingType", "problem"].contains($0.key) } }]
+        }
         part("toolDock") {
             try send("tooldock", ["action": "state"]).filter {
                 ["enabled", "position", "visible", "autoHide", "screenName"].contains($0.key)

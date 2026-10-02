@@ -110,7 +110,7 @@ extension ToolDock {
     }
 
     /// `summon id=` / `dismiss id=`: a panel id (full or short) or an app's bundle id or
-    /// name (its first panel).
+    /// name (its first hover or windowed panel).
     func handleSummon(_ args: [String: String], summon: Bool) -> [String: Any] {
         guard let key = args["id"] ?? args["name"], let panel = panel(matching: key) else {
             return ["ok": false, "error": "id=<panel id, app bundle id or name> required"]
@@ -124,7 +124,7 @@ extension ToolDock {
 
     func panel(matching key: String) -> Panel? {
         if let panel = registry.panel(id: key) { return panel }
-        guard let app = externals.app(matching: key), let first = app.manifest.panels.first else { return nil }
+        guard let app = externals.app(matching: key), let first = app.manifest.presentedPanels.first else { return nil }
         return registry.panel(id: ExternalPanel.id(app: app.id, panel: first.id))
     }
 

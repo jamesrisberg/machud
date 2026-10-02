@@ -14,9 +14,10 @@ final class CapabilityRouter {
         self.externals = externals
     }
 
-    /// Discovered apps with a panel declaring the capability, in discovery order.
+    /// Discovered apps with a hover or windowed panel declaring the capability, in discovery
+    /// order (a widget type's capabilities do not make its app a provider).
     var providers: [ExternalApp] {
-        externals.apps.filter { app in app.manifest.panels.contains { $0.capabilities.contains(capability) } }
+        externals.apps.filter { app in app.manifest.presentedPanels.contains { $0.capabilities.contains(capability) } }
     }
 
     /// True once the app's process is up (subscribed, connecting, or an on-demand launch is

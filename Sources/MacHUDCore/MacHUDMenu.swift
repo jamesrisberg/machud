@@ -39,7 +39,7 @@ final class MacHUDServices: NSObject {
                                   socketPath: ControlServer.socketPath, bundleSchema: MacHUDSettings.schema,
                                   isRunning: true, canLaunch: false)]
         for app in externals.apps.sorted(by: { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) {
-            out.append(SettingsSource(id: app.id, title: app.name, symbol: app.manifest.panels.first?.symbol ?? "app",
+            out.append(SettingsSource(id: app.id, title: app.name, symbol: app.manifest.appSymbol,
                                       socketPath: app.socketPath,
                                       bundleSchema: HUDSettingsSchema.load(manifest: app.manifest, bundleURL: app.bundleURL),
                                       isRunning: externals.supervisor.record(app.id)?.health == .running,
@@ -338,7 +338,7 @@ enum MacHUDMenuModel {
     /// Per app: "Show <App>" (summon) per panel; status lines (health unless simply running
     /// or stopped, an update waiting for a relaunch, an older contract, a panel that opened
     /// out of sight); the app's own menu (`liveMenus`, running apps only); hide/park/reveal
-    /// per panel; whether it is on the tool dock; its settings; then Relaunch (while it is
+    /// per panel; whether it is on the tool dock (apps with a dock panel); its settings; then Relaunch (while it is
     /// up, disabled while one runs) and Quit, or Launch. `buildStatus` defaults to reading it now.
     @MainActor
     static func entries(externals: ExternalPanels, liveMenus: Bool = true,
@@ -348,7 +348,7 @@ enum MacHUDMenuModel {
         return externals.apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }.map { app in
             let health = externals.supervisor.record(app.id)?.health ?? .notRunning
             let running = health == .running
-            let panels = app.manifest.panels.compactMap {
+            let panels = app.manifest.presentedPanels.compactMap {
                 externals.registry.panel(id: ExternalPanel.id(app: app.id, panel: $0.id)) as? ExternalPanel
             }
             var actions: [Action] = []
@@ -384,7 +384,9 @@ enum MacHUDMenuModel {
                     if running { actions.append(Action(.park, "Park\(suffix)", appID: app.id, panelID: panel.id)) }
                 }
             }
-            actions.append(Action(.dockToggle, "Show on Tool Dock", appID: app.id, isOn: !hiddenFromDock.contains(app.id)))
+            if !app.manifest.dockPanels.isEmpty {
+                actions.append(Action(.dockToggle, "Show on Tool Dock", appID: app.id, isOn: !hiddenFromDock.contains(app.id)))
+            }
             actions.append(Action(.settings, "\(app.name) Settings…", appID: app.id))
             actions.append(Action(.separator, "", appID: app.id))
             if externals.isUp(app.id) {
@@ -396,7 +398,7 @@ enum MacHUDMenuModel {
             }
             let dot = running ? "●" : "○"
             return Entry(appID: app.id, title: "\(dot) \(app.name)",
-                         symbol: app.manifest.panels.first?.symbol ?? "app", actions: actions)
+                         symbol: app.manifest.appSymbol, actions: actions)
         }
     }
 

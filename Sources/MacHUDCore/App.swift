@@ -19,6 +19,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBar: MenuBarManager!
     private var menuHost: MenuHostPublisher!
     private var toolDock: ToolDock!
+    private var widgets: WidgetLayer!
+    private var widgetUI: WidgetUI!
     private var sessions: SessionsBroker!
     private var feed: FeedBroker!
     private var voice: VoiceServices!
@@ -78,6 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         installMenuBar()
         installToolDock()
         installMenuHost()
+        installWidgets()
         installOnboarding()
         // Every visibility change (socket, hotkey, menu, close button, sibling push)
         // reaches `subscribe`rs, not only the ones made through the socket.
@@ -87,9 +90,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // An announced, forgotten or newly installed app: push `state` and rebuild the dock
         // now, even when no panel's visibility changed.
-        externals.onAppsChanged = { [weak router, weak toolDock] in
+        externals.onAppsChanged = { [weak self, weak router, weak toolDock] in
             router?.publishState()
             toolDock?.refresh()
+            // Types may have come or gone: the gallery, the reveal hotkey and every app's widgets.
+            self?.widgets.configChanged()
+            self?.registerWidgetsHotkey()
         }
         control.start()
         displays = DisplayWatcher { [weak self] in self?.displaysChanged() }
@@ -120,6 +126,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         PanelMenuTarget.shared.registry = panels
         statusMenu.toolDockSection = { [weak toolDock] in toolDock?.statusMenuItems() ?? [] }
+        statusMenu.widgetsSection = { [weak self] in
+            guard let self, !self.widgets.servingApps.isEmpty || !self.widgets.records.isEmpty else { return [] }
+            return [WidgetMenuModel.menuItem(self.widgets, hotkey: self.widgetUI.hotkeysEnabled ? self.store.hotkeys.widgetsReveal : nil) {
+                [weak self] in self?.widgetUI.perform($0)
+            }]
+        }
         statusMenu.appsSection = { [weak machud] in machud?.menuItems() ?? [] }
         statusMenu.openSettings = { [weak machud] in machud?.settingsWindow.show() }
         AXWindow.ownWindowFilter = { [weak panels] w in panels?.panels.contains { $0.window === w } ?? false }
@@ -147,6 +159,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.editor.open(loadout: name)
         }
         loadoutMenu.library = library
+        loadoutMenu.hasWidgets = { [weak widgets] in !(widgets?.servingApps.isEmpty ?? true) }
+        loadoutMenu.widgetsSubtitle = { [weak widgets] in
+            let n = widgets?.records.count ?? 0
+            return n == 0 ? "none placed" : "\(n) placed"
+        }
+        loadoutMenu.onWidgets = { [weak widgets] edit in
+            guard let widgets else { return }
+            if edit { widgets.setEditing(!widgets.editing) } else { widgets.setRevealed(!widgets.revealed) }
+        }
         installLoadoutsTab(loadoutMenu)
         scheduleStartupLoadout()
 
@@ -454,11 +475,57 @@ extension AppDelegate {
         }
     }
 
+    /// Desktop widgets: the `widgets` verb, sync with every app serving widgets as it
+    /// connects, their events, and keeping apps with widgets running. Follows layouts.json edits.
+    fileprivate func installWidgets() {
+        let layer = WidgetLayer(externals: externals, config: { [weak store] in
+            store?.config.widgets ?? WidgetsConfig()
+        }, save: { [weak store] widgets in
+            guard let store else { return }
+            var c = store.config
+            c.widgets = widgets
+            store.save(c)
+        })
+        let supervisor = externals.supervisor
+        externals.keepRunning = { [weak layer] in layer?.appsWithInstances ?? [] }
+        supervisor.widgetFrames = { [weak layer] in layer?.frames(app: $0) ?? [] }
+        supervisor.onConnected = { [weak layer] in layer?.appConnected($0) }
+        supervisor.onAppEvent = { [weak layer] id, event in
+            guard event["event"] as? String == "widget" else { return }
+            layer?.handle(event: event, from: id)
+        }
+        layer.summon = { [weak machud] id in machud?.summon?(id) }
+        layer.registerControl(control)
+        let ui = WidgetUI(layer: layer)
+        layer.onChange = { [weak ui] in ui?.refresh() }
+        monitor.isWidget = { [weak layer] frame in layer?.isWidgetFrame(frame) ?? false }
+        let previous = store.onChange
+        store.onChange = { [weak self, weak layer] in
+            previous?()
+            MainActor.assumeIsolated {
+                layer?.configChanged()
+                self?.registerWidgetsHotkey()
+            }
+        }
+        widgets = layer
+        widgetUI = ui
+        registerWidgetsHotkey()
+        externals.refreshKeepRunning()
+        engine.hudEngine?.widgets = layer
+    }
+
+    /// ⌃⌥W (`hotkeys.widgets`) only while some app serves widgets, so the chord stays free otherwise.
+    fileprivate func registerWidgetsHotkey() {
+        guard let widgets, let widgetUI else { return }
+        widgetUI.registerHotkey(widgets.servingApps.isEmpty ? nil : store.hotkeys.widgetsReveal)
+    }
+
     /// The set of attached displays changed: pin by-name references to the displays now
     /// present, then put the active loadout back where it belongs (not in an isolated
     /// instance; see `Env.autoApply`).
     fileprivate func displaysChanged() {
         toolDock.refresh()
+        widgets.configChanged()
         store.pinDisplays()
         guard Env.autoApply, let name = engine.activeLoadout, let loadout = store.loadout(named: name) else { return }
         engine.apply(loadout, clear: false) { report in

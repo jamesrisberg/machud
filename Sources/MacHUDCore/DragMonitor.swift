@@ -8,6 +8,8 @@ final class DragMonitor {
     private var monitors: [Any] = []
     private var keyTap: CFMachPort?
     private var running = false
+    /// Whether a window at this frame (Cocoa coordinates) is a desktop widget MacHUD placed.
+    var isWidget: ((CGRect) -> Bool)?
     /// Set while the layout editor is open so drags are ignored.
     var suspended = false {
         didSet { if suspended { cancel() } }
@@ -50,6 +52,8 @@ final class DragMonitor {
         guard store.enabled, !suspended else { return }
         let p = NSEvent.mouseLocation
         guard let window = AXWindow.under(cocoaPoint: p), let frame = window.axFrame else { return }
+        // A desktop widget moves on MacHUD's widget grid, never into a region.
+        if let cocoa = window.cocoaFrame, isWidget?(cocoa) == true { return }
         session = Session(window: window, startFrame: frame)
     }
 

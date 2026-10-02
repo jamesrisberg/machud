@@ -45,21 +45,22 @@ enum ToolDockModel {
 
     /// One list in `HUDManifest.dockSorted` order: hover apps first, then windowed ones;
     /// within a group by the manifest's `order` (none last), then by name. An app goes by
-    /// its first panel in that order. The Parked Windows button (when `hasParked`: the
+    /// its first panel in that order; an app without hover or windowed panels (widgets only)
+    /// has no button. The Parked Windows button (when `hasParked`: the
     /// orbs are hidden and something is parked) ends the hover group.
     static func items(apps: [ExternalApp], hasParked: Bool, hidden: Set<String> = []) -> [ToolDockItem] {
-        let byName = apps.filter { !$0.manifest.panels.isEmpty && !hidden.contains($0.id) }
+        let byName = apps.filter { !$0.manifest.dockPanels.isEmpty && !hidden.contains($0.id) }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         // dockSorted keeps ties in the order given (by name here); tag each app's lead panel
         // with its index so the result maps back.
         let leads = byName.enumerated().map { i, app -> HUDManifest.Panel in
-            var lead = HUDManifest.dockSorted(app.manifest.panels)[0]
+            var lead = app.manifest.dockPanels[0]
             lead.id = String(i)
             return lead
         }
         let sorted = HUDManifest.dockSorted(leads).compactMap { Int($0.id).map { byName[$0] } }
         var out: [ToolDockItem] = sorted.map { app in
-            let panels = HUDManifest.dockSorted(app.manifest.panels)
+            let panels = app.manifest.dockPanels
             let lead = panels[0]
             let behaviour: ToolDockItem.Behaviour = panels.count > 1 ? .menu : (lead.kind == .hover ? .hover : .windowed)
             let drop = panels.first { $0.capabilities.contains(HUDDrop.capability) }
