@@ -14,6 +14,8 @@ final class OrbCardView: NSView {
     var onClose: (() -> Void)?
     var onOpenSession: (() -> Void)?
     var onHover: ((Bool) -> Void)?
+    /// A click on the card itself, not one of its buttons (expands it).
+    var onClick: (() -> Void)?
 
     private(set) var card: VoiceCard?
     private(set) var errorMessage: String?
@@ -233,6 +235,8 @@ final class OrbCardView: NSView {
 
     override var mouseDownCanMoveWindow: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) {}
+    override func mouseUp(with event: NSEvent) { if card != nil { onClick?() } }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
