@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-02T04:39:40Z",
+  "updatedAt": "2026-10-02T04:40:39Z",
   "hudkit": "0.3.0",
   "apps": [
     {
@@ -105,12 +105,12 @@
       "name": "MechaHUD",
       "kind": "windowed",
       "summary": "The mechaclaude agent dashboard as a MacHUD panel",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "minOS": "14.0",
-      "download": "https://github.com/jamesrisberg/mechahud/releases/download/v0.2.0/MechaHUD-0.2.0.zip",
-      "sha256": "05c757fafcd3a80f6c72b74fe19a026269bb7384a5000f32adaa89047b953a88",
-      "size": 1717911,
-      "publishedAt": "2026-09-29T11:25:00Z",
+      "download": "https://github.com/jamesrisberg/mechahud/releases/download/v0.3.0/MechaHUD-0.3.0.zip",
+      "sha256": "2b035ba5f35a341a178594118619fd9467f91f799b682b8761a7330d8c2c304b",
+      "size": 1981902,
+      "publishedAt": "2026-10-02T04:40:39Z",
       "icon": "https://jamesrisberg.github.io/machud/icons/mechahud.png",
       "homepage": "https://github.com/jamesrisberg/mechahud",
       "bundled": false
