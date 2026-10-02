@@ -303,8 +303,13 @@ public final class VoiceHostController: VoiceHostActing {
         refreshWakeProblem()
     }
 
+    /// A full-screen app hides the orb and the card: an expanded or pinned card folds back to
+    /// the peek, so it neither comes back over the screen nor takes the keyboard later.
     func setHiddenForFullScreen(_ hidden: Bool) {
-        state.hiddenForFullScreen = hidden
+        var next = state
+        next.hiddenForFullScreen = hidden
+        if hidden { next.cardMode = .peek }
+        state = next
     }
 
     // MARK: - Actions
@@ -371,6 +376,8 @@ public final class VoiceHostController: VoiceHostActing {
         // Never into an open microphone.
         guard take == nil, !dictation.isCapturing else { return Self.takeRecording }
         stopSpeech()
+        // The preview replaces the reply's voice: the reply is not spoken, and shows whole.
+        silenceTurn()
         speaker.append(text)
         speaker.finish()
         switch state.phase {
@@ -743,7 +750,8 @@ public final class VoiceHostController: VoiceHostActing {
         let speaks = repliesSpoken(source)
         turn = Turn(requestId: requestId, speaks: speaks)
         var next = state
-        next.card = VoiceCard(prompt: prompt, spokenUpTo: speaks ? 0 : nil)
+        // A speaker that reports no chunks (a silent one) cannot pace the card.
+        next.card = VoiceCard(prompt: prompt, spokenUpTo: speaks && speaker?.reportsChunks == true ? 0 : nil)
         if isLatest, take == nil {
             next.phase = .working
             next.inputLevel = 0

@@ -88,7 +88,8 @@ final class VoiceHost {
             brainStateRoot: support.appendingPathComponent("Brain"),
             // The conversation is the brain's: kept only where a brain can run.
             conversationStore: environment.noBrain
-                ? nil : ConversationFile(url: voiceRoot.appendingPathComponent("conversation.json")),
+                ? nil : ConversationFile(url: environment.conversationFile
+                    ?? voiceRoot.appendingPathComponent("conversation.json")),
             sessions: MacHUDSessions(socketPath: environment.machudSocketPath),
             feed: MacHUDFeed(socketPath: environment.machudSocketPath),
             machudTools: MacHUDToolServer.locate(

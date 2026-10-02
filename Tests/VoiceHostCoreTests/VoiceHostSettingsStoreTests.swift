@@ -42,6 +42,7 @@ final class VoiceHostSettingsStoreTests: XCTestCase {
             "MACHUD_VOICE_NO_MIC": "1", "MACHUD_NO_HOTKEYS": "1", "MACHUD_VOICE_NO_BRAIN": "1",
             "MACHUD_VOICE_PARENT_PIPE": "1", "MACHUD_VOICE_NO_SPEECH": "1", "MACHUD_VOICE_MODELS_DIR": "/tmp/models",
             "MACHUD_VOICE_HISTORY_DIR": "/tmp/history", "SPEAKFREE_CONFIG_DIR": "/tmp/sf",
+            "MACHUD_VOICE_CONVERSATION_FILE": "/tmp/c.json",
         ])
         XCTAssertEqual(env.configDirectory.path, "/tmp/cfg")
         XCTAssertEqual(env.socketPath, "/tmp/v.sock")
@@ -52,6 +53,7 @@ final class VoiceHostSettingsStoreTests: XCTestCase {
         XCTAssertTrue(env.noSpeech)
         XCTAssertEqual(env.modelsDirectory?.path, "/tmp/models")
         XCTAssertEqual(env.historyDirectory?.path, "/tmp/history")
+        XCTAssertEqual(env.conversationFile?.path, "/tmp/c.json")
         XCTAssertEqual(env.speakFreeConfigDirectory.path, "/tmp/sf")
     }
 
@@ -80,6 +82,7 @@ final class VoiceHostSettingsStoreTests: XCTestCase {
         XCTAssertFalse(env.noMicrophone || env.noHotkeys || env.noBrain || env.parentPipe || env.noSpeech)
         XCTAssertNil(env.modelsDirectory)
         XCTAssertNil(env.historyDirectory)
+        XCTAssertNil(env.conversationFile)
         XCTAssertTrue(env.speakFreeConfigDirectory.path.hasSuffix("/.config/speakfree"))
     }
 }

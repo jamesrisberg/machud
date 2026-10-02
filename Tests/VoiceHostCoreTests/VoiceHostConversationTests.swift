@@ -332,6 +332,37 @@ final class VoiceHostConversationTests: XCTestCase {
         XCTAssertEqual(controller.state.card?.shownReply, "Hi there.", "a preview's chunks do not pace the card")
     }
 
+    func testAPreviewDuringAWaitingReplyLeavesTheReplyUnpacedAndUnspoken() async {
+        let controller = makeController(spokenSettings())
+        await voiceTurn(controller, "hello")
+        brain.push(status: "running", output: "")
+        XCTAssertEqual(controller.state.card?.spokenUpTo, 0)
+        XCTAssertNil(controller.say("Testing the voice"))
+        XCTAssertNil(controller.state.card?.spokenUpTo, "the preview's chunks do not pace the reply")
+        speaker.startChunk(0, 0..<7)
+        brain.push(status: "running", output: "Hi there.")
+        XCTAssertEqual(controller.state.card?.shownReply, "Hi there.")
+        XCTAssertEqual(speaker.spoken, "Testing the voice", "the reply is not spoken after the preview")
+    }
+
+    func testASpeakerThatReportsNoChunksDoesNotPaceTheCard() async {
+        speaker.reportsChunks = false
+        let controller = makeController(spokenSettings())
+        await voiceTurn(controller, "hello")
+        brain.push(status: "running", output: "Hi there.")
+        XCTAssertEqual(controller.state.card?.shownReply, "Hi there.")
+        XCTAssertEqual(speaker.spoken, "Hi there.", "still spoken")
+    }
+
+    func testFullScreenFoldsAnExpandedCardBackToThePeek() {
+        let controller = makeController()
+        controller.perform(.setCardMode(.expanded))
+        controller.setHiddenForFullScreen(true)
+        XCTAssertEqual(controller.state.cardMode, .peek)
+        controller.setHiddenForFullScreen(false)
+        XCTAssertEqual(controller.state.cardMode, .peek, "it does not come back and take the keyboard")
+    }
+
     func testAChunkNeverHidesTextAlreadyShown() async {
         let controller = makeController(spokenSettings())
         await voiceTurn(controller, "hello")

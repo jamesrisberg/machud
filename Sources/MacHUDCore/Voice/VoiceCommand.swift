@@ -15,7 +15,7 @@ enum VoiceCommand: Equatable {
     static let actions = ["click", "ask", "dictate", "stop", "cancel", "approve", "deny", "dismiss", "mute", "unmute",
                           "open-session", "say"]
     static let subVerbs = ["state", "status", "hello", "action", "settings", "brain", "models", "history", "secret",
-                           "conversation", "say", "card"]
+                           "conversation", "send", "card"]
     /// The states `card` takes.
     static let cardStates = ["peek", "pin", "expand", "close"]
 
@@ -49,11 +49,11 @@ enum VoiceCommand: Equatable {
             return try secret(args)
         case "conversation":
             return .forward("conversation", [:])
-        case "say":
+        case "send":
             guard let text = args["text"], !text.trimmingCharacters(in: .whitespaces).isEmpty else {
-                throw Invalid("voice say needs text= (a message typed to the agent)")
+                throw Invalid("voice send needs text= (a message typed to the agent)")
             }
-            return .forward("say", ["text": text])
+            return .forward("send", ["text": text])
         case "card":
             let inline = args["action"].flatMap { $0 == "1" ? nil : $0 }
             guard let state = inline ?? cardStates.first(where: { args[$0] != nil }), cardStates.contains(state) else {
@@ -62,7 +62,7 @@ enum VoiceCommand: Equatable {
             return .forward("card", ["action": state])
         default:
             throw Invalid("voice takes state, status, action, settings, brain, models, history, secret, conversation, "
-                + "say or card, not \(sub)")
+                + "send or card, not \(sub)")
         }
     }
 

@@ -54,6 +54,8 @@ public struct ConversationRow: Codable, Equatable, Sendable, Identifiable {
     public var error: String?
     /// Notice rows: a failure rather than an interruption.
     public var isError: Bool?
+    /// A user row the brain has not taken yet (it goes if the brain refuses it).
+    public var pending: Bool?
 
     public init(id: String, turnId: String? = nil, kind: Kind, text: String, source: ConversationSource? = nil,
                 streaming: Bool? = nil, step: Step? = nil, approvalId: String? = nil, detail: String? = nil,
@@ -122,6 +124,8 @@ final class ConversationFile: ConversationStoring {
         do {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try JSONEncoder().encode(record).write(to: url, options: .atomic)
+            // What the user said to the agent is theirs alone.
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         } catch {
             NSLog("MacHUDVoice: could not save the conversation: %@", error.localizedDescription)
         }
@@ -169,15 +173,23 @@ struct ConversationLog: Equatable {
     var rows: [ConversationRow] {
         var live = model.rows.map(row)
         if let pending {
-            live.append(.user(id: "\(launch):pending", text: pending.text, source: pending.source))
+            var row = ConversationRow.user(id: "\(launch):pending", text: pending.text, source: pending.source)
+            row.pending = true
+            live.append(row)
         }
         let liveReplies = Set(live.compactMap { $0.kind == .reply ? $0.turnId : nil })
         let liveApprovals = Set(live.compactMap(\.approvalId))
+        let liveLines = Set(live.compactMap { row in
+            [.progress, .notice].contains(row.kind) ? "\(row.kind.rawValue)|\(row.turnId ?? "")|\(row.text)" : nil
+        })
         let kept = restored.filter { row in
             switch row.kind {
             case .reply: return !(row.turnId.map(liveReplies.contains) ?? false)
             case .approval: return !(row.approvalId.map(liveApprovals.contains) ?? false)
-            default: return true
+            case .progress, .notice:
+                // A turn the brain resumes after a restart reports its lines again.
+                return row.turnId == nil || !liveLines.contains("\(row.kind.rawValue)|\(row.turnId ?? "")|\(row.text)")
+            case .user: return true
             }
         }
         return Array((kept + live).suffix(Self.maxRows))

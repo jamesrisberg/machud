@@ -13,6 +13,8 @@ final class SilentSpeaker: ReplySpeaking {
     private var generation = 0
 
     var onChunkStarted: ((SpeechChunk) -> Void)?
+    /// Nothing plays, so no chunk ever starts: the card shows replies whole.
+    let reportsChunks = false
 
     func configure(_ voice: VoiceSettings) {}
     func warmUp() {}

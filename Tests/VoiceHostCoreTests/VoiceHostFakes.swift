@@ -163,6 +163,7 @@ final class FakeSpeaker: ReplySpeaking {
     var stops = 0
 
     var onChunkStarted: ((SpeechChunk) -> Void)?
+    var reportsChunks = true
     var warmUps = 0
 
     func configure(_ voice: VoiceSettings) { voices.append(voice) }
