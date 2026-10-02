@@ -496,7 +496,8 @@ what the user does to a widget into placement.
   a gallery lists every widget type by app with an Add button per size. Done or Esc leaves it.
   Widgets never take focus or activate their app.
 - **Layout editor**: the editor shows the widgets on its display as fixed-size blocks (symbol and
-  title) over the regions. Dragging one snaps it the same way, on the grid the editor shows; the
+  title) over the regions. Dragging one snaps it the same way, on the saved grid (a density
+  picked in the editor applies to widgets once it is saved, which moves them onto it); the
   panel's Add Widget menu places a widget of any type on that display. Both take effect at once,
   through the same path as this verb, so the editor's Save, Cancel and ⌘Z leave widgets alone.
   ⌘-drag and hit-zone painting reach the regions under a widget.
@@ -526,7 +527,7 @@ what the user does to a widget into placement.
 
 | Command | Args | Effect |
 | --- | --- | --- |
-| `widgets` / `widgets list` | | `editing`, `revealed`, `grid {cols, rows}` (the layout grid), `instances[] {instance, app, appName?, type, title?, size, layer, x, y, col, row, screen? (the saved display), settings, health, frame?, display?, screenMissing?, placedAt? {x, y, col, row}, overlapping?, missingType?, problem?, droppedSettings? {key: why}}`. `x`, `y` are the saved top-left as fractions of the visible frame; `col`, `row` are the same in grid lines (`x × cols`, `y × rows`, to two places): whole numbers when the left and top edges are on lines, fractional when the widget is snapped by its right or bottom edge. `frame` is the window's, in global Cocoa coordinates |
+| `widgets` / `widgets list` | | `editing`, `revealed`, `grid {cols, rows}` (the layout grid), `instances[] {instance, app, appName?, type, title?, size, layer, x, y, col, row, screen? (the saved display), settings, health, frame?, display?, screenMissing?, placedAt? {x, y, col, row}, overlapping?, missingType?, problem?, droppedSettings? {key: why}}`. `x`, `y` are the saved top-left as fractions of the visible frame; `col`, `row` are the same in grid lines (`x × cols`, `y × rows`, to two places): whole numbers when the left and top edges are on lines, fractional when the widget is snapped by its right or bottom edge; a widget still in the older cell form (see below) has none of the four until it is converted, and is shown by its cell. `frame` is the window's, in global Cocoa coordinates |
 | `widgets types` | | `types[] {app, appName, type, title, symbol, sizes[], defaultSize, multiple, refresh?, settingsSchema?, placed}`: every widget type of every discovered app, read from the manifests (the app need not run) |
 | `widgets add` | `type=`, `app=` (bundle id or name; needed only when two apps serve the type), `size=` (default the type's `defaultSize`), `screen=` (main, builtin, index or name; default the main display), a position: `x= y=` (fractions 0 to 1 of the visible frame, from its top-left) or `col= row=` (layout-grid line indices, 0 to `cols` and 0 to `rows`; decimals allowed), not both (default the first free spot with its left and top edges on lines, down the left edge first, then the next line across), `layer=desktop\|float`, `settings=<JSON object>` | places a widget and returns it as `instance`, with `note` when it went elsewhere than asked or its app is being launched. Refused: a size the type does not declare, a second widget of a `multiple: false` type, a setting its schema rejects, no room, or the app refusing it (then nothing is saved) |
 | `widgets remove` | `instance=` | |
@@ -551,8 +552,9 @@ and Remove.
 
 Widgets saved in the older cell form (`col`/`row` with `widgets.cell`, `gap` and `margin`), in
 layouts.json or in a HUD loadout, are converted to `x`/`y` when layouts.json is loaded: each
-goes where its cell put it, snapped to the layout grid. A record that cannot be converted yet (no
-display attached) keeps its cell.
+goes where its cell put it, snapped to the layout grid and moved off any widget it would land on,
+so what is saved is what is shown. A record whose display is not attached keeps its cell (and
+`widgets` keeps the old `cell`, `gap` and `margin`) until a load finds that display.
 
 ## HUD loadouts
 

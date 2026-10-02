@@ -155,6 +155,65 @@ final class WidgetGridTests: XCTestCase {
         XCTAssertEqual(WidgetMigration.migrate(again, screens: [main]), again, "nothing left to convert")
     }
 
+    func testConversionResolvesCollisionsOnACoarseGrid() throws {
+        // On 24 × 12 the small widget at old cell (0, 1) snaps down and the large one at (0, 2)
+        // snaps up: converted one by one they would be saved overlapping.
+        let json = #"""
+        {"grid": {"cols": 24, "rows": 12},
+         "widgets": {"instances": [{"instance": "A", "app": "x", "type": "clock", "size": "small", "col": 0, "row": 1},
+                                   {"instance": "B", "app": "x", "type": "clock", "size": "large", "col": 0, "row": 2}]}}
+        """#
+        let config = WidgetMigration.migrate(try JSONDecoder().decode(Config.self, from: Data(json.utf8)), screens: [main])
+        let records = try XCTUnwrap(config.widgets?.instances)
+        let g = WidgetGrid(visible: visible, grid: GridSize(cols: 24, rows: 12))
+        let a = g.snap(g.frame(records[0].position, .small)), b = g.snap(g.frame(records[1].position, .large))
+        XCTAssertFalse(WidgetGrid.overlaps(a, b), "\(a) \(b)")
+        XCTAssertEqual(WidgetPlacement.resolve(records, screens: [main], grid: GridSize(cols: 24, rows: 12))["B"]?.moved, false,
+                       "saved where it is shown")
+    }
+
+    func testARecordWhoseDisplayIsMissingWaitsForIt() throws {
+        let json = #"""
+        {"widgets": {"cell": 150, "instances": [{"instance": "A", "app": "x", "type": "clock", "col": 1, "row": 0,
+                                                 "screen": {"name": "Gone"}}]},
+         "loadouts": [{"name": "Desk", "layout": "", "slots": [],
+                       "hud": {"widgets": [{"instance": "L", "app": "x", "type": "clock", "col": 2, "row": 0}]}}]}
+        """#
+        let decoded = try JSONDecoder().decode(Config.self, from: Data(json.utf8))
+        let config = WidgetMigration.migrate(decoded, screens: [main])
+        let a = try XCTUnwrap(config.widgets?.instances.first)
+        XCTAssertEqual(a.legacyCell, WidgetRecord.LegacyCell(col: 1, row: 0), "not converted on another display's measures")
+        XCTAssertNil(config.loadouts?.first?.hud?.widgets?.first?.legacyCell)
+        // Meanwhile it is shown by its cell on the main display, and the old measures are kept.
+        let placed = WidgetPlacement.resolve([a], screens: [main], grid: .default, legacy: try XCTUnwrap(config.widgets?.legacyGrid))
+        XCTAssertEqual(placed["A"]?.screenMissing, true)
+        let text = String(decoding: try JSONEncoder().encode(config), as: UTF8.self)
+        XCTAssertTrue(text.contains(#""cell":150"#), text)
+        // Back: it converts by its own display.
+        let gone = WidgetScreen(descriptor: ScreenDescriptor(name: "Gone", isMain: false, isBuiltin: false), ref: .name("Gone"),
+                                visible: CGRect(x: 1440, y: 0, width: 1920, height: 1055), frame: CGRect(x: 1440, y: 0, width: 1920, height: 1080))
+        let later = WidgetMigration.migrate(config, screens: [main, gone])
+        XCTAssertNil(later.widgets?.instances.first?.legacyCell)
+        XCTAssertNil(later.widgets?.legacyGrid)
+    }
+
+    func testOldMeasuresAreKeptWhileALoadoutStillHasACell() throws {
+        // Every placed widget is converted; a loadout's widget waits for its display.
+        let json = #"""
+        {"widgets": {"cell": 150, "instances": [{"instance": "A", "app": "x", "type": "clock", "col": 1, "row": 0}]},
+         "loadouts": [{"name": "Desk", "layout": "", "slots": [],
+                       "hud": {"widgets": [{"instance": "L", "app": "x", "type": "clock", "col": 2, "row": 0,
+                                            "screen": {"name": "Gone"}}]}}]}
+        """#
+        let config = WidgetMigration.migrate(try JSONDecoder().decode(Config.self, from: Data(json.utf8)), screens: [main])
+        XCTAssertNil(config.widgets?.instances.first?.legacyCell)
+        XCTAssertNotNil(config.loadouts?.first?.hud?.widgets?.first?.legacyCell)
+        let text = String(decoding: try JSONEncoder().encode(config), as: UTF8.self)
+        XCTAssertTrue(text.contains(#""cell":150"#), "the loadout's cell still needs them: \(text)")
+        let again = try JSONDecoder().decode(Config.self, from: Data(text.utf8))
+        XCTAssertEqual(again.widgets?.legacyGrid?.cell, 150)
+    }
+
     func testAnUnconvertedRecordKeepsItsCellWhenWritten() throws {
         let record = try JSONDecoder().decode(WidgetRecord.self, from: Data(#"{"instance": "A", "app": "x", "type": "t", "col": 2, "row": 3}"#.utf8))
         let again = try JSONDecoder().decode(WidgetRecord.self, from: JSONEncoder().encode(record))

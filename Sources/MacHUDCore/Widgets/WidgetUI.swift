@@ -216,8 +216,8 @@ final class WidgetGridView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         GridDrawing.backdrop(bounds, visible: visible)
-        GridDrawing.lines(grid, in: visible)
         for r in regions { GridDrawing.faintRegion(r) }
+        GridDrawing.lines(grid, in: visible)
     }
 }
 

@@ -82,6 +82,10 @@ struct WidgetGrid: Equatable {
     /// The free snapped spot for `size` nearest `near` (by top-left corner; ties go left, then
     /// up), or nil when none is free.
     func nearestFree(_ size: HUDWidgetSize, near: CGRect, occupied: [CGRect]) -> CGRect? {
+        // Free where it is: no need to look at every spot (tens of thousands on a fine grid).
+        if near.size == size.points(), snap(near) == near, !occupied.contains(where: { Self.overlaps($0, near) }) {
+            return near
+        }
         let anchor = CGPoint(x: near.minX, y: near.maxY)
         var best: (frame: CGRect, distance: CGFloat)?
         for frame in spots(size, trailing: true) where !occupied.contains(where: { Self.overlaps($0, frame) }) {
@@ -211,7 +215,10 @@ enum WidgetPlacement {
 
 /// Converts records saved on the older widget cell grid (`col`/`row` with `widgets.cell`, `gap`
 /// and `margin`) to positions on the layout grid, in layouts.json and in every HUD loadout.
-/// Run on load, before anything uses the config; the next save writes the new form only.
+/// Run on load, before anything uses the config. A set is converted through the same
+/// placement that shows it (snapped, moved off the widgets before it), so what is saved is
+/// what is shown. A record whose display is not attached keeps its cell, and the old measures
+/// are kept with it, until a load finds the display.
 enum WidgetMigration {
     static func migrate(_ config: Config, screens: [WidgetScreen]) -> Config {
         guard !screens.isEmpty else { return config }
@@ -219,29 +226,25 @@ enum WidgetMigration {
         let grid = config.grid ?? .default
         var out = config
         func convert(_ records: [WidgetRecord]) -> [WidgetRecord] {
-            records.map { record in
-                guard record.legacyCell != nil,
-                      let index = WidgetPlacement.screenIndex(record.screen, screens: screens)?.index else { return record }
-                let g = WidgetGrid(visible: screens[index].visible, grid: grid)
+            guard records.contains(where: { $0.legacyCell != nil }) else { return records }
+            let placed = WidgetPlacement.resolve(records, screens: screens, grid: grid, legacy: legacy)
+            return records.map { record in
+                guard record.legacyCell != nil, let p = placed[record.instance], !p.screenMissing else { return record }
                 var r = record
-                r.position = g.position(of: g.snap(record.frame(on: g, legacy: legacy)))
+                r.position = p.position
                 r.legacyCell = nil
                 return r
             }
         }
-        if var widgets = out.widgets {
-            widgets.instances = convert(widgets.instances)
-            if !widgets.instances.contains(where: { $0.legacyCell != nil }) { widgets.legacyGrid = nil }
-            out.widgets = widgets
+        if let instances = out.widgets?.instances { out.widgets?.instances = convert(instances) }
+        out.loadouts = out.loadouts?.map { loadout in
+            guard let set = loadout.hud?.widgets else { return loadout }
+            var l = loadout
+            l.hud?.widgets = convert(set)
+            return l
         }
-        if let loadouts = out.loadouts {
-            out.loadouts = loadouts.map { loadout in
-                guard let set = loadout.hud?.widgets else { return loadout }
-                var l = loadout
-                l.hud?.widgets = convert(set)
-                return l
-            }
-        }
+        let left = (out.widgets?.instances ?? []) + (out.loadouts ?? []).flatMap { $0.hud?.widgets ?? [] }
+        if !left.contains(where: { $0.legacyCell != nil }) { out.widgets?.legacyGrid = nil }
         return out
     }
 }

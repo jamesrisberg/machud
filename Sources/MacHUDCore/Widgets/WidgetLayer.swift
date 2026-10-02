@@ -124,10 +124,10 @@ final class WidgetLayer {
     }
 
     /// The layout grid on display `index`.
-    func widgetGrid(on index: Int, grid: GridSize? = nil) -> WidgetGrid? {
+    func widgetGrid(on index: Int) -> WidgetGrid? {
         let screens = screens()
         guard screens.indices.contains(index) else { return nil }
-        return WidgetGrid(visible: screens[index].visible, grid: grid ?? self.grid())
+        return WidgetGrid(visible: screens[index].visible, grid: grid())
     }
 
     /// The frames of an app's placed widgets (show verification leaves those windows out).
@@ -390,25 +390,24 @@ final class WidgetLayer {
     }
 
     /// A widget the user dropped at `frame` (an app's frame event, the layout editor): snapped
-    /// to the nearest free spot on the layout grid of the display under its centre (`grid`, the
-    /// one in layouts.json unless the editor is showing another). Returns why it could not be
-    /// placed, else nil.
+    /// to the nearest free spot on the layout grid of the display under its centre. Returns
+    /// why it could not be placed, else nil.
     @discardableResult
-    func drop(_ id: String, at frame: CGRect, grid: GridSize? = nil) -> String? {
-        if case .failure(let error) = place(id, at: frame, grid: grid) { return error.description }
+    func drop(_ id: String, at frame: CGRect) -> String? {
+        if case .failure(let error) = place(id, at: frame) { return error.description }
         return nil
     }
 
     /// `drop`, saying where the widget went: `wanted` is `frame` snapped, `at` the free spot
     /// nearest it.
-    func place(_ id: String, at frame: CGRect, grid: GridSize? = nil) -> Result<(wanted: CGRect, at: CGRect), Failure> {
+    func place(_ id: String, at frame: CGRect) -> Result<(wanted: CGRect, at: CGRect), Failure> {
         var c = config()
         guard let i = c.instances.firstIndex(where: { $0.instance == id }) else { return .failure(Failure("no such widget \(id)")) }
         let screens = screens()
         let centre = CGPoint(x: frame.midX, y: frame.midY)
         guard let index = screens.firstIndex(where: { $0.frame.contains(centre) })
                 ?? WidgetPlacement.screenIndex(c.instances[i].screen, screens: screens)?.index,
-              let g = widgetGrid(on: index, grid: grid) else { return .failure(Failure("no display")) }
+              let g = widgetGrid(on: index) else { return .failure(Failure("no display")) }
         let size = c.instances[i].size
         let s = size.points()
         let wanted = g.snap(CGRect(x: frame.minX, y: frame.maxY - s.height, width: s.width, height: s.height))

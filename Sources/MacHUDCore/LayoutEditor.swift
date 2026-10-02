@@ -82,12 +82,7 @@ final class LayoutEditorController: NSObject {
         let loadoutsAtOpen = config.loadouts
         v.onSave = { [weak self] config, layoutIndex in
             guard let self else { return }
-            var merged = config
-            if config.loadouts == loadoutsAtOpen {
-                // Untouched here, so keep whatever was captured/applied while the editor was open.
-                merged.loadouts = self.store.config.loadouts
-            }
-            self.store.save(merged)
+            self.store.save(Self.saved(config, current: self.store.config, loadoutsAtOpen: loadoutsAtOpen))
             self.store.select(index: layoutIndex)
             self.close()
         }
@@ -101,6 +96,17 @@ final class LayoutEditorController: NSObject {
         w.makeFirstResponder(v)
         v.buildPanel()
         v.reloadWidgets()
+    }
+
+    /// What Save writes: the editor's copy of the config, with the loadouts as they are now
+    /// when the editor left them untouched (captured or applied meanwhile), and always the
+    /// widgets as they are now: the editor changes widgets through the widget layer at once,
+    /// so its copy of them is stale.
+    static func saved(_ edited: Config, current: Config, loadoutsAtOpen: [Loadout]?) -> Config {
+        var merged = edited
+        if edited.loadouts == loadoutsAtOpen { merged.loadouts = current.loadouts }
+        merged.widgets = current.widgets
+        return merged
     }
 
     /// The placed widgets or the widget types changed.
@@ -239,9 +245,12 @@ protocol LayoutEditorWidgets: AnyObject {
     /// The widgets placed on the display whose frame is `screenFrame`.
     func editorWidgets(on screenFrame: CGRect) -> [EditorWidget]
     func editorWidgetTypes() -> [EditorWidgetType]
-    /// Moves a widget to the free spot nearest `frame` on `grid` (the one the editor shows).
-    /// Returns a note when it went elsewhere or could not move.
-    func editorMove(_ id: String, to frame: CGRect, grid: GridSize) -> String?
+    /// The grid widgets snap to: the saved one, which the editor shows unless another
+    /// density is picked and not yet saved.
+    var editorWidgetGrid: GridSize { get }
+    /// Moves a widget to the free spot nearest `frame`. Returns a note when it went elsewhere
+    /// or could not move.
+    func editorMove(_ id: String, to frame: CGRect) -> String?
     /// Adds a widget at the first free spot on that display; `done` gets a note or why not.
     func editorAdd(app: String, type: String, size: HUDWidgetSize, screenFrame: CGRect, done: @escaping (String?) -> Void)
 }
@@ -1254,8 +1263,10 @@ final class EditorView: NSView {
 
     // MARK: Widgets
 
-    /// The layout grid on this screen as widgets snap to it (the grid shown, in view coordinates).
-    private var widgetGrid: WidgetGrid { WidgetGrid(visible: visible, grid: grid) }
+    /// The layout grid on this screen as widgets snap to it, in view coordinates: the saved
+    /// grid, so the preview is where the widget stays (until a new density is saved, which
+    /// moves every widget onto it).
+    private var widgetGrid: WidgetGrid { WidgetGrid(visible: visible, grid: widgetSource?.editorWidgetGrid ?? grid) }
 
     private var screenFrame: CGRect { CGRect(origin: screenOrigin, size: bounds.size) }
 
@@ -1280,7 +1291,7 @@ final class EditorView: NSView {
     }
 
     private func moveWidget(_ id: String, to rect: CGRect) {
-        widgetNote = widgetSource?.editorMove(id, to: rect.offsetBy(dx: screenOrigin.x, dy: screenOrigin.y), grid: grid)
+        widgetNote = widgetSource?.editorMove(id, to: rect.offsetBy(dx: screenOrigin.x, dy: screenOrigin.y))
         reloadWidgets()
     }
 
@@ -1627,7 +1638,7 @@ final class EditorView: NSView {
             "Drag on empty space: new region   ·   ⌘-drag: new region on top of others   ·   Drag region: move   ·   Drag edge/corner: resize",
             "Card buttons: ✕ delete · ✎ rename · ⊕ paint hit zone (⌥-drag also works; H toggles)   ·   ⌫ delete   ·   ⏎ rename   ·   Arrows nudge",
             "⌘↑ / ⌘↓ raise or lower a stacked region   ·   Tab: next layout   ·   ⌘Z undo   ·   ⌘S save   ·   ⌘. / Esc close   ·   ? toggles this help   ·   drag the ⋮⋮ panel to move it",
-            "Widgets: drag one to move it, or Add Widget in the panel; they snap to the grid and change at once (Save, Cancel and ⌘Z leave them)",
+            "Widgets: drag one to move it, or Add Widget in the panel; they snap to the saved grid and change at once (Save, Cancel and ⌘Z leave them)",
         ]
         let para = NSMutableParagraphStyle(); para.alignment = .center; para.lineSpacing = 3
         let attrs: [NSAttributedString.Key: Any] = [

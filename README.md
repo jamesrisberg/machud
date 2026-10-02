@@ -148,8 +148,9 @@ weather and a calendar; serversHUD, Stash and MechaHUD each add a widget beside 
   with region edges and the screen edges, never on top of another widget. Its corner controls
   remove it, open its settings and step through its sizes. Done or Esc locks them again.
 - **In the layout editor**: your widgets show as blocks you can drag on the grid, and the
-  panel's **Add Widget** menu places new ones. Widget changes apply right away (Save and
-  Cancel are for the layout).
+  panel's **Add Widget** menu places new ones. Widget changes apply right away and Save keeps
+  them (Save and Cancel are for the layout). Widgets snap to the saved grid; a new density
+  moves them onto it once you save.
 - **Layers**: widgets sit on the desktop under your windows. **⌃⌥W** raises them all above
   windows until you press it again or Esc; Float Above Windows keeps one on top for good.
 - They are on every desktop, come back where they were after a restart, a display change or the

@@ -15,7 +15,8 @@ import HUDKit
 /// are computed from the display's visible frame.
 struct WidgetsConfig: Codable, Equatable {
     /// The older cell grid's measures, read only to convert records that still have `col`/`row`
-    /// (`WidgetMigration`); written back only while such a record is left.
+    /// (`WidgetMigration`), here or in a HUD loadout; the conversion drops them once no such
+    /// record is left.
     struct LegacyGrid: Equatable {
         var cell: Double?
         var gap: Double?
@@ -56,7 +57,7 @@ struct WidgetsConfig: Codable, Equatable {
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(instances, forKey: .instances)
-        guard let legacyGrid, instances.contains(where: { $0.legacyCell != nil }) else { return }
+        guard let legacyGrid else { return }
         try c.encodeIfPresent(legacyGrid.cell, forKey: .cell)
         try c.encodeIfPresent(legacyGrid.gap, forKey: .gap)
         try c.encodeIfPresent(legacyGrid.margin, forKey: .margin)

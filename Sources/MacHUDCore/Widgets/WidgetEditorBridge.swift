@@ -29,8 +29,10 @@ extension WidgetLayer: LayoutEditorWidgets {
         }
     }
 
-    func editorMove(_ id: String, to frame: CGRect, grid: GridSize) -> String? {
-        switch place(id, at: frame, grid: grid) {
+    var editorWidgetGrid: GridSize { grid() }
+
+    func editorMove(_ id: String, to frame: CGRect) -> String? {
+        switch place(id, at: frame) {
         case .failure(let error): return error.description
         case .success(let (wanted, at)): return wanted == at ? nil : "That spot is taken; moved to the nearest free one"
         }
