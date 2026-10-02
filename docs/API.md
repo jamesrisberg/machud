@@ -653,7 +653,7 @@ see Running several instances).
 
 | Command | Args | Effect |
 | --- | --- | --- |
-| `voice state` | | `state {phase, inputLevel, partialTranscript, card?, hiddenForFullScreen, brainAvailable, brainProblem?, sessionKey?, sessionProvider?, activeRuntime?, wakeListening, wakeProblem?, muted, gesturePending}` |
+| `voice state` | | `state {phase, inputLevel, partialTranscript, card?, hiddenForFullScreen, brainAvailable, brainProblem?, sessionKey?, sessionProvider?, activeRuntime?, wakeListening, wakeProblem?, muted, gesturePending, cardMode}` |
 | `voice hello` | | the voice host's `name` (`MacHUDVoice`), `version`, `pid` |
 | `voice status` | | MacHUD's view of the process: `status` (`running`, `restarting`, `disabled`, `stopped`, `failed`, `notInstalled`), `pid` while running, `socket`, `connected`, `muted` once connected, `error` (why it gave up) when `failed` |
 | `voice action` | `name=` `click`, `ask`, `dictate`, `stop`, `cancel`, `approve`, `deny`, `dismiss`, `mute`, `unmute`, `open-session`, `say`; `id=` for `approve`/`deny`; `text=` for `say` | performs it (`machud voice action mute` works too) |
@@ -662,6 +662,9 @@ see Running several instances).
 | `voice history` | `status` (default) | the voice host's `history status` (below): where finished dictations are kept |
 | `voice settings get` | | `settings`: the voice host's settings object |
 | `voice settings set` | `settings=<JSON object>`, or dotted `key=value` pairs | `settings=` replaces the whole object. `key=value` pairs (`enabled=false`, `voice.speakReplies=true`, `brain.runtime=claude`) are applied to the current settings, each converted to the type already stored, and the whole object is sent back; an unknown key is an error. A `history.` key while no `history` is saved starts from what `history status` resolves to. Turning `enabled` off stops the voice host; on starts it |
+| `voice conversation` | | the voice host's `conversation` (below): the conversation with the agent as rows |
+| `voice say` | `text=` | the voice host's `say` (below): sends `text` to the agent as a typed message, to the same session as voice; not to be confused with `voice action say`, which speaks text aloud |
+| `voice card` | `peek`, `pin`, `expand` or `close` | the voice host's `card` (below): shows the reply card as a peek, pins it, expands it, or closes it |
 | `voice secret` | `set name=grok [value=…]` / `clear name=grok` | stores or removes the Grok API key in the Keychain; the key is never returned. Without `value=`, `machud voice secret set name=grok` reads the key from stdin (without echo at a terminal): prefer that, so the key stays out of the shell history and the process list |
 
 When the voice host is not answering, `voice` replies `ok: false` with why (`status` as above).
@@ -670,7 +673,7 @@ model's Download button and progress, dictation history (Off, Text only, Text an
 history with SpeakFree while SpeakFree is installed; where it is kept), the text feed toggles,
 wake word on/off with why it is not listening (`wakeProblem`), the phrase (only phrases there is
 a model for, each marked when its model is not installed), that model's Download button,
-progress and terms, and sensitivity, reply voice, spoken replies, Test Voice (`action say`), the Kokoro voice's
+progress and terms, and sensitivity, reply voice, spoken replies, spoken replies to typed messages, Test Voice (`action say`), the Kokoro voice's
 Download button and progress (`models`), Grok key) and Brain tab (why the brain cannot take a
 turn, or Ready; on/off; runtime, listing mclaude once it is installed and marking runtimes not
 found; the workspace folder, chosen with a folder picker, the home folder while none is chosen;
@@ -700,6 +703,9 @@ HUDKit's JSON-lines socket, one request per connection, served by `MacHUDVoice` 
 | `models` | `action=download id=parakeet` | downloads SpeakFree's default Parakeet model (English) through SpeakFreeLib's `ParakeetModelManager`, as SpeakFree does: the large files with byte progress, then FluidAudio fetches the rest and compiles it for this Mac. Returns the status; progress as above. Dictation uses it from the next take, without a restart. Without a speech model a dictation fails with "Speech model not installed" |
 | `models` | `action=download id=hey-jarvis` (or its `manifestId`) | downloads that wake phrase's model through VoiceKit's `ModelStore` into the models folder (`MACHUD_VOICE_MODELS_DIR`, else `~/Library/Application Support/MacHUD/Voice/Models`), each file checked against its pinned size and SHA-256. Returns the status; progress as above. Once it is installed the wake word listens, without a restart, if it is on and that is its phrase |
 | `history` | `action=status` (or `history status`) | `{ok, mode, shareWithSpeakFree, speakFreeInstalled, folder, default}`: the `history` setting as it resolves on this Mac now. `mode` is `off`, `text` or `textAndAudio`; `shareWithSpeakFree` is true only while SpeakFree is installed; `folder` is where takes are kept (or would be); `default` is true while no setting is saved |
+| `conversation` | | `{ok, threadId, rows[]}`: the conversation with the agent (below), oldest first; `threadId` is the brain's conversation it belongs to, null until the brain has named one |
+| `say` | `text=<text>` | sends `text` to the agent as a typed turn, to the same session as voice: `{ok, state}` once it is on its way, else `{ok: false, error}` without `text`, while the brain is off or cannot take a turn, while an agent take is recording, or while the agent is still working (`The agent is still working`). A refusal by the brain itself then shows under the orb, as for a spoken turn. Its reply is spoken only with `speakTypedReplies` |
+| `card` | `action=peek\|pin\|expand\|close` | sets `cardMode` (`peek`, `pinned`, `expanded`); `close` closes the card as its close button does (`dismiss`). Returns `{ok, state}` |
 | `secret` | `action=set name=grok value=…` / `action=clear name=grok` | writes the Keychain; never returns a value |
 | `quit` | | exits after replying |
 
@@ -734,6 +740,35 @@ MacHUD tool call ask first, shown on the reply card like any other approval; off
 run without asking and the agent's other actions keep the runtime's own approval policy. With
 `machud-mcp` missing, or the setting off, the brain runs with neither.
 
+`speakTypedReplies` (default false) speaks the replies to typed messages too; replies to spoken
+turns follow `voice.speakReplies`.
+
+The reply card under the orb has three states, `cardMode` in `state`. `peek` is the latest
+exchange: it opens while a turn runs, stays 8 s after, and while the orb or the card is hovered.
+With the pointer over the card it is `pinned`: it grows into the whole conversation, scrollable,
+newest at the bottom (following new rows unless scrolled up), and stays until the pointer has
+been off it for half a second. A click expands it: a panel about 640 points wide and 70% of the
+screen's height, centered under the notch, over a scrim that dims the rest of the screen, with
+a field for typing to the agent. Return sends, Shift-Return starts a new line, ↑ in an empty
+field recalls the last typed message, ⌘K clears the field, ⌘Y and ⌘N allow or deny the newest
+approval (Tab also reaches its buttons), and Esc, the close button or a click on the scrim
+collapses it back to the peek. The expanded panel takes the keyboard without bringing the voice
+host forward, and the app that had it gets it back on collapse. Voice keeps working meanwhile:
+the orb stays above the panel and a spoken turn appears in the same conversation. The orb's
+right-click menu has Show Conversation, and `card` sets the state from a script.
+
+The conversation is BrainKit's transcript of the brain's turns: what the user said (`kind`
+`user`, `source` `voice` or `typed`), the reply (`reply`, `streaming` while the turn runs), tool
+progress (`progress`, `step` `running`, `done`, `failed` or `denied`), approvals (`approval`,
+with `approvalId`, `detail` and `decision` `pending`, `delivering`, `allowed`, `denied`,
+`resolved` or `failed`) and interruptions or failures (`notice`, `isError`). Each row has an
+`id` and the `turnId` it belongs to. The newest 200 rows are kept in
+`~/Library/Application Support/MacHUD/Voice/conversation.json` (not while the brain cannot run,
+`MACHUD_VOICE_NO_BRAIN`), saved a second after a change and at once when a turn ends, so the
+conversation and the last exchange's peek come back after a restart; a row's text is kept up to
+20,000 characters. When the brain starts another conversation (a new session, another workspace
+or runtime), the conversation starts again.
+
 `feedTranscripts` (default true) sends each finished dictation's words (cursor or agent take,
 punctuation and glossary applied) to MacHUD's `feed add text=… source=Dictation` on MacHUD's
 control socket, which hands them to the apps that provide `text-feed` (Stash); `feedAgentReplies`
@@ -742,7 +777,7 @@ Sending never waits on MacHUD or fails a take.
 
 `state` is `{phase, inputLevel, partialTranscript, card?, hiddenForFullScreen, brainAvailable,
 brainProblem?, sessionKey?, sessionProvider?, activeRuntime?, wakeListening, wakeProblem?, muted,
-gesturePending}`. `activeRuntime` is the runtime the brain companion reports running (`codex`,
+gesturePending, cardMode}`; `cardMode` is the reply card's state (see above). `activeRuntime` is the runtime the brain companion reports running (`codex`,
 `claude`, `hermes`, `mclaude`), absent while none is connected.
 `wakeListening` is true while the wake word is armed; it pauses while a take records and listens
 again after. While the wake word is on (and voice is on and not muted) but not listening,
