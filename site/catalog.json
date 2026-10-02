@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-02T04:37:43Z",
+  "updatedAt": "2026-10-02T04:38:40Z",
   "hudkit": "0.3.0",
   "apps": [
     {
@@ -89,12 +89,12 @@
       "name": "Stash",
       "kind": "hover",
       "summary": "Clipboard history as a hover panel",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "minOS": "14.0",
-      "download": "https://github.com/jamesrisberg/stash/releases/download/v0.2.0/Stash-0.2.0.zip",
-      "sha256": "8adc3d35320bec9f9d26f3e4da61c6718e63fb9b337b353e1f4f253ba639e340",
-      "size": 1972838,
-      "publishedAt": "2026-09-29T11:23:17Z",
+      "download": "https://github.com/jamesrisberg/stash/releases/download/v0.3.0/Stash-0.3.0.zip",
+      "sha256": "9e74fc7db2163998624b32b36c75aa0821b4a9f424707e57bf256a11b757be10",
+      "size": 2223574,
+      "publishedAt": "2026-10-02T04:38:40Z",
       "icon": "https://jamesrisberg.github.io/machud/icons/stash.png",
       "homepage": "https://github.com/jamesrisberg/stash",
       "bundled": true
