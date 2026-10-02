@@ -114,8 +114,8 @@ final class ExternalPanels {
     }
 
     /// Relaunches one app (`apps relaunch`, the menu's Relaunch): quit, wait for it to exit,
-    /// launch the same bundle again, wait for it to listen. Completes with `{id, pid?, health}`
-    /// or `{id, error}`.
+    /// launch the same bundle again, wait for it to listen. Completes with
+    /// `{id, previousPID?, pid, health}` or `{id, previousPID?, error}`.
     func relaunch(_ id: String, completion: @escaping ([String: Any]) -> Void) {
         let previous = supervisor.livePIDs(id).first
         supervisor.relaunch(id) { result in
@@ -123,7 +123,7 @@ final class ExternalPanels {
             if let previous { d["previousPID"] = Int(previous) }
             switch result {
             case .success(let up):
-                if let pid = up.pid { d["pid"] = Int(pid) }
+                d["pid"] = Int(up.pid)
                 d["health"] = up.health.rawValue
             case .failure(let error):
                 d["error"] = error.description

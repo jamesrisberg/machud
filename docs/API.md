@@ -281,8 +281,8 @@ its `Info.plist` and `machud.json`), else the first found. `apps` reports every 
 | `apps place` | `id=<bundle id or name>` | apply the app's configured placement now |
 | `apps quit` | `id=<bundle id or name>` | `quit` over the app's socket, else a terminate event; returns `wasRunning`. An app quit this way is not relaunched |
 | `apps quit-all` | | quit every running (or launching, or unanswering) app as `apps quit` does; answers once all have replied with `quit {id: "quit" or error}` |
-| `apps relaunch` | `id=<bundle id or name>` | quit the app, wait up to 10 s for its process to exit, launch the bundle it was running from again (as `apps launch`; never another copy declaring the id) and wait up to 10 s for it to listen; returns `pid` (the new process), `previousPID`, `health` and `app` (its `apps` row), or `ok: false` with `error` (already relaunching, did not quit, could not launch). An app that is not running is just launched |
-| `apps relaunch-all` | `outdated=1` (optional) | relaunch every running app, or with `outdated=1` only the `outdated` ones, as `apps relaunch` does; answers once all are back with `relaunched {id: {pid, previousPID, health} or {error}}` |
+| `apps relaunch` | `id=<bundle id or name>` | refuses, leaving the app running, when the bundle it runs from is gone (a build in progress); else quits the app, waits up to 10 s for its process to exit and its termination to be announced (an app that ignores the quit is then force-quit, with 3 s more), launches the bundle it was running from again (as `apps launch`; never another copy declaring the id) and waits up to 10 s for it to listen. Returns `id`, `pid` (the new process), `previousPID`, `health` and `app` (its `apps` row), or `ok: false` with `error`: already relaunching, the bundle is gone, did not quit even when forced, could not launch, or "did not come back" with why (the launch failed, the new process quit, or it was not listening in time). An app that is not running is just launched. The app stays supervised (an `autoLaunch` app is respawned as usual) whatever the outcome |
+| `apps relaunch-all` | `outdated=1` (optional) | relaunch every app that is up (running, launching or not answering), or with `outdated=1` only the `outdated` ones, as `apps relaunch` does; answers once each has finished with `relaunched {id: {id, pid, previousPID, health} or {id, previousPID, error}}` |
 | `apps menu` / `apps menu-invoke` | `id=`, `item=` | the app's own status menu and performing one of its items (see Menu bar consolidation) |
 | `apps perform` | `app=<bundle id or name>`, `verb=<action verb>`, any other `key=value` | sends the app `action name=<verb>` with the other keys (launching it first if it is not running; commands wait for its socket as for `panel show`); returns the app's reply plus `app` (its bundle id), or the app's own `ok: false`. The target is `app=`, not `id=`, so an action's own `id=` passes through; `name`, `app`, `verb` and `action` cannot be passed to the app this way |
 
@@ -295,13 +295,15 @@ not up yet are queued for 20 s.
 
 Show verification: an app's `visible: true` is not taken as proof that its panel is on
 screen. Half a second after an app accepts a `panel show` (a dock hover or click, a summon,
-the menu's Show, `panel show`), MacHUD looks for one of the app's windows (normal layer or
-above) on screen over a display. Not found, the panel is recorded as `elsewhere: "another
-desktop"` (a window on a desktop that is not showing) or `"off screen"` (ordered out, or past
-every display) in `panels`, and the app's submenu says so. A tool dock click or a summon
-(the menu's Show <App>, `summon`) that missed also shows a toast naming the fix (Relaunch <App>); a
-passing hover, `panel show` and a loadout only record it. An app's own `onActiveSpace` in its show reply is used only when the window list cannot
-tell.
+the menu's Show, `panel show`, a loadout slot), MacHUD looks for one of the app's windows
+(normal layer or above) on screen over a display. Not found, the panel is recorded as
+`elsewhere: "another desktop"` (a window on a desktop that is not showing) or `"off screen"`
+(ordered out, or past every display) in `panels`, and the app's submenu says so. A tool dock
+click or a summon (the menu's Show <App>, `summon`) that missed also shows a toast naming the
+fix (Relaunch <App>); a passing hover, `panel show` and a loadout slot only record it. A
+parked panel is not checked, and a HUD loadout's panel shows go to the apps directly and are
+not verified. An app's own `onActiveSpace` in its show reply is used only when the window
+list cannot tell.
 
 Default placement: `apps.<bundle id>.placement` in layouts.json says where MacHUD puts an
 app's panel when *it* launches the app (`apps launch`, `autoLaunch`, the menu's Launch):
