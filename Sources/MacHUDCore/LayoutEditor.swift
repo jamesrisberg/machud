@@ -1153,11 +1153,8 @@ final class EditorView: NSView {
     // MARK: Drawing
 
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.black.withAlphaComponent(0.55).setFill()
-        bounds.fill()
-        NSColor.black.withAlphaComponent(0.2).setFill()
-        visible.fill()
-        drawGrid()
+        GridDrawing.backdrop(bounds, visible: visible)
+        GridDrawing.lines(grid, in: visible)
 
         guard let l = layout else { return }
         let accent = NSColor.controlAccentColor
@@ -1244,23 +1241,6 @@ final class EditorView: NSView {
 
         if dirty { drawHint("● Unsaved changes") }
         if showHelp { drawHelp() }
-    }
-
-    private func drawGrid() {
-        let minor = NSBezierPath(), major = NSBezierPath()
-        let majorEveryC = max(1, grid.cols / 12), majorEveryR = max(1, grid.rows / 6)
-        for c in 0...grid.cols {
-            let x = (visible.minX + CGFloat(c) / CGFloat(grid.cols) * visible.width).rounded() + 0.5
-            let p = (c % majorEveryC == 0) ? major : minor
-            p.move(to: CGPoint(x: x, y: visible.minY)); p.line(to: CGPoint(x: x, y: visible.maxY))
-        }
-        for r in 0...grid.rows {
-            let y = (visible.minY + CGFloat(r) / CGFloat(grid.rows) * visible.height).rounded() + 0.5
-            let p = (r % majorEveryR == 0) ? major : minor
-            p.move(to: CGPoint(x: visible.minX, y: y)); p.line(to: CGPoint(x: visible.maxX, y: y))
-        }
-        NSColor.white.withAlphaComponent(0.06).setStroke(); minor.lineWidth = 1; minor.stroke()
-        NSColor.white.withAlphaComponent(0.16).setStroke(); major.lineWidth = 1; major.stroke()
     }
 
     private func pct(_ v: Double) -> String { String(format: "%.1f%%", v * 100) }

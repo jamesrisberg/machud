@@ -2,7 +2,7 @@ import AppKit
 import HUDKit
 import SwiftUI
 
-/// What the user sees of the widget layer in MacHUD itself: the gallery and the cell grid
+/// What the user sees of the widget layer in MacHUD itself: the gallery and the layout grid
 /// while editing, an instance's settings, and the reveal hotkey (⌃⌥W) with Esc to lower or
 /// leave edit mode.
 @MainActor
@@ -18,6 +18,9 @@ final class WidgetUI {
     private var escapeID: UInt32?
     /// Off in an isolated instance (`MACHUD_NO_HOTKEYS`).
     var hotkeysEnabled = !Env.noHotkeys
+    /// The active layout's regions on a display (Cocoa coordinates), drawn faintly under the
+    /// grid while editing so widgets can be lined up with them.
+    var regions: (WidgetScreen) -> [CGRect] = { _ in [] }
 
     init(layer: WidgetLayer) {
         self.layer = layer
@@ -108,8 +111,12 @@ final class WidgetUI {
         while overlays.count < screens.count { overlays.append(makeOverlay()) }
         for (i, overlay) in overlays.enumerated() {
             guard screens.indices.contains(i) else { overlay.orderOut(nil); continue }
-            overlay.setFrame(screens[i].frame, display: false)
-            (overlay.contentView as? WidgetGridView)?.cells = cellFrames(on: screens[i])
+            let screen = screens[i]
+            overlay.setFrame(screen.frame, display: false)
+            if let view = overlay.contentView as? WidgetGridView {
+                let local = { (r: CGRect) in r.offsetBy(dx: -screen.frame.minX, dy: -screen.frame.minY) }
+                view.show(visible: local(screen.visible), grid: layer.grid(), regions: regions(screen).map(local))
+            }
             overlay.orderFrontRegardless()
         }
     }
@@ -118,18 +125,6 @@ final class WidgetUI {
         galleryWindow?.orderOut(nil)
         gallery.message = nil
         for overlay in overlays { overlay.orderOut(nil) }
-    }
-
-    /// Every cell of the screen's grid, in the overlay window's coordinates.
-    private func cellFrames(on screen: WidgetScreen) -> [CGRect] {
-        let grid = layer.config().grid(on: screen.visible)
-        var out: [CGRect] = []
-        for c in 0..<grid.columns {
-            for r in 0..<grid.rows {
-                out.append(grid.cellFrame(WidgetGrid.Cell(col: c, row: r)).offsetBy(dx: -screen.frame.minX, dy: -screen.frame.minY))
-            }
-        }
-        return out
     }
 
     private func makeGallery() -> NSWindow {
@@ -204,20 +199,25 @@ private final class FirstMouseHostingView<Content: View>: NSHostingView<Content>
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
-/// The faint cell grid drawn on each display while editing.
+/// The layout grid on one display while editing widgets, drawn as the layout editor draws it,
+/// with the active layout's regions faintly under it.
 final class WidgetGridView: NSView {
-    var cells: [CGRect] = [] { didSet { needsDisplay = true } }
+    private(set) var visible: CGRect = .zero
+    private(set) var grid: GridSize = .default
+    private(set) var regions: [CGRect] = []
+
+    func show(visible: CGRect, grid: GridSize, regions: [CGRect]) {
+        guard visible != self.visible || grid != self.grid || regions != self.regions else { return }
+        self.visible = visible
+        self.grid = grid
+        self.regions = regions
+        needsDisplay = true
+    }
 
     override func draw(_ dirtyRect: NSRect) {
-        for cell in cells {
-            let path = NSBezierPath(roundedRect: cell, xRadius: HUDWidgetStyle.cornerRadius, yRadius: HUDWidgetStyle.cornerRadius)
-            NSColor.white.withAlphaComponent(0.05).setFill()
-            path.fill()
-            NSColor.white.withAlphaComponent(0.18).setStroke()
-            path.setLineDash([6, 4], count: 2, phase: 0)
-            path.lineWidth = 1
-            path.stroke()
-        }
+        GridDrawing.backdrop(bounds, visible: visible)
+        GridDrawing.lines(grid, in: visible)
+        for r in regions { GridDrawing.faintRegion(r) }
     }
 }
 

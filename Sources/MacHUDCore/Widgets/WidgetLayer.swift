@@ -48,6 +48,8 @@ final class WidgetLayer {
     var save: (WidgetsConfig) -> Void
     /// The displays attached now (tests give their own).
     var screens: () -> [WidgetScreen] = { WidgetScreen.attached() }
+    /// The layout grid (`grid` in layouts.json) widgets snap to.
+    var grid: () -> GridSize = { .default }
     /// A new instance id: eight hex digits.
     var newID: () -> String = { String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(8)) }
     /// Tells the user something went wrong (a toast).
@@ -116,7 +118,16 @@ final class WidgetLayer {
     var servingApps: [ExternalApp] { externals.apps.filter { !$0.manifest.widgetPanels.isEmpty } }
 
     func placements() -> [String: WidgetPlacement.Placed] {
-        WidgetPlacement.resolve(records, screens: screens(), config: config()) { [unowned self] in !isMissingType($0) }
+        WidgetPlacement.resolve(records, screens: screens(), grid: grid(), legacy: config().legacyGrid ?? .standard) { [unowned self] in
+            !isMissingType($0)
+        }
+    }
+
+    /// The layout grid on display `index`.
+    func widgetGrid(on index: Int, grid: GridSize? = nil) -> WidgetGrid? {
+        let screens = screens()
+        guard screens.indices.contains(index) else { return nil }
+        return WidgetGrid(visible: screens[index].visible, grid: grid ?? self.grid())
     }
 
     /// The frames of an app's placed widgets (show verification leaves those windows out).
@@ -378,48 +389,58 @@ final class WidgetLayer {
         }
     }
 
-    /// A widget the user dropped at `frame`: snapped to the nearest free cells of the display
-    /// under its centre. Returns why it could not be placed, else nil.
+    /// A widget the user dropped at `frame` (an app's frame event, the layout editor): snapped
+    /// to the nearest free spot on the layout grid of the display under its centre (`grid`, the
+    /// one in layouts.json unless the editor is showing another). Returns why it could not be
+    /// placed, else nil.
     @discardableResult
-    func drop(_ id: String, at frame: CGRect) -> String? {
-        var c = config()
-        guard let i = c.instances.firstIndex(where: { $0.instance == id }) else { return "no such widget \(id)" }
-        let screens = screens()
-        let centre = CGPoint(x: frame.midX, y: frame.midY)
-        guard let index = screens.firstIndex(where: { $0.frame.contains(centre) })
-                ?? WidgetPlacement.screenIndex(c.instances[i].screen, screens: screens)?.index else { return "no display" }
-        let grid = c.grid(on: screens[index].visible)
-        let size = c.instances[i].size
-        guard let near = grid.snap(frame, size),
-              let cell = grid.nearestFree(size, near: near, occupied: occupied(on: index, except: id)) else {
-            commit(c)          // puts it back where it was
-            return "No room for it there"
-        }
-        c.instances[i].screen = screens[index].ref
-        c.instances[i].cell = cell
-        commit(c)
+    func drop(_ id: String, at frame: CGRect, grid: GridSize? = nil) -> String? {
+        if case .failure(let error) = place(id, at: frame, grid: grid) { return error.description }
         return nil
     }
 
-    /// The cells taken on display `index` by every placed widget but `except`.
-    func occupied(on index: Int, except: String? = nil) -> Set<WidgetGrid.Cell> {
-        let placed = placements()
-        var out: Set<WidgetGrid.Cell> = []
-        guard let screen = screens().indices.contains(index) ? screens()[index] : nil else { return out }
-        let grid = config().grid(on: screen.visible)
-        for r in records where r.instance != except {
-            guard let p = placed[r.instance], p.screen == index else { continue }
-            out.formUnion(grid.cells(p.cell, r.size))
+    /// `drop`, saying where the widget went: `wanted` is `frame` snapped, `at` the free spot
+    /// nearest it.
+    func place(_ id: String, at frame: CGRect, grid: GridSize? = nil) -> Result<(wanted: CGRect, at: CGRect), Failure> {
+        var c = config()
+        guard let i = c.instances.firstIndex(where: { $0.instance == id }) else { return .failure(Failure("no such widget \(id)")) }
+        let screens = screens()
+        let centre = CGPoint(x: frame.midX, y: frame.midY)
+        guard let index = screens.firstIndex(where: { $0.frame.contains(centre) })
+                ?? WidgetPlacement.screenIndex(c.instances[i].screen, screens: screens)?.index,
+              let g = widgetGrid(on: index, grid: grid) else { return .failure(Failure("no display")) }
+        let size = c.instances[i].size
+        let s = size.points()
+        let wanted = g.snap(CGRect(x: frame.minX, y: frame.maxY - s.height, width: s.width, height: s.height))
+        guard let at = g.nearestFree(size, near: wanted, occupied: occupied(on: index, except: id)) else {
+            commit(c)          // puts it back where it was
+            return .failure(Failure("No room for it there"))
         }
-        return out
+        c.instances[i].screen = screens[index].ref
+        c.instances[i].position = g.position(of: at)
+        c.instances[i].legacyCell = nil
+        commit(c)
+        return .success((wanted, at))
+    }
+
+    /// The frames taken on display `index` by every placed widget but `except`.
+    func occupied(on index: Int, except: String? = nil) -> [CGRect] {
+        placements().filter { $0.key != except && $0.value.screen == index }.map(\.value.snapped)
+    }
+
+    /// A placement as `col,row` in grid-line units, for notes.
+    func describe(_ frame: CGRect, on g: WidgetGrid) -> String {
+        let lines = g.lines(g.position(of: frame))
+        return "\(Self.number(lines.col)),\(Self.number(lines.row))"
     }
 
     // MARK: - Changes
 
-    /// Places a new widget. `cell` nil: the first free cells; else the nearest free ones.
-    /// `done` gets the instance's record and a note (moved to free cells, app launching), or why not.
+    /// Places a new widget. `position` nil: the first free spot; else the free spot nearest it
+    /// once snapped. `done` gets the instance's record and a note (moved to a free spot, app
+    /// launching), or why not.
     func add(app key: String?, type typeID: String, size: HUDWidgetSize? = nil, screen ref: ScreenRef? = nil,
-             cell: WidgetGrid.Cell? = nil, layer: HUDWidgetLayer = .desktop, settings: [String: HUDSettingValue] = [:],
+             position: WidgetGrid.Position? = nil, layer: HUDWidgetLayer = .desktop, settings: [String: HUDSettingValue] = [:],
              done: @escaping (Result<(WidgetRecord, String?), Failure>) -> Void) {
         let type: WidgetType
         do { type = try findType(app: key, type: typeID) } catch let e as Failure { done(.failure(e)); return } catch { return }
@@ -434,14 +455,16 @@ final class WidgetLayer {
         let screens = screens()
         guard let index = WidgetPlacement.screenIndex(ref, screens: screens)?.index else { done(.failure(Failure("no display"))); return }
         if let ref, ref.index(in: screens.map(\.descriptor)) == nil { done(.failure(Failure("no display \(ref.label)"))); return }
-        let grid = config().grid(on: screens[index].visible)
+        guard let g = widgetGrid(on: index) else { done(.failure(Failure("no display"))); return }
         let taken = occupied(on: index)
-        let at = cell.flatMap { grid.nearestFree(size, near: $0, occupied: taken) } ?? (cell == nil ? grid.firstFree(size, occupied: taken) : nil)
+        let wanted = position.map { g.snap(g.frame($0, size)) }
+        let at = wanted.map { g.nearestFree(size, near: $0, occupied: taken) } ?? g.firstFree(size, occupied: taken)
         guard let at else { done(.failure(Failure("no room for a \(size.rawValue) widget on \(screens[index].name)"))); return }
         var note: String?
-        if let cell, cell != at { note = "\(cell) is taken; placed at \(at)" }
+        if let wanted, wanted != at { note = "\(describe(wanted, on: g)) is taken; placed at \(describe(at, on: g))" }
+        let p = g.position(of: at)
         let record = WidgetRecord(instance: uniqueID(), app: type.app.id, type: type.id, size: size,
-                                  screen: ref == nil ? nil : screens[index].ref, col: at.col, row: at.row, layer: layer,
+                                  screen: ref == nil ? nil : screens[index].ref, x: p.x, y: p.y, layer: layer,
                                   settings: settings.isEmpty ? nil : settings)
         var c = config()
         c.instances.append(record)
@@ -478,10 +501,10 @@ final class WidgetLayer {
         commit(c, apps: [record.app])
     }
 
-    /// Moves a widget to the free cells nearest `cell` (on `screen`, else its own display).
-    /// Returns where it went.
+    /// Moves a widget to the free spot nearest `position` once snapped (on `screen`, else its
+    /// own display). Returns a note when it went elsewhere than asked.
     @discardableResult
-    func move(_ id: String, to cell: WidgetGrid.Cell, screen ref: ScreenRef? = nil) throws -> (WidgetGrid.Cell, String) {
+    func move(_ id: String, to position: WidgetGrid.Position, screen ref: ScreenRef? = nil) throws -> String? {
         var c = config()
         guard let i = c.instances.firstIndex(where: { $0.instance == id }) else { throw Failure("no such widget \(id)") }
         let screens = screens()
@@ -493,15 +516,17 @@ final class WidgetLayer {
             guard let own = WidgetPlacement.screenIndex(c.instances[i].screen, screens: screens) else { throw Failure("no display") }
             index = own.index
         }
-        let grid = c.grid(on: screens[index].visible)
+        guard let g = widgetGrid(on: index) else { throw Failure("no display") }
         let size = c.instances[i].size
-        guard let at = grid.nearestFree(size, near: cell, occupied: occupied(on: index, except: id)) else {
+        let wanted = g.snap(g.frame(position, size))
+        guard let at = g.nearestFree(size, near: wanted, occupied: occupied(on: index, except: id)) else {
             throw Failure("no room for it on \(screens[index].name)")
         }
         if ref != nil || c.instances[i].screen != nil { c.instances[i].screen = screens[index].ref }
-        c.instances[i].cell = at
+        c.instances[i].position = g.position(of: at)
+        c.instances[i].legacyCell = nil
         commit(c, apps: [c.instances[i].app])
-        return (at, screens[index].name)
+        return at == wanted ? nil : "\(describe(wanted, on: g)) is taken; placed at \(describe(at, on: g)) on \(screens[index].name)"
     }
 
     /// Changes a widget's size: in place when it fits, else at the nearest free spot.
@@ -519,13 +544,17 @@ final class WidgetLayer {
         guard let index = placed?.screen ?? WidgetPlacement.screenIndex(record.screen, screens: screens)?.index else {
             throw Failure("no display")
         }
-        let grid = c.grid(on: screens[index].visible)
-        let here = placed?.cell ?? record.cell
-        guard let at = grid.nearestFree(size, near: here, occupied: occupied(on: index, except: id)) else {
+        guard let g = widgetGrid(on: index) else { throw Failure("no display") }
+        // The same top-left, at the new size, snapped again.
+        let topLeft = placed?.snapped ?? record.frame(on: g, legacy: config().legacyGrid ?? .standard)
+        let s = size.points()
+        let here = g.snap(CGRect(x: topLeft.minX, y: topLeft.maxY - s.height, width: s.width, height: s.height))
+        guard let at = g.nearestFree(size, near: here, occupied: occupied(on: index, except: id)) else {
             throw Failure("No room for a \(size.rawValue) \(type.title) on \(screens[index].name)")
         }
         c.instances[i].size = size
-        c.instances[i].cell = at
+        c.instances[i].position = g.position(of: at)
+        c.instances[i].legacyCell = nil
         commit(c, apps: [record.app])
     }
 
@@ -580,8 +609,7 @@ final class WidgetLayer {
         var ids = Set<String>()
         var next: [WidgetRecord] = []
         for var record in set {
-            if let i = current.firstIndex(where: { $0.app == record.app && $0.type == record.type
-                                                   && $0.screen == record.screen && $0.cell == record.cell }) {
+            if let i = current.firstIndex(where: { $0.samePlace(as: record) }) {
                 record.instance = current.remove(at: i).instance
             }
             if ids.contains(record.instance) { record.instance = uniqueID(avoiding: ids) }
@@ -626,7 +654,7 @@ final class WidgetLayer {
         [r.minX, r.minY, r.width, r.height].map { Self.number(Double($0)) }.joined(separator: ",")
     }
 
-    private static func number(_ d: Double) -> String { d == d.rounded() ? String(Int(d)) : String(d) }
+    static func number(_ d: Double) -> String { d == d.rounded() ? String(Int(d)) : String(d) }
 
     /// Equal, counting a whole-number double and the same int as equal (`1.0` is saved as `1`
     /// and reads back as an int).
