@@ -195,7 +195,7 @@ final class VoiceControlTests: XCTestCase {
         XCTAssertEqual(try parse(["history"]), .forward("history", ["action": "status"]))
         XCTAssertEqual(try parse(["history", "status"]), .forward("history", ["action": "status"]))
         XCTAssertEqual(try parse(["conversation"]), .forward("conversation", [:]))
-        XCTAssertEqual(try parse(["say", "text=list my files"]), .forward("say", ["text": "list my files"]))
+        XCTAssertEqual(try parse(["send", "text=list my files"]), .forward("send", ["text": "list my files"]))
         XCTAssertEqual(try parse(["card", "pin"]), .forward("card", ["action": "pin"]))
         XCTAssertEqual(try parse(["card", "action=expand"]), .forward("card", ["action": "expand"]))
         XCTAssertEqual(try parse(["card", "close"]), .forward("card", ["action": "close"]))
@@ -218,7 +218,7 @@ final class VoiceControlTests: XCTestCase {
         fails(["models", "download"], "download needs id")
         fails(["models", "action=delete", "id=kokoro"], "models only reports and downloads")
         fails(["history", "action=clear"], "history only reports status")
-        fails(["say"], "say needs text")
+        fails(["send"], "send needs text")
         fails(["card"], "card needs a state")
         fails(["card", "action=fold"], "not a card state")
     }

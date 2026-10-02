@@ -11,6 +11,7 @@ import VoiceKit
 final class ReplySpeaker: ReplySpeaking {
     var onFinished: (() -> Void)?
     var onChunkStarted: ((SpeechChunk) -> Void)?
+    let reportsChunks = true
     var isSpeaking: Bool { streamer?.isSpeaking == true }
 
     private let kokoroDirectory: URL

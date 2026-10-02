@@ -127,6 +127,27 @@ final class ConversationTests: XCTestCase {
         XCTAssertEqual(restored.rows.map(\.text), ["hello", "Hi there"])
     }
 
+    func testATurnTheBrainResumesAfterARestartShowsItsLinesOnce() {
+        var log = ConversationLog(launch: "A")
+        log.submitted("clean up", source: .voice)
+        log.accepted()
+        log.apply(snapshot("running", progress: "Reading folder", turn: "t5"))
+        var restored = ConversationLog(record: log.record, launch: "B")
+        restored.apply(snapshot("running", progress: "Reading folder", turn: "t5"))
+        restored.apply(snapshot("interrupted", progress: "Reading folder", turn: "t5"))
+        XCTAssertEqual(restored.rows.filter { $0.kind == .progress }.count, 1, "\(restored.rows.map(\.text))")
+        XCTAssertEqual(restored.rows.filter { $0.kind == .notice }.count, 1)
+    }
+
+    func testTheSubmittedRowIsMarkedPendingUntilTheBrainTakesIt() {
+        var log = ConversationLog(launch: "A")
+        log.submitted("hello", source: .typed)
+        XCTAssertEqual(log.rows.last?.pending, true)
+        XCTAssertNil(log.record.rows.last, "a pending row is not kept")
+        log.accepted()
+        XCTAssertNil(log.rows.last?.pending)
+    }
+
     func testANewThreadClearsTheConversation() {
         var log = ConversationLog(launch: "A")
         log.submitted("hello", source: .voice)
@@ -191,6 +212,8 @@ final class ConversationTests: XCTestCase {
         let record = ConversationRecord(threadId: "t", rows: [.user(id: "a", text: "hi", source: .typed)])
         store.save(record)
         XCTAssertEqual(store.load(), record)
+        let mode = try FileManager.default.attributesOfItem(atPath: store.url.path)[.posixPermissions] as? NSNumber
+        XCTAssertEqual(mode?.intValue, 0o600, "only the user can read the conversation")
     }
 
     func testRowsEncodeOnlyTheFieldsTheirKindHas() throws {

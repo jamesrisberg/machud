@@ -220,20 +220,20 @@ final class VoiceHostCommandsTests: XCTestCase {
 
     // MARK: Conversation
 
-    func testSayIsATypedTurn() async {
-        let reply = commands.handle("say", ["text": "list my files"])
+    func testSendIsATypedTurn() async {
+        let reply = commands.handle("send", ["text": "list my files"])
         XCTAssertEqual(reply["ok"] as? Bool, true, "\(reply)")
         await controller.pendingWork?.value
         XCTAssertEqual(brain.submitted.map(\.text), ["list my files"])
-        XCTAssertEqual(commands.handle("say", [:])["ok"] as? Bool, false)
+        XCTAssertEqual(commands.handle("send", [:])["ok"] as? Bool, false)
         brain.push(status: "running", output: "Working")
-        let busy = commands.handle("say", ["text": "again"])
+        let busy = commands.handle("send", ["text": "again"])
         XCTAssertEqual(busy["ok"] as? Bool, false)
         XCTAssertEqual(busy["error"] as? String, VoiceHostController.agentBusy)
     }
 
     func testConversationListsTheRows() async throws {
-        _ = commands.handle("say", ["text": "hello"])
+        _ = commands.handle("send", ["text": "hello"])
         await controller.pendingWork?.value
         brain.push(status: "idle", output: "Hi")
         let reply = commands.handle("conversation", [:])
