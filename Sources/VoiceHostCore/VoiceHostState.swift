@@ -72,6 +72,8 @@ public struct VoiceTakeEnd: Codable, Equatable, Sendable {
         case pause
         /// The take reached the endpointer's maximum length.
         case maximum
+        /// No speech was heard 10 s into an automatic take: it is thrown away, not sent.
+        case nothingHeard
         /// A tap: the orb, the fn key or `action stop`.
         case stop
         /// Thrown away: `action cancel`, mute, or a change to the fn key setup.

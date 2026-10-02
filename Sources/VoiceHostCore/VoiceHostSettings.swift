@@ -5,7 +5,7 @@ import VoiceKit
 /// Everything the voice host is configured by. Stored as `voice.json` in MacHUD's config
 /// directory; the voice host owns the file and MacHUD edits it through `settings set`.
 public struct VoiceHostSettings: Codable, Equatable, Sendable {
-    public enum KeyMode: String, Codable, Equatable, Sendable {
+    public enum KeyMode: String, Codable, CaseIterable, Equatable, Sendable {
         /// Hold fn to dictate; tap then hold to talk to the agent.
         case hold
         /// Tap fn to dictate; double-tap to talk to the agent.
@@ -116,7 +116,7 @@ public struct VoiceHostSettings: Codable, Equatable, Sendable {
 
 /// How a hands-free take ends (`handsFree` in `voice.json`). Key-held takes end with the key.
 public struct HandsFreeSettings: Codable, Equatable, Sendable {
-    public enum EndOfTurn: String, Codable, Equatable, Sendable {
+    public enum EndOfTurn: String, Codable, CaseIterable, Equatable, Sendable {
         /// A pause after speech ends the take (`SilenceEndpointer`).
         case auto
         /// Only a tap (the orb, the fn key, `voice action stop`) or the maximum length ends it.
@@ -124,7 +124,7 @@ public struct HandsFreeSettings: Codable, Equatable, Sendable {
     }
 
     /// How readily a sound counts as speech over the room's noise.
-    public enum Sensitivity: String, Codable, Equatable, Sendable {
+    public enum Sensitivity: String, Codable, CaseIterable, Equatable, Sendable {
         case low, medium, high
     }
 
@@ -164,6 +164,29 @@ public struct HandsFreeSettings: Codable, Equatable, Sendable {
 }
 
 extension VoiceHostSettings {
+    /// The settings whose value is one of a fixed set, by dotted path, with their choices.
+    static let choices: [(path: String, values: [String])] = [
+        ("keyMode", KeyMode.allCases.map(\.rawValue)),
+        ("handsFree.endOfTurn", HandsFreeSettings.EndOfTurn.allCases.map(\.rawValue)),
+        ("handsFree.sensitivity", HandsFreeSettings.Sensitivity.allCases.map(\.rawValue)),
+        ("history.mode", DictationHistorySettings.Mode.allCases.map(\.rawValue)),
+        ("brain.runtime", AgentRuntime.allCases.map(\.rawValue)),
+        ("voice.replyVoice", SpeechVoiceKind.allCases.map(\.rawValue)),
+    ]
+
+    /// Why `object` (a settings object about to be saved) cannot be: a choice setting holds a
+    /// value that is not one of its choices. Decoding would quietly take the default instead.
+    static func invalidChoice(in object: [String: Any]) -> String? {
+        for (path, values) in choices {
+            var current: Any? = object
+            for key in path.split(separator: ".") { current = (current as? [String: Any])?[String(key)] }
+            guard let value = current else { continue }
+            if let text = value as? String, values.contains(text) { continue }
+            return "\(path) must be one of \(values.joined(separator: ", ")), not \(value)"
+        }
+        return nil
+    }
+
     /// These settings with a wake phrase that can be listened for: while the wake word is on, a
     /// phrase no model detects (the default "Hey Computer") becomes the first of `phrases`, the
     /// phrases with a model. While it is off the phrase is left as it is, and with no phrases

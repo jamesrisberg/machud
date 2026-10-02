@@ -167,13 +167,24 @@ final class VoiceHostControllerTests: XCTestCase {
         }
     }
 
+    /// Words at 0.6, 0.4 s each with a 0.1 s gap at the start of every half second.
+    private func speak(from start: Double, to end: Double) {
+        var time = start
+        while time < end - 1e-9, dictation.isCapturing {
+            clock.now = time
+            dictation.level((time + 1e-9).truncatingRemainder(dividingBy: 0.5) < 0.1 ? 0.01 : 0.6)
+            time += 0.05
+        }
+    }
+
     func testOrbClickStartsAnAgentTakeThatEndsOnSilence() {
         let controller = makeController()
         controller.perform(.orbClicked)
         XCTAssertEqual(dictation.starts, [.caller])
         XCTAssertEqual(controller.state.phase, .listening(.agent))
-        levels(0.6, from: 0, to: 1)
+        speak(from: 0, to: 1)
         XCTAssertEqual(controller.state.inputLevel, 0.6)
+        XCTAssertEqual(controller.state.phase, .listening(.agent))
         dictation.partial("What is on my calendar today?")
         levels(0.01, from: 1, to: 2.9)
         XCTAssertEqual(dictation.stops, 0, "a pause shorter than 2 s keeps listening")
@@ -186,7 +197,7 @@ final class VoiceHostControllerTests: XCTestCase {
         let controller = makeController()
         defer { withExtendedLifetime(controller) {} }
         controller.perform(.orbClicked)
-        levels(0.6, from: 0, to: 1)
+        speak(from: 0, to: 1)
         dictation.partial("Open the browser and")
         levels(0.01, from: 1, to: 4.4)
         XCTAssertEqual(dictation.stops, 0)
@@ -200,7 +211,7 @@ final class VoiceHostControllerTests: XCTestCase {
         let controller = makeController(settings)
         defer { withExtendedLifetime(controller) {} }
         controller.perform(.orbClicked)
-        levels(0.6, from: 0, to: 1)
+        speak(from: 0, to: 1)
         dictation.partial("Stop.")
         levels(0.01, from: 1, to: 2.1)
         XCTAssertEqual(dictation.stops, 1)
@@ -212,7 +223,7 @@ final class VoiceHostControllerTests: XCTestCase {
         settings.handsFree.endOfTurn = .manual
         let controller = makeController(settings)
         controller.perform(.orbClicked)
-        levels(0.6, from: 0, to: 1)
+        speak(from: 0, to: 1)
         dictation.partial("Done.")
         levels(0.01, from: 1, to: 60)
         XCTAssertEqual(dictation.stops, 0)
@@ -227,15 +238,15 @@ final class VoiceHostControllerTests: XCTestCase {
         controller.logTakeEnd = { logged.append($0) }
         controller.perform(.orbClicked)
         levels(0.01, from: 0, to: 0.5)
-        levels(0.6, from: 0.5, to: 1.5)
+        speak(from: 0.5, to: 1.5)
         dictation.partial("Mute the music.")
         levels(0.01, from: 1.5, to: 5)
         let end = try XCTUnwrap(controller.state.lastTakeEnd)
         XCTAssertEqual(end.reason, .pause)
         XCTAssertEqual(end.seconds, 3.5, accuracy: 0.001)
         XCTAssertEqual(try XCTUnwrap(end.quietMs), 2000)
-        XCTAssertEqual(try XCTUnwrap(end.floor), 0.01, accuracy: 0.002)
-        XCTAssertEqual(try XCTUnwrap(end.threshold), 0.05, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(end.floor), 0.012, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(end.threshold), 0.03, accuracy: 0.001)
         XCTAssertEqual(end.pause, 2)
         XCTAssertEqual(end.grace, false)
         XCTAssertEqual(logged.count, 1)
@@ -258,7 +269,7 @@ final class VoiceHostControllerTests: XCTestCase {
 
         clock.now = 200
         controller.perform(.orbClicked)
-        levels(0.6, from: 200, to: 321)
+        speak(from: 200, to: 321)
         XCTAssertEqual(dictation.stops, 2)
         let end = try XCTUnwrap(controller.state.lastTakeEnd)
         XCTAssertEqual(end.reason, .maximum)
@@ -268,6 +279,19 @@ final class VoiceHostControllerTests: XCTestCase {
         controller.perform(.orbClicked)
         dictation.onUpdate?(dictation.takeID, .failed(.tooShort))
         XCTAssertEqual(controller.state.lastTakeEnd?.reason, .failed)
+    }
+
+    func testATakeWithNothingHeardIsThrownAway() throws {
+        let controller = makeController()
+        controller.perform(.orbClicked)
+        levels(0.01, from: 0, to: 9.9)
+        XCTAssertEqual(dictation.cancels, 0)
+        levels(0.01, from: 9.9, to: 10.1)
+        XCTAssertEqual(dictation.cancels, 1)
+        XCTAssertEqual(dictation.stops, 0, "nothing is transcribed or sent")
+        XCTAssertEqual(try XCTUnwrap(controller.state.lastTakeEnd).reason, .nothingHeard)
+        XCTAssertEqual(controller.state.phase, .failed("Didn't hear anything"))
+        XCTAssertTrue(brain.submitted.isEmpty)
     }
 
     func testKeyTakesReportNoTakeEnd() {

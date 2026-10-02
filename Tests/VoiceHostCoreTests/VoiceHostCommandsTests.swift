@@ -74,6 +74,19 @@ final class VoiceHostCommandsTests: XCTestCase {
         XCTAssertEqual((get["handsFree"] as? [String: Any])?["endOfTurn"] as? String, "manual")
     }
 
+    func testAChoiceSettingOutsideItsChoicesIsRefused() {
+        for json in [#"{"handsFree":{"endOfTurn":"never"}}"#, #"{"handsFree":{"sensitivity":3}}"#,
+                     #"{"keyMode":"edit"}"#, #"{"brain":{"runtime":"gpt"}}"#, #"{"voice":{"replyVoice":"x"}}"#,
+                     #"{"history":{"mode":"all"}}"#] {
+            let reply = commands.handle("settings", ["action": "set", "settings": json])
+            XCTAssertEqual(reply["ok"] as? Bool, false, json)
+            XCTAssertTrue((reply["error"] as? String ?? "").contains("must be one of"), "\(reply)")
+        }
+        XCTAssertEqual(controller.settings, VoiceHostSettings(), "nothing was saved")
+        let error = commands.handle("settings", ["action": "set", "settings": #"{"handsFree":{"endOfTurn":"never"}}"#])["error"]
+        XCTAssertEqual(error as? String, "handsFree.endOfTurn must be one of auto, manual, not never")
+    }
+
     func testStateReportsHowTheLastTakeEnded() throws {
         _ = commands.handle("action", ["name": "ask"])
         _ = commands.handle("action", ["name": "stop"])
