@@ -328,6 +328,8 @@ final class AppSupervisor {
 
     func didLaunch(_ id: String) {
         guard let record = records[id] else { return }
+        // Opened again (by hand too): an earlier quit no longer keeps it down.
+        record.quitRequested = false
         record.launchInFlight = false
         record.launchedAt = now()
         record.connectAttempts = 0
