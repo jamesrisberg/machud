@@ -51,6 +51,8 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
     private var reportedCardHover = false
     /// The app in front when the conversation expanded, which gets the keyboard back.
     private var previousApp: NSRunningApplication?
+    /// Set while the expanded conversation collapses, when giving up key status is expected.
+    private var collapsing = false
     private var cardGrow = CardGrow()
     private var visible = false
 
@@ -109,7 +111,7 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
 
     public func renderConversation(_ rows: [ConversationRow]) {
         self.rows = rows
-        refreshConversation()
+        refreshConversation(force: true)
     }
 
     // MARK: Scene
@@ -205,7 +207,7 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
     /// Shows, changes or puts away the pinned or expanded conversation to match the scene.
     private func applyConversation(now: Date) {
         let wanted: VoiceCardMode? = visible && scene.showsConversation ? scene.cardMode : nil
-        guard wanted != shownConversation else { return refreshConversation() }
+        guard wanted != shownConversation else { return refreshConversation(force: false) }
         let old = shownConversation
         shownConversation = wanted
         if old == .expanded, wanted != .expanded { endExpanded(keepWindow: wanted != nil) }
@@ -223,7 +225,7 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
             return
         }
         let start = old == nil && cardShown ? cardWindow.frame : conversationWindow.frame
-        refreshConversation(animated: false)
+        refreshConversation(force: true, animated: false)
         let target = conversationWindow.frame
         if old == nil {
             // Grows out of the card it replaces, or appears where it goes.
@@ -243,15 +245,30 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
         syncHover(now: now)
     }
 
-    /// The conversation's rows, mode and frame, while it is shown.
-    private func refreshConversation(animated: Bool = true) {
+    /// What the conversation's look depends on besides its rows; a render that changes none of
+    /// it (the input level while a take records) leaves the conversation alone.
+    private struct ConversationLook: Equatable {
+        var mode: VoiceCardMode
+        var busy: Bool
+        var link: String?
+        var geometry: CGRect
+    }
+
+    private var conversationLook: ConversationLook?
+
+    /// The conversation's rows, mode and frame, while it is shown; `force` after new rows or a
+    /// change of mode.
+    private func refreshConversation(force: Bool, animated: Bool = true) {
         guard let mode = shownConversation else { return }
         let expanded = mode == .expanded
+        let link = tracker.state.sessionKey == nil ? nil : OrbSceneTracker.sessionLink(provider: tracker.state.sessionProvider)
+        let look = ConversationLook(mode: mode, busy: Self.isBusy(tracker.state.phase), link: link,
+                                    geometry: geometry.screenFrame)
+        guard force || look != conversationLook else { return }
+        conversationLook = look
         let width = expanded ? OrbLayout.expandedFrame(geometry: geometry).width : OrbLayout.pinnedWidth
         conversationView.panelWidth = width
-        let link = tracker.state.sessionKey == nil ? nil : OrbSceneTracker.sessionLink(provider: tracker.state.sessionProvider)
-        conversationView.update(rows: rows, mode: expanded ? .expanded : .pinned, busy: Self.isBusy(tracker.state.phase),
-                                sessionLink: link)
+        conversationView.update(rows: rows, mode: expanded ? .expanded : .pinned, busy: look.busy, sessionLink: link)
         let frame = expanded
             ? OrbLayout.expandedFrame(geometry: geometry)
             : OrbLayout.pinnedFrame(contentHeight: conversationView.fittingHeight, geometry: geometry)
@@ -298,6 +315,8 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
     /// Puts the scrim away and gives the keyboard back to the app that had it. The panel stops
     /// being key; it stays on screen only when it goes back to pinned.
     private func endExpanded(keepWindow: Bool) {
+        collapsing = true
+        defer { collapsing = false }
         conversationWindow.keyable = false
         if conversationWindow.isKeyWindow {
             conversationWindow.makeFirstResponder(nil)
@@ -425,8 +444,17 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
         conversationView.onCollapse = { [weak self] in self?.actions?.perform(.setCardMode(.peek)) }
         conversationView.onClose = { [weak self] in self?.actions?.perform(.dismissCard) }
         conversationView.onOpenSession = { [weak self] in self?.actions?.perform(.openSession) }
-        conversationView.onSend = { [weak self] text in self?.actions?.send(typed: text) ?? VoiceHostController.noSpeech }
+        conversationView.onSend = { [weak self] text in self?.actions?.send(typed: text) ?? "The voice host is stopping" }
         scrimView.onClick = { [weak self] in self?.actions?.perform(.setCardMode(.peek)) }
+        // Moving to another app (⌘-Tab) collapses the expanded conversation: its scrim would
+        // otherwise stay over the screen without the keyboard to close it.
+        observers.append(NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification, object: conversationWindow, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.shownConversation == .expanded, !self.collapsing else { return }
+                self.actions?.perform(.setCardMode(.peek))
+            }
+        })
     }
 
     private func hoverChanged() {
