@@ -264,11 +264,12 @@ final class ExternalPanels {
     /// `duplicates` for `apps`: id → every bundle declaring it, the one in use first.
     var duplicatesJSON: [String: [String]] { duplicates.mapValues { $0.map(\.path) } }
 
-    /// Registers `apps` (replacing any earlier set). Split from `rescan` for tests.
+    /// Registers `apps` (replacing any earlier set) and their hover and windowed panels; widget
+    /// types and unknown kinds are not panels. Split from `rescan` for tests.
     func install(_ apps: [ExternalApp], autoLaunch configured: Set<String>) {
         let autoLaunch = autoLaunches ? configured : []
         self.apps = apps
-        let wanted = Set(apps.flatMap { app in app.manifest.panels.map { ExternalPanel.id(app: app.id, panel: $0.id) } })
+        let wanted = Set(apps.flatMap { app in app.manifest.presentedPanels.map { ExternalPanel.id(app: app.id, panel: $0.id) } })
         registry.unregister { panel in
             guard let external = panel as? ExternalPanel else { return false }
             // Re-register panels whose app moved or whose manifest changed.
@@ -282,7 +283,7 @@ final class ExternalPanels {
         }
         supervisor.update(apps: apps, autoLaunch: autoLaunch)
         for app in apps {
-            for descriptor in app.manifest.panels {
+            for descriptor in app.manifest.presentedPanels {
                 let id = ExternalPanel.id(app: app.id, panel: descriptor.id)
                 if let existing = registry.panel(id: id) as? ExternalPanel, existing.app == app,
                    existing.descriptor == descriptor { continue }

@@ -97,7 +97,7 @@ final class HUDLoadoutEngine {
                     if case .success(let reply) = result, let all = reply["settings"] as? [String: Any] {
                         var settings: [String: String] = [:]
                         for key in HUDLoadout.dockSettingKeys { if let v = all[key] { settings[key] = "\(v)" } }
-                        if !settings.isEmpty, let first = app.manifest.panels.first?.id { panels[first]?.settings = settings }
+                        if !settings.isEmpty, let first = app.manifest.presentedPanels.first?.id { panels[first]?.settings = settings }
                     }
                     hud.apps?[app.id] = HUDLoadout.App(panels: panels)
                     waiting -= 1
@@ -112,7 +112,7 @@ final class HUDLoadoutEngine {
     private func panelEntries(_ app: ExternalApp) -> [String: HUDLoadout.PanelEntry] {
         var panels: [String: HUDLoadout.PanelEntry] = [:]
         let record = supervisor.record(app.id)
-        for descriptor in app.manifest.panels {
+        for descriptor in app.manifest.presentedPanels {
             let state = record?.panels[descriptor.id] ?? HUDPanelState(id: descriptor.id, visible: false)
             var entry = HUDLoadout.PanelEntry(visible: state.visible, mode: state.mode)
             let panel = externals.registry.panel(id: ExternalPanel.id(app: app.id, panel: descriptor.id)) as? ExternalPanel

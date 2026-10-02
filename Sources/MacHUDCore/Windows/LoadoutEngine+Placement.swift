@@ -7,7 +7,7 @@ extension LoadoutEngine {
     /// the app MacHUD launched is listening. Returns why it could not, or nil.
     @discardableResult
     func applyDefaultPlacement(_ app: ExternalApp, _ placement: AppPlacement) -> String? {
-        guard let panelID = placement.panel ?? app.manifest.panels.first?.id,
+        guard let panelID = placement.panel ?? app.manifest.presentedPanels.first?.id,
               let panel = panels.panel(id: ExternalPanel.id(app: app.id, panel: panelID)) as? ExternalPanel else {
             return "\(app.name) has no panel \(placement.panel ?? "")"
         }
