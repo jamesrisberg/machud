@@ -157,7 +157,7 @@ final class WidgetLayerTests: XCTestCase {
 
     // MARK: The verb
 
-    func testAddSendsCreateAtTheFirstFreeCellsAndPersists() throws {
+    func testAddSendsCreateAtTheFirstFreeSpotAndPersists() throws {
         startApp()
         stored.instances = []
         _ = call(["action": "add", "type": "clock", "size": "medium"])

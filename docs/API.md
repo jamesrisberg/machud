@@ -474,20 +474,32 @@ widget` panels in its manifest (the contract is `../hudkit/docs/CONTRACT.md` § 
 owns the placed widgets: it keeps them in layouts.json, sends each app its own, and turns
 what the user does to a widget into placement.
 
-- **Grid**: widgets snap to square cells per display (`widgets.cell`, default 170 pt, `gap` 16,
-  `margin` 24 from the display's visible frame), column 0 at the left and row 0 at the top. Sizes
-  take `small` 1 × 1, `medium` 2 × 1, `large` 2 × 2 and `extraLarge` 4 × 2 cells. Widgets never
-  overlap: adding or moving one takes the nearest free cells (and says so). Positions are cells,
-  so they survive resolution changes; a widget whose display is missing stands in on the main
-  display (`screenMissing`), one beyond a smaller grid is pulled inside it, and one that would land
-  on another moves to the nearest free cells (`placedAt`), without changing what is saved.
+- **Grid**: widgets sit on the layout grid, the one regions snap to (`grid` in layouts.json,
+  default 96 × 54 lines over each display's visible frame). A widget keeps a fixed size in points:
+  `small` 170 × 170, `medium` 356 × 170, `large` 356 × 356, `extraLarge` 728 × 356. Its position
+  is its top-left as fractions of the visible frame from the top-left corner (`x`, `y`, like a
+  region's), so it follows resolution changes. On each axis whichever edge (left or right, top or
+  bottom) is nearer a grid line snaps to it, so a widget can sit flush against a region's edge or
+  the visible frame's (under the menu bar, against the Dock), and it is kept inside the visible
+  frame. Widgets never overlap each other (touching is fine): adding or moving one takes the
+  nearest free snapped spot (and says so). They may overlap regions; they sit on the desktop layer.
+  A widget whose display is missing stands in on the main display (`screenMissing`), and one that
+  would land outside or on another moves to the nearest free spot (`placedAt`), without changing
+  what is saved. The window frames sent to the apps are on whole points; saved positions stay
+  exactly on their lines.
 - **Layers**: `desktop` (under every window) or `float` (above windows). **Reveal** (⌃⌥W,
   `hotkeys.widgets`; the status menu; the wheel; `widgets reveal`) raises the desktop widgets
   above windows until pressed again or Esc.
 - **Edit mode** (`widgets edit on`, the status menu's Edit Widgets…, the wheel): every widget is
-  unlocked with remove, settings and next-size controls, a faint cell grid shows on each
-  display, and a gallery lists every widget type by app with an Add button per size. Done or Esc
-  leaves it. Widgets never take focus or activate their app.
+  unlocked with remove, settings and next-size controls, each display dims and shows the layout
+  grid drawn as the layout editor draws it, with the active layout's regions faintly under it, and
+  a gallery lists every widget type by app with an Add button per size. Done or Esc leaves it.
+  Widgets never take focus or activate their app.
+- **Layout editor**: the editor shows the widgets on its display as fixed-size blocks (symbol and
+  title) over the regions. Dragging one snaps it the same way, on the grid the editor shows; the
+  panel's Add Widget menu places a widget of any type on that display. Both take effect at once,
+  through the same path as this verb, so the editor's Save, Cancel and ⌘Z leave widgets alone.
+  ⌘-drag and hit-zone painting reach the regions under a widget.
 - **Sync**: when an app serving widgets connects (launch, relaunch, reconnect) MacHUD sends it
   `widget sync` with all its widgets and the current edit and reveal modes; after that every
   change (this verb, a widget event, a loadout, a hand edit of layouts.json, a display change)
@@ -495,7 +507,7 @@ what the user does to a widget into placement.
   `rejected`, a failed create) is marked with `problem` and not offered again until it changes;
   settings it dropped are listed as `droppedSettings`; one toast per app says so. A widget of a
   type its app no longer serves is kept, marked `missingType` and not sent.
-- **Events**: a widget dragged in edit mode snaps to the nearest free cells of the display under
+- **Events**: a widget dragged in edit mode snaps to the nearest free spot of the display under
   its centre; the resize control takes the next size in place or at the nearest spot with room
   (else a toast); remove removes it; the settings control (or the widget's own button) opens the
   widget's settings in a MacHUD window built from its type's schema; settings the widget changed
@@ -509,15 +521,16 @@ what the user does to a widget into placement.
   launches nothing at startup (`MACHUD_APPLY_STARTUP`).
 - **Reveal hotkey**: ⌃⌥W is registered only while some app serves widgets; otherwise the chord
   is left to other apps. Esc is taken only while widgets are revealed or being edited.
-- **Drag snapping** (⇧-drag) never takes a widget into a region; widgets move on their grid.
+- **Drag snapping** (⇧-drag) never takes a widget into a region; widgets move on the layout grid
+  (edit mode, the layout editor, this verb).
 
 | Command | Args | Effect |
 | --- | --- | --- |
-| `widgets` / `widgets list` | | `editing`, `revealed`, `grid {cell, gap, margin}`, `instances[] {instance, app, appName?, type, title?, size, layer, col, row, screen? (the saved display), settings, health, frame?, display?, screenMissing?, placedAt? {col, row}, overlapping?, missingType?, problem?, droppedSettings? {key: why}}` |
+| `widgets` / `widgets list` | | `editing`, `revealed`, `grid {cols, rows}` (the layout grid), `instances[] {instance, app, appName?, type, title?, size, layer, x, y, col, row, screen? (the saved display), settings, health, frame?, display?, screenMissing?, placedAt? {x, y, col, row}, overlapping?, missingType?, problem?, droppedSettings? {key: why}}`. `x`, `y` are the saved top-left as fractions of the visible frame; `col`, `row` are the same in grid lines (`x × cols`, `y × rows`, to two places): whole numbers when the left and top edges are on lines, fractional when the widget is snapped by its right or bottom edge. `frame` is the window's, in global Cocoa coordinates |
 | `widgets types` | | `types[] {app, appName, type, title, symbol, sizes[], defaultSize, multiple, refresh?, settingsSchema?, placed}`: every widget type of every discovered app, read from the manifests (the app need not run) |
-| `widgets add` | `type=`, `app=` (bundle id or name; needed only when two apps serve the type), `size=` (default the type's `defaultSize`), `screen=` (main, builtin, index or name; default the main display), `col= row=` (default the first free cells, down the first column first), `layer=desktop\|float`, `settings=<JSON object>` | places a widget and returns it as `instance`, with `note` when it went elsewhere than asked or its app is being launched. Refused: a size the type does not declare, a second widget of a `multiple: false` type, a setting its schema rejects, no room, or the app refusing it (then nothing is saved) |
+| `widgets add` | `type=`, `app=` (bundle id or name; needed only when two apps serve the type), `size=` (default the type's `defaultSize`), `screen=` (main, builtin, index or name; default the main display), a position: `x= y=` (fractions 0 to 1 of the visible frame, from its top-left) or `col= row=` (layout-grid line indices, 0 to `cols` and 0 to `rows`; decimals allowed), not both (default the first free spot with its left and top edges on lines, down the left edge first, then the next line across), `layer=desktop\|float`, `settings=<JSON object>` | places a widget and returns it as `instance`, with `note` when it went elsewhere than asked or its app is being launched. Refused: a size the type does not declare, a second widget of a `multiple: false` type, a setting its schema rejects, no room, or the app refusing it (then nothing is saved) |
 | `widgets remove` | `instance=` | |
-| `widgets move` | `instance= col= row=`, `screen=` | to the nearest free cells; `note` when not the ones asked |
+| `widgets move` | `instance=` and `x= y=` or `col= row=` (as for add), `screen=` | snapped, then to the nearest free spot; `note` when not the one asked (positions in `col,row`) |
 | `widgets resize` | `instance= size=` | in place when it fits, else at the nearest spot with room |
 | `widgets layer` | `instance=` plus `desktop` or `float` (or `layer=`) | |
 | `widgets settings` | `instance=` plus `key=value ...` or `settings=<JSON object>` (`null` removes a key) | merged into the widget's settings, each checked and typed by its type's schema (keys the schema does not list are kept as given) |
@@ -531,11 +544,15 @@ Add Widget ▸ (types by app, sizes) and every placed widget with Settings…, F
 and Remove.
 
 ```json
-"widgets": {"cell": 170, "gap": 16, "margin": 24,
-            "instances": [{"instance": "8F0C1E2A", "app": "xyz.machud.widgethud", "type": "clock",
-                           "size": "small", "screen": {"builtin": true}, "col": 0, "row": 0,
+"widgets": {"instances": [{"instance": "8F0C1E2A", "app": "xyz.machud.widgethud", "type": "clock",
+                           "size": "small", "screen": {"builtin": true}, "x": 0.125, "y": 0,
                            "layer": "desktop", "settings": {"zone": "Europe/Oslo"}}]}
 ```
+
+Widgets saved in the older cell form (`col`/`row` with `widgets.cell`, `gap` and `margin`), in
+layouts.json or in a HUD loadout, are converted to `x`/`y` when layouts.json is loaded: each
+goes where its cell put it, snapped to the layout grid. A record that cannot be converted yet (no
+display attached) keeps its cell.
 
 ## HUD loadouts
 
@@ -550,7 +567,7 @@ only that (`"layout": ""`, `"slots": []`):
                                                           "settings": {"dock.edge": "left"}}}},
                   "xyz.machud.servershud": {"panels": {"servers": {"visible": false, "mode": "full"}}}},
          "widgets": [{"instance": "8F0C1E2A", "app": "xyz.machud.widgethud", "type": "clock",
-                      "size": "small", "col": 0, "row": 0, "layer": "desktop"}]}}
+                      "size": "small", "x": 0.125, "y": 0, "layer": "desktop"}]}}
 ```
 
 - **Capture** (`capture name= hud=only|1`, or the status menu's **Save Current HUD as
@@ -562,7 +579,7 @@ only that (`"layout": ""`, `"slots": []`):
   the key is left out, so applying that loadout leaves the widgets as they are.
 - **Apply** (after the loadout's windows, if any) moves the tool dock, replaces the placed
   widgets with the loadout's `widgets` when it has that key (a widget of the same app and type at
-  the same cells keeps its id and window; without the key the widgets are left alone; the report
+  the same position keeps its id and window; without the key the widgets are left alone; the report
   says how many as `widgets`), then per app:
   launches it if it is not running, then sends `settings set`, `panel mode`, `panel frame`
   (not for a parked panel) and `panel show`/`hide` (`reason=summon`), in that order;
@@ -819,7 +836,7 @@ are in [MCP.md](MCP.md).
   /Applications-else-~/Applications choice and is also searched for apps (see App catalog).
   `hotkeys.dock` (default ⌃⌥D) shows and hides the tool dock; `hotkeys.widgets` (default ⌃⌥W,
   `{"key": ""}` turns it off) reveals the desktop widgets.
-  `widgets`: the widget grid and every placed widget (see Desktop widgets).
+  `widgets`: every placed widget, on the layout grid (see Desktop widgets).
 - `~/.config/machud/voice.json` — the voice host's settings (see Voice). The voice host writes
   it; MacHUD reads only `enabled`, to decide whether to start it.
 - `~/.config/machud/state/catalog.json` — the last catalog fetched; `state/onboarding.json` records the onboarding (`status`, `step`).

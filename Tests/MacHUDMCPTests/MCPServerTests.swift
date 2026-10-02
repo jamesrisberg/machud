@@ -240,8 +240,18 @@ final class MCPServerTests: XCTestCase {
         XCTAssertEqual(fake.requests("widgets").last, ["action": "add", "type": "clock", "size": "medium", "col": "2", "row": "1",
                                                        "settings": #"{"seconds":true,"zone":"UTC"}"#])
         XCTAssertEqual(text(call("add_widget", ["type": "clock", "col": 2])), "give both col and row, or neither")
+        call("add_widget", ["type": "clock", "x": 0.5, "y": 0])
+        XCTAssertEqual(fake.requests("widgets").last, ["action": "add", "type": "clock", "x": "0.5", "y": "0"])
+        XCTAssertEqual(text(call("add_widget", ["type": "clock", "x": 0.5])), "give both x and y, or neither")
+        XCTAssertEqual(text(call("add_widget", ["type": "clock", "x": 0.5, "y": 0, "col": 1, "row": 1])),
+                       "give x and y or col and row, not both")
         call("change_widget", ["instance": "A", "action": "move", "col": 0, "row": 3, "screen": "builtin"])
         XCTAssertEqual(fake.requests("widgets").last, ["action": "move", "instance": "A", "col": "0", "row": "3", "screen": "builtin"])
+        call("change_widget", ["instance": "A", "action": "move", "col": 84.67, "row": 0])
+        XCTAssertEqual(fake.requests("widgets").last, ["action": "move", "instance": "A", "col": "84.67", "row": "0"])
+        call("change_widget", ["instance": "A", "action": "move", "x": 0.125, "y": 0.5])
+        XCTAssertEqual(fake.requests("widgets").last, ["action": "move", "instance": "A", "x": "0.125", "y": "0.5"])
+        XCTAssertEqual(text(call("change_widget", ["instance": "A", "action": "move"])), "move needs x and y or col and row")
         call("change_widget", ["instance": "A", "action": "layer", "layer": "float"])
         XCTAssertEqual(fake.requests("widgets").last, ["action": "layer", "instance": "A", "layer": "float"])
         call("change_widget", ["instance": "A", "action": "remove"])

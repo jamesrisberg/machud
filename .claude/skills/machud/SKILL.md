@@ -123,23 +123,27 @@ Buttons list hover apps (Stash, Scratch, ffmpegHUD, …) first, then windowed ap
 ## Desktop widgets
 
 Siblings serve widget types (`kind: widget` panels; widgetHUD's clock, weather, calendar).
-MacHUD places instances on a per-display grid (cells from the top-left; small 1×1, medium 2×1,
-large 2×2, extraLarge 4×2) and keeps the serving app running.
+MacHUD places instances on the layout grid (`grid` in layouts.json, the lines regions snap to)
+at a fixed size (small 170×170, medium 356×170, large 356×356, extraLarge 728×356 pt), each
+edge snapping flush to the nearer grid line, never overlapping another widget, and keeps the
+serving app running. A position is `x= y=` (top-left as fractions 0-1 of the visible frame,
+from the top-left, like regions) or `col= row=` (grid-line indices; default grid 96×54).
 
 ```sh
 machud widgets types                          # every type: app, sizes, multiple, settingsSchema
-machud widgets                                # placed: instance, type, size, col/row, display, frame, layer, problems
-machud widgets add type=clock [size=medium] [col=0 row=0] [screen=builtin] [layer=float] [settings='{"zone":"UTC"}']
-machud widgets move instance=8F0C1E2A col=2 row=0   # nearest free cells; `note` says when it moved elsewhere
+machud widgets                                # placed: instance, type, size, x/y, col/row, display, frame, layer, problems
+machud widgets add type=clock [size=medium] [x=0.5 y=0 | col=48 row=0] [screen=builtin] [layer=float] [settings='{"zone":"UTC"}']
+machud widgets move instance=8F0C1E2A col=24 row=0  # snapped, nearest free spot; `note` says when it moved elsewhere
 machud widgets resize instance=8F0C1E2A size=medium
 machud widgets layer instance=8F0C1E2A float        # or desktop
 machud widgets settings instance=8F0C1E2A zone=Asia/Tokyo   # merged, checked by the type's schema
 machud widgets remove instance=8F0C1E2A
-machud widgets edit on|off|toggle             # unlock + gallery + grid overlay (visible to the user)
+machud widgets edit on|off|toggle             # unlock + gallery + layout-grid overlay (visible to the user)
 machud widgets reveal on|off|toggle           # raise desktop widgets above windows (⌃⌥W)
 ```
 
-An app that serves only widgets has no tool dock button. `missingType`: its app no longer
+The layout editor (`machud edit`) also shows widgets as blocks to drag, with an Add Widget
+menu; those changes apply at once. An app that serves only widgets has no tool dock button. `missingType`: its app no longer
 serves the type (kept, not shown); `problem`: the app refused it.
 
 ## Parking and orbs
