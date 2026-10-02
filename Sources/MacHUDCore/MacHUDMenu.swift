@@ -83,6 +83,10 @@ final class MacHUDServices: NSObject {
     var liveMenus: () -> Bool = { true }
     /// Per-app submenu delegates of the menu currently built, by app id.
     private var submenus: [String: AppSubmenu] = [:]
+    /// Each running app's build status, read once per menu build (it reads files) and
+    /// reused as its submenu is filled and refilled.
+    private var buildStatuses: [String: AppBuildStatus] = [:]
+    private func cachedStatus(_ id: String) -> AppBuildStatus? { buildStatuses[id] }
 
     /// The status menu's Apps section: Launch All and Quit All (and Relaunch Outdated Apps
     /// while an app runs an older build than its bundle on disk), then a submenu per
@@ -94,9 +98,13 @@ final class MacHUDServices: NSObject {
         header.isEnabled = false
         items.append(header)
         let bulk = MacHUDMenuModel.bulk(externals: externals)
+        buildStatuses = [:]
+        for app in externals.apps {
+            if let status = externals.supervisor.buildStatus(app.id) { buildStatuses[app.id] = status }
+        }
         var bulkItems = [("Launch All Apps", bulk.canLaunch, #selector(launchAll)),
                          ("Quit All Apps", bulk.canQuit, #selector(quitAll))]
-        if MacHUDMenuModel.hasOutdated(externals: externals) {
+        if MacHUDMenuModel.hasOutdated(externals: externals, buildStatus: cachedStatus) {
             bulkItems.append(("Relaunch Outdated Apps", true, #selector(relaunchOutdated)))
         }
         for (title, enabled, selector) in bulkItems {
@@ -106,7 +114,8 @@ final class MacHUDServices: NSObject {
             items.append(mi)
         }
         let live = liveMenus()
-        let entries = MacHUDMenuModel.entries(externals: externals, liveMenus: live, mode: { [host] in host.mode(of: $0) })
+        let entries = MacHUDMenuModel.entries(externals: externals, liveMenus: live, buildStatus: cachedStatus,
+                                              mode: { [host] in host.mode(of: $0) })
         if entries.isEmpty {
             let none = NSMenuItem(title: "No MacHUD apps found", action: nil, keyEquivalent: "")
             none.isEnabled = false
@@ -137,7 +146,7 @@ final class MacHUDServices: NSObject {
     func fill(_ menu: NSMenu, appID: String) {
         menu.removeAllItems()
         let live = liveMenus()
-        guard let entry = MacHUDMenuModel.entries(externals: externals, liveMenus: live,
+        guard let entry = MacHUDMenuModel.entries(externals: externals, liveMenus: live, buildStatus: cachedStatus,
                                                   mode: { [host] in host.mode(of: $0) }).first(where: { $0.appID == appID })
         else { return }
         for action in entry.actions {
@@ -164,6 +173,7 @@ final class MacHUDServices: NSObject {
                 mi.target = self
                 mi.representedObject = action
                 if let on = action.isOn { mi.state = on ? .on : .off }
+                mi.isEnabled = action.isEnabled
                 menu.addItem(mi)
             }
         }
@@ -285,13 +295,16 @@ enum MacHUDMenuModel {
         let panelID: String?
         /// Checkmark state, for toggles.
         let isOn: Bool?
+        let isEnabled: Bool
 
-        init(_ kind: Kind, _ title: String, appID: String, panelID: String? = nil, isOn: Bool? = nil) {
+        init(_ kind: Kind, _ title: String, appID: String, panelID: String? = nil, isOn: Bool? = nil,
+             isEnabled: Bool = true) {
             self.kind = kind
             self.title = title
             self.appID = appID
             self.panelID = panelID
             self.isOn = isOn
+            self.isEnabled = isEnabled
         }
     }
 
@@ -310,10 +323,11 @@ enum MacHUDMenuModel {
     }
 
     /// Whether any app runs an older build than its bundle on disk (Relaunch Outdated Apps).
+    /// `buildStatus` defaults to reading it now.
     @MainActor
-    static func hasOutdated(externals: ExternalPanels) -> Bool {
-        let ids = Set(externals.apps.map(\.id))
-        return externals.supervisor.outdatedIDs.contains { ids.contains($0) }
+    static func hasOutdated(externals: ExternalPanels, buildStatus: ((String) -> AppBuildStatus?)? = nil) -> Bool {
+        let status = buildStatus ?? externals.supervisor.buildStatus
+        return externals.apps.contains { status($0.id)?.outdated != nil }
     }
 
     /// The toast for a shown panel that is not on this desktop.
@@ -325,10 +339,12 @@ enum MacHUDMenuModel {
     /// or stopped, an update waiting for a relaunch, an older contract, a panel that opened
     /// out of sight); the app's own menu (`liveMenus`, running apps only); hide/park/reveal
     /// per panel; whether it is on the tool dock; its settings; then Relaunch (while it is
-    /// up) and Quit, or Launch.
+    /// up, disabled while one runs) and Quit, or Launch. `buildStatus` defaults to reading it now.
     @MainActor
-    static func entries(externals: ExternalPanels, liveMenus: Bool = true, mode: (Panel) -> HUDPanelMode) -> [Entry] {
+    static func entries(externals: ExternalPanels, liveMenus: Bool = true,
+                        buildStatus: ((String) -> AppBuildStatus?)? = nil, mode: (Panel) -> HUDPanelMode) -> [Entry] {
         let hiddenFromDock = externals.config().hiddenFromDock
+        let buildStatus = buildStatus ?? externals.supervisor.buildStatus
         return externals.apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }.map { app in
             let health = externals.supervisor.record(app.id)?.health ?? .notRunning
             let running = health == .running
@@ -343,7 +359,7 @@ enum MacHUDMenuModel {
             if health != .running && health != .notRunning {
                 actions.append(Action(.status, statusText(health), appID: app.id))
             }
-            if let build = externals.supervisor.buildStatus(app.id) {
+            if let build = buildStatus(app.id) {
                 if build.outdated != nil { actions.append(Action(.status, "Update ready, relaunch to apply", appID: app.id)) }
                 if build.contract?.older == true { actions.append(Action(.status, "Built for an older MacHUD", appID: app.id)) }
             }
@@ -372,7 +388,8 @@ enum MacHUDMenuModel {
             actions.append(Action(.settings, "\(app.name) Settings…", appID: app.id))
             actions.append(Action(.separator, "", appID: app.id))
             if externals.isUp(app.id) {
-                actions.append(Action(.relaunch, "Relaunch \(app.name)", appID: app.id))
+                actions.append(Action(.relaunch, "Relaunch \(app.name)", appID: app.id,
+                                      isEnabled: externals.supervisor.record(app.id)?.relaunching != true))
                 actions.append(Action(.quit, "Quit \(app.name)", appID: app.id))
             } else {
                 actions.append(Action(.launch, "Launch \(app.name)", appID: app.id))

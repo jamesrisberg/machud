@@ -12,6 +12,8 @@ protocol WorkspaceControl: AnyObject {
     func launch(_ app: ExternalApp, completion: @escaping (Error?) -> Void)
     /// Asks every instance to quit. False when none was running.
     func terminate(bundleID: String) -> Bool
+    /// Kills these processes (a hung app that ignores the quit).
+    func forceTerminate(pids: Set<pid_t>)
     /// Set by the supervisor; called on the main thread with the bundle id and pid.
     var onLaunch: ((String) -> Void)? { get set }
     /// The pid is passed because `runningPIDs` can still list the process while its
@@ -79,6 +81,9 @@ final class AppSupervisor {
         var showChecks: [String: ShowOutcome] = [:]
         /// A `relaunch` is under way.
         var relaunching = false
+        /// Old processes a relaunch waits to see announced terminated, so a late notice
+        /// cannot land on the new instance.
+        var relaunchAwaiting: Set<pid_t> = []
         /// Commands waiting for the socket, with when they give up.
         var pending: [(command: String, args: [String: String], deadline: Date,
                        completion: ((Result<[String: Any], Error>) -> Void)?)] = []
@@ -315,6 +320,7 @@ final class AppSupervisor {
     func didTerminate(_ id: String, pid: pid_t) {
         guard let record = records[id] else { return }
         record.deadPIDs.insert(pid)
+        record.relaunchAwaiting.remove(pid)
         // Another instance may still be running.
         guard livePIDs(id).isEmpty else { return }
         record.subscription?.cancel()
@@ -361,8 +367,8 @@ final class AppSupervisor {
                 record.lastError = nil
                 self.set(record, .running)
                 self.seedState(id)
-                self.askHello(id)
                 self.flushPending(record)
+                self.askHello(id)
             case .failure(let error):
                 record.lastError = "\(error)"
                 self.set(record, .socketUnreachable)
@@ -515,8 +521,9 @@ final class AppSupervisor {
     /// `onShowMissed`; a passing hover only records it.
     func verifyShow(_ id: String, panel: String, loud: Bool, hint: Bool? = nil) {
         schedule(Self.showCheckDelay) { [weak self] in
+            // A parked panel is mostly past the screen edge, its orb under the window filter.
             guard let self, let record = self.records[id], record.health == .running,
-                  record.panels[panel]?.visible == true else { return }
+                  let state = record.panels[panel], state.visible, state.mode != .parked else { return }
             let outcome = self.windowProbe(Set(self.livePIDs(id))) ?? hint.map { $0 ? .onScreen : .anotherDesktop }
             guard let outcome else { return }
             if record.showChecks[panel] != outcome {
@@ -530,28 +537,53 @@ final class AppSupervisor {
     // MARK: - Relaunch
 
     enum RelaunchError: Error, CustomStringConvertible {
-        case busy(String), didNotQuit(String), launch(LaunchError)
+        case busy(String), bundleMissing(String, String), didNotQuit(String), launch(LaunchError)
+        /// The new process quit, failed to launch or did not listen in time: id and why.
+        case didNotListen(String, String)
         var description: String {
             switch self {
             case .busy(let id): return "\(id) is already relaunching"
-            case .didNotQuit(let id): return "\(id) did not quit within \(Int(AppSupervisor.relaunchTimeout)) s"
+            case .bundleMissing(let id, let path):
+                return "\(path) is gone (a build in progress?); \(id) was left running"
+            case .didNotQuit(let id): return "\(id) did not quit, even when forced"
             case .launch(let error): return error.description
+            case .didNotListen(let id, let why): return "\(id) did not come back: \(why)"
             }
         }
     }
 
+    /// How long a forced quit gets to take effect.
+    static let forceQuitGrace: TimeInterval = 3
+
     /// Quits the app, waits for its process to exit, launches the bundle it was running from
     /// again (as `apps launch`; never another copy declaring the id) and waits for it to
-    /// listen. Completes with the new process's pid (nil if none came up in time) and health.
-    /// An app that is not running is just launched.
-    func relaunch(_ id: String, completion: @escaping (Result<(pid: pid_t?, health: Health), RelaunchError>) -> Void) {
+    /// listen. Completes with the new process's pid and health, or why it is not back. An
+    /// app that is not running is just launched.
+    ///
+    /// The bundle must still be there before anything is quit (a build may have removed it).
+    /// An app that ignores the quit for `relaunchTimeout` is force-terminated. The launch
+    /// waits until the old processes' terminations were announced, so a late notice cannot
+    /// mark the new instance stopped. Every outcome clears `quitRequested`, so an
+    /// `autoLaunch` app stays supervised.
+    func relaunch(_ id: String, completion: @escaping (Result<(pid: pid_t, health: Health), RelaunchError>) -> Void) {
         guard let record = records[id] else { completion(.failure(.launch(.unknown(id)))); return }
         guard !record.relaunching else { completion(.failure(.busy(id))); return }
-        record.relaunching = true
         let old = Set(livePIDs(id))
         let bundle = workspace.processes(bundleID: id).first { old.contains($0.pid) }?.bundleURL
-        let finish: (Result<(pid: pid_t?, health: Health), RelaunchError>) -> Void = { [weak record] result in
+        if !old.isEmpty {
+            var app = record.app
+            if let bundle { app.bundleURL = bundle }
+            guard workspace.isInstalled(app) else {
+                completion(.failure(.bundleMissing(id, app.bundleURL.path)))
+                return
+            }
+        }
+        record.relaunching = true
+        record.relaunchAwaiting = old
+        let finish: (Result<(pid: pid_t, health: Health), RelaunchError>) -> Void = { [weak record] result in
             record?.relaunching = false
+            record?.relaunchAwaiting = []
+            record?.quitRequested = false
             completion(result)
         }
         let start = { [weak self] in
@@ -562,24 +594,39 @@ final class AppSupervisor {
         guard !old.isEmpty else { start(); return }
         quit(id) { [weak self] _ in
             guard let self else { return }
-            self.awaitExit(id, old: old, deadline: self.now().addingTimeInterval(Self.relaunchTimeout)) { exited in
-                if exited { start() } else { finish(.failure(.didNotQuit(id))) }
+            self.awaitExit(id, old: old, deadline: self.now().addingTimeInterval(Self.relaunchTimeout)) { [weak self] exited in
+                guard let self else { return }
+                if exited { start(); return }
+                self.workspace.forceTerminate(pids: old.intersection(self.livePIDs(id)))
+                self.awaitExit(id, old: old, deadline: self.now().addingTimeInterval(Self.forceQuitGrace)) { exited in
+                    if exited { start() } else { finish(.failure(.didNotQuit(id))) }
+                }
             }
         }
     }
 
+    /// Done once the old processes are gone and their terminations were announced; at the
+    /// deadline, gone is enough (a missed notice cannot hold a relaunch forever).
     private func awaitExit(_ id: String, old: Set<pid_t>, deadline: Date, _ done: @escaping (Bool) -> Void) {
-        if old.isDisjoint(with: livePIDs(id)) { done(true); return }
+        let gone = old.isDisjoint(with: workspace.runningPIDs(bundleID: id))
+        let announced = records[id]?.relaunchAwaiting.isEmpty ?? true
+        if gone && (announced || now() >= deadline) { done(true); return }
         guard now() < deadline else { done(false); return }
         schedule(Self.relaunchPoll) { [weak self] in self?.awaitExit(id, old: old, deadline: deadline, done) }
     }
 
+    /// Succeeds once a new process is subscribed; fails when the launch failed or the new
+    /// process quit (health back to `notRunning` with nothing in flight), or at the deadline.
     private func awaitListening(_ id: String, old: Set<pid_t>, deadline: Date,
-                                _ done: @escaping (Result<(pid: pid_t?, health: Health), RelaunchError>) -> Void) {
+                                _ done: @escaping (Result<(pid: pid_t, health: Health), RelaunchError>) -> Void) {
+        guard let record = records[id] else { done(.failure(.launch(.unknown(id)))); return }
         let fresh = livePIDs(id).first { !old.contains($0) }
-        let health = records[id]?.health ?? .notRunning
-        if (fresh != nil && health == .running) || now() >= deadline || health == .notInstalled {
-            done(.success((fresh, health)))
+        if let fresh, record.health == .running { done(.success((fresh, .running))); return }
+        let stopped = (record.health == .notRunning || record.health == .notInstalled) && !record.launchInFlight
+        if stopped || now() >= deadline {
+            let why = record.lastError ?? (stopped ? "it quit right after launching"
+                                                   : "not listening after \(Int(Self.relaunchTimeout)) s")
+            done(.failure(.didNotListen(id, why)))
             return
         }
         schedule(Self.relaunchPoll) { [weak self] in self?.awaitListening(id, old: old, deadline: deadline, done) }
@@ -687,6 +734,10 @@ final class NSWorkspaceControl: WorkspaceControl {
         let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).filter { !$0.isTerminated }
         apps.forEach { $0.terminate() }
         return !apps.isEmpty
+    }
+
+    func forceTerminate(pids: Set<pid_t>) {
+        for pid in pids { NSRunningApplication(processIdentifier: pid)?.forceTerminate() }
     }
 }
 

@@ -20,7 +20,18 @@ final class FakeWorkspace: WorkspaceControl {
     func processes(bundleID: String) -> [AppProcess] {
         (running[bundleID] ?? []).map { processInfo[$0] ?? AppProcess(pid: $0) }
     }
-    func isInstalled(_ app: ExternalApp) -> Bool { installed.contains(app.id) }
+    func isInstalled(_ app: ExternalApp) -> Bool { installed.contains(app.id) && !missingBundles.contains(app.bundleURL) }
+    /// Bundles that are gone although their app id is installed (a build in progress).
+    var missingBundles: Set<URL> = []
+    /// Pids force-terminated; `forceKills` decides whether that ends them.
+    var forceTerminated: [pid_t] = []
+    var forceKills = false
+
+    func forceTerminate(pids: Set<pid_t>) {
+        forceTerminated += pids.sorted()
+        guard forceKills else { return }
+        for (id, listed) in running where !listed.filter(pids.contains).isEmpty { stop(id) }
+    }
     /// Called as each launch is asked for, before it completes.
     var onLaunchCall: (() -> Void)?
 

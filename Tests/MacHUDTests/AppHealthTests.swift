@@ -269,16 +269,125 @@ final class AppHealthTests: XCTestCase {
         XCTAssertFalse(supervisor.record(id)?.quitRequested ?? true, "the new process is supervised as usual")
     }
 
-    func testRelaunchGivesUpOnAnAppThatDoesNotQuit() {
+    func testAHungAppIsForcedAndAnUnkillableOneFailsWithoutStayingQuitRequested() {
         startApp(pid: 100)
         var result: [String: Any]?
         externals.relaunch(id) { result = $0 }
         var second: [String: Any]?
         externals.relaunch(id) { second = $0 }
         XCTAssertEqual(second?["error"] as? String, "\(id) is already relaunching")
+        XCTAssertEqual(entry?.actions.first { $0.kind == .relaunch }?.isEnabled, false, "Relaunch is off while one runs")
         for _ in 0..<100 where result == nil { clock.runQueued() }
-        XCTAssertEqual(result?["error"] as? String, "\(id) did not quit within 10 s")
+        XCTAssertEqual(workspace.forceTerminated, [100], "forced after the quit timeout")
+        XCTAssertEqual(result?["error"] as? String, "\(id) did not quit, even when forced")
         XCTAssertTrue(workspace.launches.isEmpty)
+        XCTAssertFalse(supervisor.record(id)?.quitRequested ?? true, "an autoLaunch app stays supervised")
+        XCTAssertEqual(entry?.actions.first { $0.kind == .relaunch }?.isEnabled, true)
+    }
+
+    func testAHungAppThatDiesWhenForcedIsRelaunched() {
+        workspace.forceKills = true
+        startApp(pid: 100)
+        var result: [String: Any]?
+        externals.relaunch(id) { result = $0 }
+        for _ in 0..<100 where workspace.launches.isEmpty { clock.runQueued() }
+        XCTAssertEqual(workspace.forceTerminated, [100])
+        workspace.start(id, pid: 200)
+        clock.runQueued()
+        clock.runQueued()
+        XCTAssertEqual(result?["pid"] as? Int, 200)
+    }
+
+    func testAMissingBundleIsRefusedBeforeQuitting() {
+        let exe = URL(fileURLWithPath: "/Applications/Pad.app/Contents/MacOS/Pad")
+        workspace.processInfo[100] = AppProcess(pid: 100, bundleURL: app.bundleURL, executableURL: exe)
+        workspace.missingBundles = [app.bundleURL]
+        startApp(pid: 100)
+        var result: [String: Any]?
+        externals.relaunch(id) { result = $0 }
+        XCTAssertEqual(result?["error"] as? String, "/Applications/Pad.app is gone (a build in progress?); \(id) was left running")
+        XCTAssertFalse(connector.requests.contains { $0.command == "quit" })
+        XCTAssertEqual(supervisor.record(id)?.health, .running)
+        XCTAssertFalse(supervisor.record(id)?.relaunching ?? true)
+    }
+
+    func testTheLaunchWaitsForTheOldProcessesTerminationNotice() {
+        startApp(pid: 100)
+        var result: [String: Any]?
+        externals.relaunch(id) { result = $0 }
+        workspace.running[id] = nil                          // gone from the list, not yet announced
+        clock.runQueued()
+        clock.runQueued()
+        XCTAssertTrue(workspace.launches.isEmpty, "waits for the notice")
+        workspace.onTerminate?(id, 100)
+        clock.runQueued()
+        XCTAssertEqual(workspace.launches, [id])
+        workspace.start(id, pid: 200)
+        clock.runQueued()
+        clock.runQueued()
+        XCTAssertEqual(result?["pid"] as? Int, 200)
+        XCTAssertEqual(supervisor.record(id)?.health, .running)
+    }
+
+    func testANewProcessThatCrashesFailsTheRelaunch() {
+        startApp(pid: 100)
+        var result: [String: Any]?
+        externals.relaunch(id) { result = $0 }
+        workspace.stop(id)
+        clock.runQueued()
+        XCTAssertEqual(workspace.launches, [id])
+        workspace.start(id, pid: 200)
+        workspace.stop(id)                                   // crashes at once
+        for _ in 0..<5 where result == nil { clock.runQueued() }
+        XCTAssertEqual(result?["error"] as? String, "\(id) did not come back: it quit right after launching")
+        XCTAssertNil(result?["pid"])
+    }
+
+    func testALaunchErrorFailsTheRelaunch() {
+        startApp(pid: 100)
+        var result: [String: Any]?
+        externals.relaunch(id) { result = $0 }
+        workspace.launchError = NSError(domain: "test", code: 7, userInfo: [NSLocalizedDescriptionKey: "no such file"])
+        workspace.stop(id)
+        clock.runQueued()
+        XCTAssertEqual(workspace.launches, [id])
+        XCTAssertTrue((result?["error"] as? String)?.hasPrefix("\(id) did not come back: ") ?? false, "\(String(describing: result))")
+    }
+
+    func testANewProcessThatNeverListensFailsAtTheDeadline() {
+        startApp(pid: 100)
+        var result: [String: Any]?
+        externals.relaunch(id) { result = $0 }
+        workspace.stop(id)
+        clock.runQueued()
+        connector.reachable = []
+        workspace.start(id, pid: 200)
+        for _ in 0..<100 where result == nil { clock.runQueued() }
+        XCTAssertTrue((result?["error"] as? String)?.hasPrefix("\(id) did not come back: ") ?? false, "\(String(describing: result))")
+    }
+
+    func testRelaunchOutdatedAppsAppearsInTheMenuOnlyWhileAnAppIsOutdated() {
+        let exe = URL(fileURLWithPath: "/Applications/Pad.app/Contents/MacOS/Pad")
+        workspace.processInfo[4242] = AppProcess(pid: 4242, launchDate: clock.now, executableURL: exe)
+        var built = clock.now.addingTimeInterval(-60)
+        supervisor.fileDate = { $0 == exe ? built : nil }
+        startApp()
+        let services = MacHUDServices(externals: externals, host: MacHUDPanelHost(registry: externals.registry))
+        services.liveMenus = { false }
+        XCTAssertFalse(services.menuItems().map(\.title).contains("Relaunch Outdated Apps"))
+        built = clock.now.addingTimeInterval(3600)
+        let titles = services.menuItems().map(\.title)
+        XCTAssertEqual(Array(titles.prefix(4)), ["Apps", "Launch All Apps", "Quit All Apps", "Relaunch Outdated Apps"])
+    }
+
+    func testAParkedPanelIsNotChecked() {
+        startApp()
+        probe = .offScreen
+        connector.onEvents[socket]?(["event": "state", "panels": [["id": "pad", "visible": true, "mode": "parked"]]])
+        panel.show(HUDPanelTransition(reason: .click))
+        clock.runQueued()
+        XCTAssertNil(supervisor.record(id)?.showChecks["pad"])
+        XCTAssertTrue(missed.isEmpty)
     }
 
     func testRelaunchOfAStoppedAppLaunchesIt() {

@@ -40,8 +40,9 @@ final class ExternalPanel: Panel {
         health == .running && (descriptor.verbs.isEmpty || descriptor.verbs.contains("frame"))
     }
 
-    /// Plain shows (`panel show`, loadouts) record a miss quietly: a loadout may place the
-    /// panel on a desktop it is visiting.
+    /// Plain shows (`panel show`, a loadout slot) record a miss quietly: a loadout may place
+    /// the panel on a desktop it is visiting. A HUD loadout sends its shows to the app
+    /// directly, unverified.
     func show() { visibility("show", assume: true) }
     func hide() { visibility("hide", assume: false) }
     func toggle() { visibility("toggle", assume: !isVisible) }

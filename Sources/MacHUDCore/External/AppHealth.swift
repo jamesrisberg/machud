@@ -83,13 +83,15 @@ struct AppBuildStatus: Equatable {
         return Contract(app: "\(a.0).\(a.1)", machud: "\(m.0).\(m.1)", older: a < m)
     }
 
+    nonisolated(unsafe) static let dateFormat = ISO8601DateFormatter()
+
     var json: [String: Any] {
         var d: [String: Any] = ["outdated": outdated != nil]
         if let outdated { d["outdatedReason"] = outdated }
         if let contract { d["contract"] = ["app": contract.app, "machud": contract.machud, "older": contract.older] }
         if let newerCopy {
             d["newerCopy"] = newerCopy.path
-            d["newerCopyBuilt"] = ISO8601DateFormatter().string(from: newerCopy.built)
+            d["newerCopyBuilt"] = Self.dateFormat.string(from: newerCopy.built)
             if let version = newerCopy.version { d["newerCopyVersion"] = version }
         }
         return d
