@@ -210,6 +210,17 @@ struct Hotkeys: Codable, Equatable {
     /// Collapse/expand the menu bar's hidden items. `menuBar.hotkey` wins over it; with
     /// neither set it is ⌃⌥B (see `MenuBarConfig.defaultHotkey`).
     var menuBar: HotKey? = nil
+    /// Reveal the desktop widgets; press again or Esc lowers them. Absent means ⌃⌥W; an
+    /// empty `key` turns it off.
+    var widgets: HotKey? = nil
+
+    static let defaultWidgets = HotKey(key: "w", modifiers: ["control", "option"])
+
+    /// The widget reveal hotkey in effect.
+    var widgetsReveal: HotKey? {
+        let hk = widgets ?? Self.defaultWidgets
+        return hk.key.isEmpty ? nil : hk
+    }
 
     static let defaults = Hotkeys(
         loadoutMenu: HotKey(key: "space", modifiers: ["control", "option"]),

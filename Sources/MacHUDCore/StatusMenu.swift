@@ -21,6 +21,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     var appsSection: (() -> [NSMenuItem])?
     /// The tool dock the apps sit on, right after them.
     var toolDockSection: (() -> [NSMenuItem])?
+    /// The Widgets submenu, after Tool Dock.
+    var widgetsSection: (() -> [NSMenuItem])?
 
     init(store: LayoutStore) {
         self.store = store
@@ -91,6 +93,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
         // The tool dock, then the apps that live on it under their own header.
         var appItems = toolDockSection?() ?? []
+        appItems += widgetsSection?() ?? []
         appItems += appsSection?() ?? []
         if !appItems.isEmpty {
             for item in appItems { menu.addItem(item) }

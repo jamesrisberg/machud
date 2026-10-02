@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuHost: MenuHostPublisher!
     private var toolDock: ToolDock!
     private var widgets: WidgetLayer!
+    private var widgetUI: WidgetUI!
     private var sessions: SessionsBroker!
     private var feed: FeedBroker!
     private var voice: VoiceServices!
@@ -122,6 +123,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         PanelMenuTarget.shared.registry = panels
         statusMenu.toolDockSection = { [weak toolDock] in toolDock?.statusMenuItems() ?? [] }
+        statusMenu.widgetsSection = { [weak self] in
+            guard let self, !self.widgets.servingApps.isEmpty || !self.widgets.records.isEmpty else { return [] }
+            return [WidgetMenuModel.menuItem(self.widgets, hotkey: self.widgetUI.hotkeysEnabled ? self.store.hotkeys.widgetsReveal : nil) {
+                [weak self] in self?.widgetUI.perform($0)
+            }]
+        }
         statusMenu.appsSection = { [weak machud] in machud?.menuItems() ?? [] }
         statusMenu.openSettings = { [weak machud] in machud?.settingsWindow.show() }
         AXWindow.ownWindowFilter = { [weak panels] w in panels?.panels.contains { $0.window === w } ?? false }
@@ -149,6 +156,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.editor.open(loadout: name)
         }
         loadoutMenu.library = library
+        loadoutMenu.hasWidgets = { [weak widgets] in !(widgets?.servingApps.isEmpty ?? true) }
+        loadoutMenu.widgetsSubtitle = { [weak widgets] in
+            let n = widgets?.records.count ?? 0
+            return n == 0 ? "none placed" : "\(n) placed"
+        }
+        loadoutMenu.onWidgets = { [weak widgets] edit in
+            guard let widgets else { return }
+            if edit { widgets.setEditing(!widgets.editing) } else { widgets.setRevealed(!widgets.revealed) }
+        }
         installLoadoutsTab(loadoutMenu)
         scheduleStartupLoadout()
 
@@ -477,12 +493,19 @@ extension AppDelegate {
         }
         layer.summon = { [weak machud] id in machud?.summon?(id) }
         layer.registerControl(control)
+        let ui = WidgetUI(layer: layer)
+        layer.onChange = { [weak ui] in ui?.refresh() }
+        ui.registerHotkey(store.hotkeys.widgetsReveal)
         let previous = store.onChange
-        store.onChange = { [weak layer] in
+        store.onChange = { [weak layer, weak ui, weak store] in
             previous?()
-            MainActor.assumeIsolated { layer?.configChanged() }
+            MainActor.assumeIsolated {
+                layer?.configChanged()
+                ui?.registerHotkey(store?.hotkeys.widgetsReveal)
+            }
         }
         widgets = layer
+        widgetUI = ui
         externals.refreshKeepRunning()
         engine.hudEngine?.widgets = layer
     }
