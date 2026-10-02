@@ -396,7 +396,7 @@ struct Config: Codable, Equatable {
     var startupLoadout: String? = nil
     /// The app catalog (Settings → Apps): its URL and the install directory.
     var catalog: CatalogConfig? = nil
-    /// Desktop widgets: the grid and every placed widget.
+    /// Desktop widgets: every placed widget, on the layout grid (`grid`).
     var widgets: WidgetsConfig? = nil
 
     /// Blank by default: the editor opens on first trigger so you draw your own.
@@ -540,12 +540,14 @@ final class LayoutStore {
         do {
             let data = try Data(contentsOf: Self.configURL)
             let decoded = try JSONDecoder().decode(Config.self, from: data)
-            let withIDs = DisplayPinning.migrate(Self.withRegionIDs(decoded), screens: NSScreen.screens.map(\.descriptor))
+            let pinned = DisplayPinning.migrate(Self.withRegionIDs(decoded), screens: NSScreen.screens.map(\.descriptor))
+            let withIDs = WidgetMigration.migrate(pinned, screens: WidgetScreen.attached())
             config = withIDs
             loadError = nil
             if withIDs != decoded {
-                // Regions written by hand get stable ids so loadouts can reference them, and
-                // displays named in loadouts get pinned to the physical display.
+                // Regions written by hand get stable ids so loadouts can reference them,
+                // displays named in loadouts get pinned to the physical display, and widgets
+                // saved in the older grid cells get positions on the layout grid.
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
                 try? encoder.encode(withIDs).write(to: Self.configURL, options: .atomic)
