@@ -75,7 +75,8 @@ re-applied on its own.
 
 A loadout's `hud` part holds the MacHUD side of the desktop: the tool dock's position,
 each running sibling's panels (visible, mode, frame, dock setting) and the placed widgets
-(`widgets`; applying a loadout with that key replaces them, one without leaves them alone). A loadout may be HUD
+(`widgets`, only when some are placed; applying a loadout with that key replaces them, one
+without leaves them alone). A loadout may be HUD
 only (`"layout": ""`, `"slots": []`).
 
 ```sh

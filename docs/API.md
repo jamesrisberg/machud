@@ -498,9 +498,14 @@ what the user does to a widget into placement.
   (else a toast); remove removes it; the settings control (or the widget's own button) opens the
   widget's settings in a MacHUD window built from its type's schema; settings the widget changed
   itself are saved; a widget asking to open its app summons the app's first panel.
-- **Running**: an app with widgets placed is kept running like an `autoLaunch` app (launched at
-  startup, relaunched if it quits unexpectedly, not after an explicit quit). An isolated
-  instance launches nothing at startup (`MACHUD_APPLY_STARTUP`).
+- **Running**: an app with widgets placed is kept running like an `autoLaunch` app: launched at
+  startup and relaunched when it stops, unless it was quit through MacHUD (`apps quit`, the menu's
+  Quit). ⌘Q in the app itself or a kill counts as a crash and it comes back. An app quit through
+  MacHUD is kept running again once it is opened, from MacHUD or by hand. An isolated instance
+  launches nothing at startup (`MACHUD_APPLY_STARTUP`).
+- **Reveal hotkey**: ⌃⌥W is registered only while some app serves widgets; otherwise the chord
+  is left to other apps. Esc is taken only while widgets are revealed or being edited.
+- **Drag snapping** (⇧-drag) never takes a widget into a region; widgets move on their grid.
 
 | Command | Args | Effect |
 | --- | --- | --- |
@@ -513,6 +518,9 @@ what the user does to a widget into placement.
 | `widgets layer` | `instance=` plus `desktop` or `float` (or `layer=`) | |
 | `widgets settings` | `instance=` plus `key=value ...` or `settings=<JSON object>` (`null` removes a key) | merged into the widget's settings, each checked and typed by its type's schema (keys the schema does not list are kept as given) |
 | `widgets edit` / `widgets reveal` | `on`, `off` or `toggle` (default; or `state=`) | returns `editing`, `revealed` |
+
+A bare `widgets` lists; arguments without a sub-verb (`action=` or the CLI's bare word) are an
+error, so a change that lost its sub-verb never passes for a list.
 
 The status menu's **Widgets** submenu (next to Tool Dock) has Reveal Widgets, Edit Widgets…,
 Add Widget ▸ (types by app, sizes) and every placed widget with Settings…, Float Above Windows
@@ -546,7 +554,8 @@ only that (`"layout": ""`, `"slots": []`):
   sibling, each panel's `visible` and `mode` from its state, its `frame` (the one the
   app reports in a fresh `state`, else its window's while showing) and, for apps that
   have a `dock.position` or `dock.edge` setting, that setting (on the app's first panel), and
-  the placed widgets (`widgets`, as layouts.json keeps them) when there are any.
+  the placed widgets (`widgets`, as layouts.json keeps them) when any are placed; with none placed
+  the key is left out, so applying that loadout leaves the widgets as they are.
 - **Apply** (after the loadout's windows, if any) moves the tool dock, replaces the placed
   widgets with the loadout's `widgets` when it has that key (a widget of the same app and type at
   the same cells keeps its id and window; without the key the widgets are left alone; the report

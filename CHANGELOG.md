@@ -16,8 +16,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - Widgets sit under your windows. **⌃⌥W** raises them all until you press it again or Esc (also
   in the Widgets submenu and on the wheel); Float Above Windows keeps one on top.
 - Widgets are on every desktop and come back where they were after a restart, a display change or
-  their app relaunching. An app with widgets is kept running. HUD loadouts save your widgets and
-  put them back.
+  their app relaunching. An app with widgets is kept running unless you quit it from MacHUD. HUD
+  loadouts save your widgets and put them back.
 - Scripts and agents get `machud widgets` (list, types, add, move, resize, layer, settings,
   remove, edit, reveal) and the MCP tools `list_widgets`, `add_widget`, `change_widget` and
   `widget_mode`.
