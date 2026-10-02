@@ -6,6 +6,12 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 
 ## [Unreleased]
 
+### Launch and quit every app at once
+- The menu's Apps section starts with **Launch All Apps** and **Quit All Apps**, which start
+  every HUD app that is not running or quit every one that is. Each app's own submenu still
+  launches or quits just that app. Scripts and agents get the same with `machud apps launch-all`
+  and `machud apps quit-all`.
+
 ## [0.2.0] - 2026-09-29
 
 ### The brain can drive MacHUD

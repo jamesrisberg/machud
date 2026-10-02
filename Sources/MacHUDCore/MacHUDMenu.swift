@@ -3,8 +3,8 @@ import HUDKit
 
 /// The umbrella bits of MacHUD that sit on top of the external panel registry:
 /// the shared settings window (`settings-window`) and the status menu's "Apps" section
-/// (each discovered app with Show, its own status menu fetched live, park/reveal, its
-/// settings and Quit/Launch).
+/// (Launch All and Quit All, then each discovered app with Show, its own status menu fetched
+/// live, park/reveal, its settings and Quit/Launch).
 @MainActor
 final class MacHUDServices: NSObject {
     let externals: ExternalPanels
@@ -73,13 +73,22 @@ final class MacHUDServices: NSObject {
     /// Per-app submenu delegates of the menu currently built, by app id.
     private var submenus: [String: AppSubmenu] = [:]
 
-    /// The status menu's Apps section: a submenu per discovered app with "Show <App>", the
-    /// app's own status menu (fetched live), MacHUD's controls for it, and Quit or Launch.
+    /// The status menu's Apps section: Launch All and Quit All, then a submenu per
+    /// discovered app with "Show <App>", the app's own status menu (fetched live), MacHUD's
+    /// controls for it, and Quit or Launch.
     func menuItems() -> [NSMenuItem] {
         var items: [NSMenuItem] = []
         let header = NSMenuItem(title: "Apps", action: nil, keyEquivalent: "")
         header.isEnabled = false
         items.append(header)
+        let bulk = MacHUDMenuModel.bulk(externals: externals)
+        for (title, enabled, selector) in [("Launch All Apps", bulk.canLaunch, #selector(launchAll)),
+                                           ("Quit All Apps", bulk.canQuit, #selector(quitAll))] {
+            let mi = NSMenuItem(title: title, action: selector, keyEquivalent: "")
+            mi.target = self
+            mi.isEnabled = enabled
+            items.append(mi)
+        }
         let live = liveMenus()
         let entries = MacHUDMenuModel.entries(externals: externals, liveMenus: live, mode: { [host] in host.mode(of: $0) })
         if entries.isEmpty {
@@ -158,6 +167,17 @@ final class MacHUDServices: NSObject {
     }
 
     @objc private func openApps() { settingsWindow.show(select: AppsTabModel.tabID) }
+
+    @objc private func launchAll() {
+        let failed = externals.launchAll().compactMapValues { result -> String? in
+            if case .failure(let error) = result { return error.description } else { return nil }
+        }
+        guard !failed.isEmpty else { return }
+        let names = failed.keys.map { externals.app(matching: $0)?.name ?? $0 }.sorted()
+        Toast.show("Could not launch \(names.joined(separator: ", "))", detail: failed.values.sorted().joined(separator: "\n"))
+    }
+
+    @objc private func quitAll() { externals.quitAll() }
 
     @objc private func appMenuAction(_ sender: NSMenuItem) {
         guard let ref = sender.representedObject as? AppMenuRef else { return }
@@ -246,6 +266,13 @@ enum MacHUDMenuModel {
         }
     }
 
+    /// Whether Launch All and Quit All have anything to do.
+    @MainActor
+    static func bulk(externals: ExternalPanels) -> (canLaunch: Bool, canQuit: Bool) {
+        let up = externals.apps.map { externals.isUp($0.id) }
+        return (up.contains(false), up.contains(true))
+    }
+
     struct Entry {
         var appID: String
         var title: String
@@ -291,7 +318,7 @@ enum MacHUDMenuModel {
             actions.append(Action(.dockToggle, "Show on Tool Dock", appID: app.id, isOn: !hiddenFromDock.contains(app.id)))
             actions.append(Action(.settings, "\(app.name) Settings…", appID: app.id))
             actions.append(Action(.separator, "", appID: app.id))
-            actions.append(running || health == .socketUnreachable || health == .launching
+            actions.append(externals.isUp(app.id)
                            ? Action(.quit, "Quit \(app.name)", appID: app.id)
                            : Action(.launch, "Launch \(app.name)", appID: app.id))
             let dot = running ? "●" : "○"
