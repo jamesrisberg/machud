@@ -6,6 +6,12 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-02
+
+### Fixed
+- Spoken replies start promptly on a busy Mac: the voice prepares a reply's pieces strictly in
+  order, so the first words never wait behind later ones.
+
 ## [0.3.0] - 2026-10-02
 
 ### The orb's reply card becomes a conversation
