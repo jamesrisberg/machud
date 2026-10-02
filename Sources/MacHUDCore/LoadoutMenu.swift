@@ -248,7 +248,11 @@ final class LoadoutMenu {
                       name, capture.regionCount, capture.slotCount, capture.screens.count)
                 let finish = { (hud: HUDLoadout?) in
                     var detail = Self.captureDetail(of: capture)
-                    if let apps = hud?.apps?.count { detail += "\nTool dock + \(apps) app\(apps == 1 ? "" : "s") saved with it" }
+                    if let apps = hud?.apps?.count {
+                        let widgets = hud?.widgets?.count ?? 0
+                        detail += "\nTool dock + \(apps) app\(apps == 1 ? "" : "s")"
+                            + (widgets > 0 ? " + \(widgets) widget\(widgets == 1 ? "" : "s")" : "") + " saved with it"
+                    }
                     Toast.show("Captured \(name)", detail: detail, on: screen, seconds: 3.5)
                 }
                 if answer.includeHUD {

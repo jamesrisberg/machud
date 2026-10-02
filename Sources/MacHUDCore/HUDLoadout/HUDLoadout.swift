@@ -1,9 +1,10 @@
 import AppKit
 import HUDKit
 
-/// The MacHUD half of a loadout: where the tool dock sits and, per sibling app, each
-/// panel's visibility, mode, frame and (for apps with their own dock strip) the settings
-/// that place it.
+/// The MacHUD half of a loadout: where the tool dock sits; per sibling app, each panel's
+/// visibility, mode, frame and (for apps with their own dock strip) the settings that place
+/// it; and the desktop widgets (`widgets`, as layouts.json keeps them; absent leaves the
+/// widgets alone).
 ///
 /// ```json
 /// "hud": {"dock": {"position": "bottomLeft"},
@@ -42,18 +43,21 @@ struct HUDLoadout: Codable, Equatable {
 
     var dock: Dock?
     var apps: [String: App]?
+    var widgets: [WidgetRecord]?
 
-    init(dock: Dock? = nil, apps: [String: App]? = nil) {
+    init(dock: Dock? = nil, apps: [String: App]? = nil, widgets: [WidgetRecord]? = nil) {
         self.dock = dock
         self.apps = apps
+        self.widgets = widgets
     }
 
-    private enum CodingKeys: String, CodingKey { case dock, apps }
+    private enum CodingKeys: String, CodingKey { case dock, apps, widgets }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         dock = try c.decodeIfPresent(Dock.self, forKey: .dock)
         apps = try c.decodeIfPresent([String: App].self, forKey: .apps)
+        widgets = try c.decodeIfPresent([WidgetRecord].self, forKey: .widgets)
     }
 
     /// Settings keys an app exposes for its own dock strip; captured when present.
@@ -67,6 +71,8 @@ final class HUDLoadoutEngine {
     /// The tool dock's position, and how to move it.
     var dockPosition: () -> HUDDockPosition?
     var setDockPosition: (HUDDockPosition) -> Void
+    /// The desktop widgets a loadout captures and replaces.
+    weak var widgets: WidgetLayer?
 
     init(externals: ExternalPanels, dockPosition: @escaping () -> HUDDockPosition?,
          setDockPosition: @escaping (HUDDockPosition) -> Void) {
@@ -81,9 +87,11 @@ final class HUDLoadoutEngine {
 
     /// The dock position plus every running (reachable) sibling's panels: visibility and
     /// mode from its pushed state, the frame it reports (or its window's frame), and its
-    /// `dock.position`/`dock.edge` settings when it has them.
+    /// `dock.position`/`dock.edge` settings when it has them; and the widgets, when any are placed.
     func capture(completion: @escaping (HUDLoadout) -> Void) {
-        var hud = HUDLoadout(dock: dockPosition().map(HUDLoadout.Dock.init(position:)), apps: [:])
+        let placed = widgets?.capture() ?? []
+        var hud = HUDLoadout(dock: dockPosition().map(HUDLoadout.Dock.init(position:)), apps: [:],
+                             widgets: placed.isEmpty ? nil : placed)
         let running = externals.apps.filter { supervisor.record($0.id)?.health == .running }
         var waiting = running.count
         guard waiting > 0 else { completion(hud); return }
@@ -130,21 +138,29 @@ final class HUDLoadoutEngine {
         var dock: String?
         /// Per app: "applied", or why not.
         var apps: [String: String] = [:]
+        /// How many widgets the loadout put in place of the ones before, when it has a set.
+        var widgets: Int?
 
         var json: [String: Any] {
             var d: [String: Any] = ["apps": apps]
             if let dock { d["dock"] = dock }
+            if let widgets { d["widgets"] = widgets }
             return d
         }
     }
 
-    /// Moves the dock, then per app: launch it if needed, then settings, mode, frame,
-    /// visibility, in that order over its socket (commands queue until it listens).
+    /// Moves the dock and replaces the widgets (when the loadout has a set), then per app:
+    /// launch it if needed, then settings, mode, frame, visibility, in that order over its
+    /// socket (commands queue until it listens).
     func apply(_ hud: HUDLoadout, completion: @escaping (Report) -> Void) {
         var report = Report()
         if let position = hud.dock?.position {
             setDockPosition(position)
             report.dock = position.rawValue
+        }
+        if let set = hud.widgets, let widgets {
+            widgets.replace(with: set)
+            report.widgets = set.count
         }
         let entries = (hud.apps ?? [:]).sorted { $0.key < $1.key }
         var waiting = entries.count

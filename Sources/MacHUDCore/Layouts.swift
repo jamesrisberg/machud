@@ -385,6 +385,8 @@ struct Config: Codable, Equatable {
     var startupLoadout: String? = nil
     /// The app catalog (Settings → Apps): its URL and the install directory.
     var catalog: CatalogConfig? = nil
+    /// Desktop widgets: the grid and every placed widget.
+    var widgets: WidgetsConfig? = nil
 
     /// Blank by default: the editor opens on first trigger so you draw your own.
     static let defaults = Config(gap: 0, trigger: .shift, grid: .default, layouts: [], loadouts: [],
@@ -418,6 +420,7 @@ struct Config: Codable, Equatable {
         spaces = try c.decodeIfPresent(SpacesConfig.self, forKey: .spaces)
         startupLoadout = try c.decodeIfPresent(String.self, forKey: .startupLoadout)
         catalog = try c.decodeIfPresent(CatalogConfig.self, forKey: .catalog)
+        widgets = try c.decodeIfPresent(WidgetsConfig.self, forKey: .widgets)
     }
 }
 
