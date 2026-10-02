@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBar: MenuBarManager!
     private var menuHost: MenuHostPublisher!
     private var toolDock: ToolDock!
+    private var widgets: WidgetLayer!
     private var sessions: SessionsBroker!
     private var feed: FeedBroker!
     private var voice: VoiceServices!
@@ -78,6 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         installMenuBar()
         installToolDock()
         installMenuHost()
+        installWidgets()
         installOnboarding()
         // Every visibility change (socket, hotkey, menu, close button, sibling push)
         // reaches `subscribe`rs, not only the ones made through the socket.
@@ -454,11 +456,43 @@ extension AppDelegate {
         }
     }
 
+    /// Desktop widgets: the `widgets` verb, sync with every app serving widgets as it
+    /// connects, their events, and keeping apps with widgets running. Follows layouts.json edits.
+    fileprivate func installWidgets() {
+        let layer = WidgetLayer(externals: externals, config: { [weak store] in
+            store?.config.widgets ?? WidgetsConfig()
+        }, save: { [weak store] widgets in
+            guard let store else { return }
+            var c = store.config
+            c.widgets = widgets
+            store.save(c)
+        })
+        let supervisor = externals.supervisor
+        externals.keepRunning = { [weak layer] in layer?.appsWithInstances ?? [] }
+        supervisor.widgetFrames = { [weak layer] in layer?.frames(app: $0) ?? [] }
+        supervisor.onConnected = { [weak layer] in layer?.appConnected($0) }
+        supervisor.onAppEvent = { [weak layer] id, event in
+            guard event["event"] as? String == "widget" else { return }
+            layer?.handle(event: event, from: id)
+        }
+        layer.summon = { [weak machud] id in machud?.summon?(id) }
+        layer.registerControl(control)
+        let previous = store.onChange
+        store.onChange = { [weak layer] in
+            previous?()
+            MainActor.assumeIsolated { layer?.configChanged() }
+        }
+        widgets = layer
+        externals.refreshKeepRunning()
+        engine.hudEngine?.widgets = layer
+    }
+
     /// The set of attached displays changed: pin by-name references to the displays now
     /// present, then put the active loadout back where it belongs (not in an isolated
     /// instance; see `Env.autoApply`).
     fileprivate func displaysChanged() {
         toolDock.refresh()
+        widgets.configChanged()
         store.pinDisplays()
         guard Env.autoApply, let name = engine.activeLoadout, let loadout = store.loadout(named: name) else { return }
         engine.apply(loadout, clear: false) { report in

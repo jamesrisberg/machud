@@ -27,6 +27,9 @@ final class ExternalPanels {
     /// false: `autoLaunch` apps are neither launched, relaunched nor placed (an isolated
     /// instance; see `Env.autoApply`).
     var autoLaunches = true
+    /// Apps kept running like `autoLaunch` ones besides the configured: those with widgets
+    /// placed (wired to the widget layer).
+    var keepRunning: () -> Set<String> = { [] }
     /// Rescans when an app appears in, leaves or is replaced in a watched directory.
     private(set) var watcher: AppDirectoryWatcher?
     /// Puts an app's panel where its `apps.<id>.placement` says (wired to the loadout
@@ -267,7 +270,7 @@ final class ExternalPanels {
     /// Registers `apps` (replacing any earlier set) and their hover and windowed panels; widget
     /// types and unknown kinds are not panels. Split from `rescan` for tests.
     func install(_ apps: [ExternalApp], autoLaunch configured: Set<String>) {
-        let autoLaunch = autoLaunches ? configured : []
+        let autoLaunch = autoLaunches ? configured.union(keepRunning()) : []
         self.apps = apps
         let wanted = Set(apps.flatMap { app in app.manifest.presentedPanels.map { ExternalPanel.id(app: app.id, panel: $0.id) } })
         registry.unregister { panel in
@@ -290,6 +293,13 @@ final class ExternalPanels {
                 registry.register(ExternalPanel(app: app, descriptor: descriptor, supervisor: supervisor))
             }
         }
+    }
+
+    /// Applies a change in `keepRunning` (a widget placed for an app, or its last one removed).
+    func refreshKeepRunning() {
+        let wanted = autoLaunches ? Set(config().autoLaunch ?? []).union(keepRunning()) : []
+        guard Set(apps.map(\.id).filter { supervisor.record($0)?.autoLaunch == true }) != wanted.intersection(apps.map(\.id)) else { return }
+        supervisor.update(apps: apps, autoLaunch: wanted)
     }
 
     /// Bundle id, or app name (case-insensitive).

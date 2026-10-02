@@ -155,6 +155,10 @@ final class AppSupervisor {
     /// A loud show (a click or summon, not a passing hover) did not reach the screen: app id,
     /// panel id and where it went.
     var onShowMissed: ((String, String, ShowOutcome) -> Void)?
+    /// An app connected (or reconnected) and its queued commands went out: app id.
+    var onConnected: ((String) -> Void)?
+    /// An event other than `state` (`widget`) pushed by an app: app id and the event.
+    var onAppEvent: ((String, [String: Any]) -> Void)?
 
     init(workspace: WorkspaceControl? = nil, connector: SocketConnector? = nil,
          schedule: ((TimeInterval, @escaping @MainActor () -> Void) -> Void)? = nil) {
@@ -373,6 +377,7 @@ final class AppSupervisor {
                 self.seedState(id)
                 self.flushPending(record)
                 self.askHello(id)
+                self.onConnected?(id)
             case .failure(let error):
                 record.lastError = "\(error)"
                 self.set(record, .socketUnreachable)
@@ -416,8 +421,11 @@ final class AppSupervisor {
     }
 
     func handle(_ event: [String: Any], from id: String) {
+        if let name = event["event"] as? String, name != "state" {
+            if records[id] != nil { onAppEvent?(id, event) }
+            return
+        }
         guard let record = records[id], let panels = event["panels"] as? [[String: Any]] else { return }
-        if let name = event["event"] as? String, name != "state" { return }
         var changed = false
         for p in panels {
             guard let panelID = p["id"] as? String else { continue }
@@ -769,7 +777,7 @@ final class HUDSocketConnector: SocketConnector {
         let events = UncheckedBox(onEvent), closed = UncheckedBox(onClose), done = UncheckedBox(completion)
         queue.async {
             let result = Result<SocketSubscription, Error> {
-                try client.subscribe(events: ["state"], onEvent: { event in
+                try client.subscribe(events: ["state", "widget"], onEvent: { event in
                     let box = UncheckedBox(event)
                     DispatchQueue.main.async { events.value(box.value) }
                 }, onClose: {
