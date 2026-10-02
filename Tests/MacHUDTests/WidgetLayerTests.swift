@@ -203,6 +203,18 @@ final class WidgetLayerTests: XCTestCase {
         XCTAssertEqual(externals.supervisor.record(appID)?.autoLaunch, true)
         XCTAssertEqual(workspace.launches, [appID], "and launched now")
         XCTAssertEqual(externals.supervisor.record(otherID)?.autoLaunch, false)
+
+        // Quit by the user: no longer kept, and not launched again when its widgets change.
+        workspace.start(appID)
+        clock.runQueued()
+        externals.supervisor.quit(appID) { _ in }
+        workspace.stop(appID)
+        clock.runQueued()
+        stored.instances = []
+        externals.refreshKeepRunning()
+        stored.instances = [WidgetRecord(instance: "B", app: appID, type: "clock", size: .small, col: 0, row: 0)]
+        externals.refreshKeepRunning()
+        XCTAssertEqual(workspace.launches, [appID], "the user quit it")
     }
 
     // MARK: The verb

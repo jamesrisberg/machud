@@ -295,11 +295,10 @@ final class ExternalPanels {
         }
     }
 
-    /// Applies a change in `keepRunning` (a widget placed for an app, or its last one removed).
+    /// Applies a change in `keepRunning` (a widget placed for an app, or its last one removed);
+    /// an app the user quit stays quit.
     func refreshKeepRunning() {
-        let wanted = autoLaunches ? Set(config().autoLaunch ?? []).union(keepRunning()) : []
-        guard Set(apps.map(\.id).filter { supervisor.record($0)?.autoLaunch == true }) != wanted.intersection(apps.map(\.id)) else { return }
-        supervisor.update(apps: apps, autoLaunch: wanted)
+        supervisor.setAutoLaunch(autoLaunches ? Set(config().autoLaunch ?? []).union(keepRunning()) : [])
     }
 
     /// Bundle id, or app name (case-insensitive).
