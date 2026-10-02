@@ -12,7 +12,7 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   gallery of every widget by app with a button per size. Widgets snap to a grid, never overlap,
   and can be placed several times, each with its own settings.
 - In edit mode you drag widgets to move them, and their controls remove them, open their settings
-  and change their size; a faint grid shows where they can go. Done or Esc locks them again.
+  and change their size; the layout grid shows where they can go. Done or Esc locks them again.
 - Widgets sit under your windows. **⌃⌥W** raises them all until you press it again or Esc (also
   in the Widgets submenu and on the wheel); Float Above Windows keeps one on top.
 - Widgets are on every desktop and come back where they were after a restart, a display change or
@@ -23,6 +23,17 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   `widget_mode`.
 - An app that serves only widgets is listed under Apps like any other, without a tool dock
   button, and a panel kind MacHUD does not know is skipped instead of being shown as a window.
+
+### Widgets live on the layout grid
+- Desktop widgets now sit on the same grid as your layouts, like small windows of a fixed size:
+  drag one and it snaps to the grid lines, flush against a region's edge or the edge of the
+  screen, anywhere on the screen, never on top of another widget.
+- Edit Widgets shows exactly the layout editor's grid, with your layout's regions faintly under
+  it, so widgets line up with them.
+- The layout editor shows your widgets as blocks you can drag, and its panel has an **Add
+  Widget** menu. Widget changes there apply right away.
+- Widgets you had placed keep their place: they move onto the new grid the first time MacHUD
+  starts. Scripts place them with `x= y=` (fractions of the screen) or `col= row=` (grid lines).
 
 ### Quitting an app yourself keeps it quit
 - Quitting a HUD app with ⌘Q or its own Quit menu item now counts as you meaning it: MacHUD no
