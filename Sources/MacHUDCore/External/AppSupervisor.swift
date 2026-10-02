@@ -5,6 +5,8 @@ import HUDKit
 @MainActor
 protocol WorkspaceControl: AnyObject {
     func runningPIDs(bundleID: String) -> [pid_t]
+    /// The app's running processes with when each started and the bundle it runs from.
+    func processes(bundleID: String) -> [AppProcess]
     func isInstalled(_ app: ExternalApp) -> Bool
     /// Launches without activating. `completion` runs on the main thread.
     func launch(_ app: ExternalApp, completion: @escaping (Error?) -> Void)
@@ -41,6 +43,10 @@ protocol SocketConnector: AnyObject {
 /// (only for `autoLaunch` apps that quit unexpectedly, or a failed on-demand launch) backs
 /// off exponentially and gives up after `maxLaunchAttempts`; a run of `stableRun` seconds
 /// or an explicit `apps launch` resets the count.
+///
+/// It also keeps what each app said in `hello` (contract and version), judges whether a
+/// running app is behind its bundle on disk (`buildStatus`), checks that a panel MacHUD
+/// showed reached the screen (`verifyShow`), and relaunches apps (`relaunch`).
 @MainActor
 final class AppSupervisor {
     enum Health: String {
@@ -66,6 +72,13 @@ final class AppSupervisor {
         var panels: [String: HUDPanelState] = [:]
         /// Frames apps that report one in `state` (`frame`) gave, per panel id.
         var frames: [String: CGRect] = [:]
+        /// The app's `hello` since it last connected.
+        var hello: AppHello?
+        /// Where each shown panel was found after MacHUD showed it, per panel id; dropped
+        /// when the panel hides.
+        var showChecks: [String: ShowOutcome] = [:]
+        /// A `relaunch` is under way.
+        var relaunching = false
         /// Commands waiting for the socket, with when they give up.
         var pending: [(command: String, args: [String: String], deadline: Date,
                        completion: ((Result<[String: Any], Error>) -> Void)?)] = []
@@ -99,6 +112,12 @@ final class AppSupervisor {
     /// A process that stayed up this long was not crash-looping.
     static let stableRun: TimeInterval = 60
     static let pendingTimeout: TimeInterval = 20
+    /// How long after an app answers a show its window is looked for: past HUDKit's
+    /// slide-in, so the window is ordered in and opaque.
+    static let showCheckDelay: TimeInterval = 0.5
+    /// How long a relaunch waits for the old process to exit, then for the new one to listen.
+    nonisolated static let relaunchTimeout: TimeInterval = 10
+    static let relaunchPoll: TimeInterval = 0.25
 
     private(set) var records: [String: Record] = [:]
     /// Every app, in discovery order.
@@ -111,6 +130,24 @@ final class AppSupervisor {
     var now: () -> Date = Date.init
     /// Called whenever an app's health or pushed panel state changes.
     var onChange: ((String) -> Void)?
+    /// The contract MacHUD speaks, compared with each app's `hello.hudkit`.
+    var contractVersion = HUDKit.version
+    /// When a file was last written (the executable a process runs from).
+    var fileDate: (URL) -> Date? = { (try? FileManager.default.attributesOfItem(atPath: $0.path))?[.modificationDate] as? Date }
+    /// A bundle's `CFBundleShortVersionString` as it is on disk now.
+    var bundleVersion: (URL) -> String? = AppSupervisor.diskVersion
+    /// The executable a bundle on disk launches.
+    var bundleExecutable: (URL) -> URL? = AppSupervisor.diskExecutable
+    /// Every bundle declaring an app id (set from discovery's duplicates); empty when only
+    /// the one in use does.
+    var bundles: (String) -> [URL] = { _ in [] }
+    /// Which of several bundles declaring one id a launch would use now.
+    var nextBundle: ([URL]) -> URL = { $0[ExternalAppCatalog.preferred($0, running: [])] }
+    /// Where an app's panel is, given its processes; nil when it cannot tell.
+    var windowProbe: (Set<pid_t>) -> ShowOutcome? = { WindowPresence.probe($0) }
+    /// A loud show (a click or summon, not a passing hover) did not reach the screen: app id,
+    /// panel id and where it went.
+    var onShowMissed: ((String, String, ShowOutcome) -> Void)?
 
     init(workspace: WorkspaceControl? = nil, connector: SocketConnector? = nil,
          schedule: ((TimeInterval, @escaping @MainActor () -> Void) -> Void)? = nil) {
@@ -283,6 +320,8 @@ final class AppSupervisor {
         record.launchedAt = nil
         if ranFor >= Self.stableRun { record.launchAttempts = 0 }
         for key in record.panels.keys { record.panels[key]?.visible = false }
+        record.hello = nil
+        record.showChecks = [:]
         failPending(record, LaunchError.unknown("\(id) quit"))
         set(record, workspace.isInstalled(record.app) ? .notRunning : .notInstalled)
         if record.autoLaunch && !record.quitRequested { scheduleRelaunch(id) }
@@ -317,6 +356,7 @@ final class AppSupervisor {
                 record.lastError = nil
                 self.set(record, .running)
                 self.seedState(id)
+                self.askHello(id)
                 self.flushPending(record)
             case .failure(let error):
                 record.lastError = "\(error)"
@@ -348,6 +388,18 @@ final class AppSupervisor {
         }
     }
 
+    /// The contract and version the running process was built with.
+    private func askHello(_ id: String) {
+        guard let record = records[id] else { return }
+        record.hello = nil
+        connector.request(path: record.app.socketPath, command: "hello", args: [:]) { [weak self] result in
+            guard case .success(let reply) = result, reply["ok"] as? Bool != false,
+                  let record = self?.records[id] else { return }
+            record.hello = AppHello(reply: reply)
+            self?.onChange?(id)
+        }
+    }
+
     func handle(_ event: [String: Any], from id: String) {
         guard let record = records[id], let panels = event["panels"] as? [[String: Any]] else { return }
         if let name = event["event"] as? String, name != "state" { return }
@@ -356,6 +408,7 @@ final class AppSupervisor {
             guard let panelID = p["id"] as? String else { continue }
             var state = record.panels[panelID] ?? HUDPanelState(id: panelID, visible: false)
             if let visible = p["visible"] as? Bool { state.visible = visible }
+            if !state.visible, record.showChecks.removeValue(forKey: panelID) != nil { changed = true }
             if let mode = (p["mode"] as? String).flatMap(HUDPanelMode.init(rawValue:)) { state.mode = mode }
             // Only as fresh as the last report: a report without one (HUDKit's own pushes)
             // forgets it rather than keep a stale frame.
@@ -392,7 +445,141 @@ final class AppSupervisor {
         var state = record.panels[panel] ?? HUDPanelState(id: panel, visible: visible)
         state.visible = visible
         record.panels[panel] = state
+        if !visible { record.showChecks[panel] = nil }
         onChange?(id)
+    }
+
+    // MARK: - Health
+
+    /// Whether the running app is behind MacHUD's contract, or behind the bundle a relaunch
+    /// would start: the bundle it runs from, or a newer one declaring the same id (an
+    /// installed update beside a dev build), chosen as discovery chooses when the app is not
+    /// running (`ExternalAppCatalog.preferred`). nil while it is not running.
+    func buildStatus(_ id: String) -> AppBuildStatus? {
+        guard let record = records[id] else { return nil }
+        let live = Set(livePIDs(id))
+        guard !live.isEmpty else { return nil }
+        let processes = workspace.processes(bundleID: id).filter { live.contains($0.pid) }
+        // The oldest process decides: it is the one that may be running an old build.
+        let oldest = processes.min { ($0.launchDate ?? .distantFuture) < ($1.launchDate ?? .distantFuture) }
+        let running = oldest?.bundleURL ?? record.app.bundleURL
+        var candidates = [running]
+        for bundle in bundles(id) where !candidates.contains(where: { Self.sameBundle($0, bundle) }) {
+            candidates.append(bundle)
+        }
+        let next = candidates.count == 1 ? running : nextBundle(candidates)
+        let elsewhere = !Self.sameBundle(next, running)
+        let executable = elsewhere ? bundleExecutable(next) : oldest?.executableURL ?? bundleExecutable(running)
+        var status = AppBuildStatus()
+        status.outdated = AppBuildStatus.outdatedReason(launched: oldest?.launchDate, built: executable.flatMap(fileDate),
+                                                        running: record.hello?.version, onDisk: bundleVersion(next))
+            .map { elsewhere ? "\($0) (\(next.path))" : $0 }
+        if let contract = record.hello?.contract {
+            status.contract = AppBuildStatus.contract(app: contract, machud: contractVersion)
+        }
+        return status
+    }
+
+    /// Ids of the running apps whose bundle on disk is newer than the running process.
+    var outdatedIDs: [String] { order.filter { buildStatus($0)?.outdated != nil } }
+
+    /// `CFBundleShortVersionString` read from the Info.plist on disk (not `Bundle`, which
+    /// caches a bundle's Info.plist for the life of the process).
+    nonisolated static func diskVersion(_ bundle: URL) -> String? {
+        infoPlist(bundle)?["CFBundleShortVersionString"] as? String
+    }
+
+    /// The executable a bundle on disk launches (`CFBundleExecutable`).
+    nonisolated static func diskExecutable(_ bundle: URL) -> URL? {
+        (infoPlist(bundle)?["CFBundleExecutable"] as? String).map { bundle.appendingPathComponent("Contents/MacOS/\($0)") }
+    }
+
+    private nonisolated static func infoPlist(_ bundle: URL) -> [String: Any]? {
+        NSDictionary(contentsOf: bundle.appendingPathComponent("Contents/Info.plist")) as? [String: Any]
+    }
+
+    nonisolated static func sameBundle(_ a: URL, _ b: URL) -> Bool {
+        ExternalAppCatalog.canonicalPath(a) == ExternalAppCatalog.canonicalPath(b)
+    }
+
+    /// After a show the app answered: once its window has had time to appear, records
+    /// whether one of the app's windows is on screen on the active desktop. The window list
+    /// decides; the app's `onActiveSpace` hint in its show reply (HUDKit 0.3+) is used only
+    /// when the window list cannot tell. A `loud` show that missed is reported through
+    /// `onShowMissed`; a passing hover only records it.
+    func verifyShow(_ id: String, panel: String, loud: Bool, hint: Bool? = nil) {
+        schedule(Self.showCheckDelay) { [weak self] in
+            guard let self, let record = self.records[id], record.health == .running,
+                  record.panels[panel]?.visible == true else { return }
+            let outcome = self.windowProbe(Set(self.livePIDs(id))) ?? hint.map { $0 ? .onScreen : .anotherDesktop }
+            guard let outcome else { return }
+            if record.showChecks[panel] != outcome {
+                record.showChecks[panel] = outcome
+                self.onChange?(id)
+            }
+            if loud, !outcome.isOnScreen { self.onShowMissed?(id, panel, outcome) }
+        }
+    }
+
+    // MARK: - Relaunch
+
+    enum RelaunchError: Error, CustomStringConvertible {
+        case busy(String), didNotQuit(String), launch(LaunchError)
+        var description: String {
+            switch self {
+            case .busy(let id): return "\(id) is already relaunching"
+            case .didNotQuit(let id): return "\(id) did not quit within \(Int(AppSupervisor.relaunchTimeout)) s"
+            case .launch(let error): return error.description
+            }
+        }
+    }
+
+    /// Quits the app, waits for its process to exit, launches it again (as `apps launch`) and
+    /// waits for it to listen. Completes with the new process's pid (nil if none came up in
+    /// time) and health. An app that is not running is just launched.
+    ///
+    /// `beforeLaunch` runs once the old process is gone (discovery then picks the newest
+    /// bundle declaring the id, which is the one launched).
+    func relaunch(_ id: String, beforeLaunch: (() -> Void)? = nil,
+                  completion: @escaping (Result<(pid: pid_t?, health: Health), RelaunchError>) -> Void) {
+        guard let record = records[id] else { completion(.failure(.launch(.unknown(id)))); return }
+        guard !record.relaunching else { completion(.failure(.busy(id))); return }
+        record.relaunching = true
+        let old = Set(livePIDs(id))
+        let finish: (Result<(pid: pid_t?, health: Health), RelaunchError>) -> Void = { [weak record] result in
+            record?.relaunching = false
+            completion(result)
+        }
+        let start = { [weak self] in
+            guard let self else { return }
+            beforeLaunch?()
+            if let error = self.launch(id, manual: true) { finish(.failure(.launch(error))); return }
+            self.awaitListening(id, old: old, deadline: self.now().addingTimeInterval(Self.relaunchTimeout), finish)
+        }
+        guard !old.isEmpty else { start(); return }
+        quit(id) { [weak self] _ in
+            guard let self else { return }
+            self.awaitExit(id, old: old, deadline: self.now().addingTimeInterval(Self.relaunchTimeout)) { exited in
+                if exited { start() } else { finish(.failure(.didNotQuit(id))) }
+            }
+        }
+    }
+
+    private func awaitExit(_ id: String, old: Set<pid_t>, deadline: Date, _ done: @escaping (Bool) -> Void) {
+        if old.isDisjoint(with: livePIDs(id)) { done(true); return }
+        guard now() < deadline else { done(false); return }
+        schedule(Self.relaunchPoll) { [weak self] in self?.awaitExit(id, old: old, deadline: deadline, done) }
+    }
+
+    private func awaitListening(_ id: String, old: Set<pid_t>, deadline: Date,
+                                _ done: @escaping (Result<(pid: pid_t?, health: Health), RelaunchError>) -> Void) {
+        let fresh = livePIDs(id).first { !old.contains($0) }
+        let health = records[id]?.health ?? .notRunning
+        if (fresh != nil && health == .running) || now() >= deadline || health == .notInstalled {
+            done(.success((fresh, health)))
+            return
+        }
+        schedule(Self.relaunchPoll) { [weak self] in self?.awaitListening(id, old: old, deadline: deadline, done) }
     }
 
     // MARK: - Commands
@@ -472,6 +659,13 @@ final class NSWorkspaceControl: WorkspaceControl {
     func runningPIDs(bundleID: String) -> [pid_t] {
         NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
             .filter { !$0.isTerminated }.map(\.processIdentifier)
+    }
+
+    func processes(bundleID: String) -> [AppProcess] {
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).filter { !$0.isTerminated }.map {
+            AppProcess(pid: $0.processIdentifier, launchDate: $0.launchDate, bundleURL: $0.bundleURL,
+                       executableURL: $0.executableURL)
+        }
     }
 
     func isInstalled(_ app: ExternalApp) -> Bool {

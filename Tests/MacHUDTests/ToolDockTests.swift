@@ -457,6 +457,27 @@ final class ToolDockControllerTests: XCTestCase {
         XCTAssertEqual(show?["from"], "bottom")
     }
 
+    func testAPanelThatMissedTheScreenIsReportedForClicksNotPassingHovers() throws {
+        var missed: [String] = []
+        externals.supervisor.windowProbe = { _ in .anotherDesktop }
+        externals.supervisor.onShowMissed = { app, _, _ in missed.append(app) }
+        let on = try centre(scratchID)
+        dock.step(mouse: on, now: 10)
+        dock.step(mouse: on, now: 10.06)
+        clock.runQueued()
+        XCTAssertTrue(missed.isEmpty, "a passing hover only records it")
+        XCTAssertEqual((registry.panel(id: "\(scratchID)/pad") as? ExternalPanel)?.json["elsewhere"] as? String, "another desktop")
+        dock.step(mouse: CGPoint(x: 1500, y: 900), now: 11)
+        dock.step(mouse: CGPoint(x: 1500, y: 900), now: 12)
+
+        dock.click(dock.items[1], anchor: nil)              // pins the hover panel
+        clock.runQueued()
+        XCTAssertEqual(missed, [scratchID])
+        dock.click(dock.items[2], anchor: nil)              // windowed: summoned by click
+        clock.runQueued()
+        XCTAssertEqual(missed, [scratchID, siftID])
+    }
+
     func testDraggingTheStripClosesHoverPanelsAndOpensNoneUntilItEnds() throws {
         let strip = HUDDockStripView()
         let scratch = try centre(scratchID)

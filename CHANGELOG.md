@@ -6,6 +6,21 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 
 ## [Unreleased]
 
+### MacHUD checks that a panel really appeared
+- When you click or summon a HUD app's panel and it opens on another desktop (or nowhere on
+  screen), MacHUD no longer takes the app's word that it is showing: it says where the panel
+  went and that relaunching the app fixes it, and the app's submenu notes it too. Passing hovers
+  over the tool dock stay quiet. `machud panels` reports `onScreen` and `elsewhere` for each
+  shown panel.
+
+### Relaunch apps after an update
+- MacHUD notices when a HUD app is still running an older build than the one on disk, or was
+  built for an older MacHUD. Its submenu says "Update ready, relaunch to apply" or "Built for an
+  older MacHUD", every running app's submenu has **Relaunch <App>**, and **Relaunch Outdated
+  Apps** appears next to Launch All Apps while any app is behind. Scripts get `outdated` and
+  `contract` in `machud apps`, plus `machud apps relaunch id=<app>` and
+  `machud apps relaunch-all [outdated=1]`.
+
 ### Launch and quit every app at once
 - The menu's Apps section starts with **Launch All Apps** and **Quit All Apps**, which start
   every HUD app that is not running or quit every one that is. Each app's own submenu still

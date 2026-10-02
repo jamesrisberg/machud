@@ -7,6 +7,10 @@ public struct DiscoveredApp: Equatable, Sendable {
     public var name: String
     public var health: String
     public var running: Bool
+    /// Why the running app is older than its bundle on disk (relaunch to update); nil when it is not.
+    public var outdated: String?
+    /// The app was built against an older HUDKit contract than MacHUD's.
+    public var olderContract: Bool
     public var panels: [HUDManifest.Panel]
 
     /// Panel verbs every app handles through `panel` (and MacHUD's `summon`/`dismiss`), not
@@ -14,11 +18,13 @@ public struct DiscoveredApp: Equatable, Sendable {
     public static let panelVerbs: Set<String> = ["show", "hide", "toggle", "frame", "mode"]
 
     public init(id: String, name: String, health: String = "notRunning", running: Bool = false,
-                panels: [HUDManifest.Panel] = []) {
+                outdated: String? = nil, olderContract: Bool = false, panels: [HUDManifest.Panel] = []) {
         self.id = id
         self.name = name
         self.health = health
         self.running = running
+        self.outdated = outdated
+        self.olderContract = olderContract
         self.panels = panels
     }
 
@@ -40,6 +46,8 @@ public struct DiscoveredApp: Equatable, Sendable {
         name = row["name"] as? String ?? id
         health = row["health"] as? String ?? "notRunning"
         running = row["running"] as? Bool ?? false
+        outdated = row["outdated"] as? Bool == true ? row["outdatedReason"] as? String ?? "outdated" : nil
+        olderContract = (row["contract"] as? [String: Any])?["older"] as? Bool ?? false
         if let manifest = row["manifest"],
            let data = try? JSONSerialization.data(withJSONObject: manifest),
            let decoded = try? HUDManifest.decode(data) {

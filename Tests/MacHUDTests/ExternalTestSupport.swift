@@ -13,10 +13,20 @@ final class FakeWorkspace: WorkspaceControl {
     var launchError: Error?
     var terminated: [String] = []
 
+    /// Launch dates and bundles per pid; a running pid without an entry has none.
+    var processInfo: [pid_t: AppProcess] = [:]
+
     func runningPIDs(bundleID: String) -> [pid_t] { running[bundleID] ?? [] }
+    func processes(bundleID: String) -> [AppProcess] {
+        (running[bundleID] ?? []).map { processInfo[$0] ?? AppProcess(pid: $0) }
+    }
     func isInstalled(_ app: ExternalApp) -> Bool { installed.contains(app.id) }
+    /// Called as each launch is asked for, before it completes.
+    var onLaunchCall: (() -> Void)?
+
     func launch(_ app: ExternalApp, completion: @escaping (Error?) -> Void) {
         launches.append(app.id)
+        onLaunchCall?()
         completion(launchError)
     }
     func terminate(bundleID: String) -> Bool {
