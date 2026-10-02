@@ -45,6 +45,11 @@ struct OrbScene: Equatable {
     /// The card's "Open in …" button title, when the brain's session can be shown elsewhere.
     var sessionLink: String?
     var muted = false
+    /// How much of the conversation the card shows.
+    var cardMode: VoiceCardMode = .peek
+
+    /// The pinned or expanded conversation is on screen in place of the card's peek.
+    var showsConversation: Bool { !hidden && cardMode != .peek }
 
     init(hidden: Bool, form: OrbForm, tint: OrbTint, motion: OrbMotion, accessibilityStatus: String,
          card: VoiceCard? = nil, errorMessage: String? = nil, sessionLink: String? = nil, muted: Bool = false) {
@@ -63,7 +68,8 @@ struct OrbScene: Equatable {
 /// Maps `VoiceHostState` to an `OrbScene`. The controller owns every piece of voice state; the
 /// tracker only keeps the display timing the state cannot carry: when a failure appeared (it
 /// shows for `failureDisplay`), when an agent turn ended (the card lingers for `cardLinger`),
-/// and whether the pointer is over the orb or card (hover peeks the last card).
+/// and whether the pointer is over the orb or card (hover peeks the last card). Those timings
+/// govern the peek; a pinned or expanded card stays until the controller changes its mode.
 struct OrbSceneTracker {
     static let failureDisplay: TimeInterval = 3
     static let cardLinger: TimeInterval = 8
@@ -116,7 +122,8 @@ struct OrbSceneTracker {
             scene.errorMessage = nil
             return scene
         }
-        scene.card = showsCard(phase: phase, now: now) ? state.card : nil
+        scene.cardMode = state.cardMode
+        scene.card = scene.showsConversation || showsCard(phase: phase, now: now) ? state.card : nil
         if scene.card != nil, state.sessionKey != nil { scene.sessionLink = Self.sessionLink(provider: state.sessionProvider) }
         return scene
     }

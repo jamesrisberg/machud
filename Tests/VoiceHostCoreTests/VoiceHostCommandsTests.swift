@@ -217,4 +217,46 @@ final class VoiceHostCommandsTests: XCTestCase {
         XCTAssertEqual(reply["error"] as? String, VoiceHostController.noSession)
         XCTAssertEqual(VoiceHostCommands.actionName(["name": "open-session"]), "open-session")
     }
+
+    // MARK: Conversation
+
+    func testSendIsATypedTurn() async {
+        let reply = commands.handle("send", ["text": "list my files"])
+        XCTAssertEqual(reply["ok"] as? Bool, true, "\(reply)")
+        await controller.pendingWork?.value
+        XCTAssertEqual(brain.submitted.map(\.text), ["list my files"])
+        XCTAssertEqual(commands.handle("send", [:])["ok"] as? Bool, false)
+        brain.push(status: "running", output: "Working")
+        let busy = commands.handle("send", ["text": "again"])
+        XCTAssertEqual(busy["ok"] as? Bool, false)
+        XCTAssertEqual(busy["error"] as? String, VoiceHostController.agentBusy)
+    }
+
+    func testConversationListsTheRows() async throws {
+        _ = commands.handle("send", ["text": "hello"])
+        await controller.pendingWork?.value
+        brain.push(status: "idle", output: "Hi")
+        let reply = commands.handle("conversation", [:])
+        XCTAssertEqual(reply["ok"] as? Bool, true)
+        XCTAssertEqual(reply["threadId"] as? String, "thread")
+        let rows = try XCTUnwrap(reply["rows"] as? [[String: Any]])
+        XCTAssertEqual(rows.map { $0["kind"] as? String }, ["user", "reply"])
+        XCTAssertEqual(rows.map { $0["text"] as? String }, ["hello", "Hi"])
+        XCTAssertEqual(rows.first?["source"] as? String, "typed")
+    }
+
+    func testCardSetsTheCardState() throws {
+        for (verb, mode) in [("pin", "pinned"), ("expand", "expanded"), ("peek", "peek")] {
+            let reply = commands.handle("card", ["action": verb])
+            XCTAssertEqual(reply["ok"] as? Bool, true, verb)
+            let state = try XCTUnwrap(reply["state"] as? [String: Any])
+            XCTAssertEqual(state["cardMode"] as? String, mode)
+        }
+        _ = commands.handle("card", ["_": "expand"])
+        XCTAssertEqual(controller.state.cardMode, .expanded)
+        _ = commands.handle("card", ["action": "close"])
+        XCTAssertEqual(controller.state.cardMode, .peek)
+        XCTAssertNil(controller.state.card)
+        XCTAssertEqual(commands.handle("card", ["action": "fold"])["ok"] as? Bool, false)
+    }
 }

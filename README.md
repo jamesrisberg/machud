@@ -26,7 +26,9 @@ apps that make up the rest of the HUD:
 - **Parking**: tuck windows off an edge behind a hover orb.
 - **Menu bar**: hide menu bar items behind a separator, Hidden Bar style.
 - **Voice**: MacHUD runs its voice host (dictation and the agent brain) as a helper process,
-  restarts it if it stops, and has Voice and Brain tabs in its settings.
+  restarts it if it stops, and has Voice and Brain tabs in its settings. The agent's reply card
+  under the notch orb shows the whole conversation while you hover it, and a click opens it
+  larger with a field for typing to the agent ([docs/API.md#voice](docs/API.md#voice)).
 - **CLI and API**: everything is scriptable through `machud <command>` (JSON over a
   Unix socket). See [docs/API.md](docs/API.md); a Claude Code skill lives in
   `.claude/skills/machud`.
@@ -417,6 +419,7 @@ MACHUD_SOCKET=/tmp/machud-try.sock scripts/machud quit
 | `MACHUD_VOICE_NO_SPEECH` | `1`: the voice host's replies and `say` make no sound |
 | `MACHUD_VOICE_MODELS_DIR` | Where the voice host keeps downloaded models (default `~/Library/Application Support/MacHUD/Voice/Models`) |
 | `MACHUD_VOICE_HISTORY_DIR` | MacHUD's own dictation history folder (default `~/Library/Application Support/MacHUD/Voice/History`) |
+| `MACHUD_VOICE_CONVERSATION_FILE` | Where the voice host keeps the conversation with the agent (default `~/Library/Application Support/MacHUD/Voice/conversation.json`) |
 | `SPEAKFREE_CONFIG_DIR` | SpeakFree's config folder the voice host reads (`saveRecordings`) and shares history into (default `~/.config/speakfree`) |
 | `MACHUD_VOICE_KEYCHAIN_SERVICE` | The Keychain service the voice host keeps the Grok key under |
 | `MACHUD_VOICE_LIVE` | `1`: an isolated copy runs its voice host with the microphone, brain, orb, sound and the real models folder |
@@ -425,7 +428,7 @@ MACHUD_SOCKET=/tmp/machud-try.sock scripts/machud quit
 The voice host inherits MacHUD's environment, so `MACHUD_CONFIG`, `MACHUD_NO_HOTKEYS` and the
 `MACHUD_VOICE_*` switches reach it. An isolated copy sets `MACHUD_VOICE_NO_MIC`, `NO_BRAIN`,
 `HEADLESS` and `NO_SPEECH` to `1` for it and models and history folders beside its voice socket (unless
-`MACHUD_VOICE_LIVE=1`), and a Keychain service of its own
+`MACHUD_VOICE_LIVE=1`), a conversation file beside its voice socket (always), and a Keychain service of its own
 (`com.jrisberg.machud.voice.isolated`, unless `MACHUD_VOICE_KEYCHAIN_SERVICE` is set).
 
 Setting `MACHUD_SOCKET` or `MACHUD_CONFIG` marks the instance isolated: it does not serve

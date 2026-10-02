@@ -451,6 +451,8 @@ struct VoiceTabView: View {
                             options: [("kokoro", "Kokoro (on this Mac)"), ("system", "System voice"), ("grok", "Grok")])
                 VoiceToggle(model: model, title: "Speak replies", path: "voice.speakReplies",
                             help: "Off shows replies as text only.")
+                VoiceToggle(model: model, title: "Speak replies to typed messages", path: "speakTypedReplies",
+                            help: "Messages typed in the conversation get spoken replies too.")
                 LabeledContent("Try it") {
                     Button("Test Voice") { model.testVoice() }
                 }

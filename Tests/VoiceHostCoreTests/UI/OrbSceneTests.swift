@@ -180,6 +180,43 @@ final class OrbSceneTests: XCTestCase {
         XCTAssertNil(tracker.nextDeadline(now: t0))
     }
 
+    // MARK: Pinned and expanded
+
+    func testAPinnedCardStaysOpenAfterTheLingerAndShowsTheConversation() {
+        var tracker = OrbSceneTracker()
+        tracker.ingest(VoiceHostState(phase: .speaking, card: card), now: t0)
+        tracker.ingest(VoiceHostState(phase: .idle, card: card, cardMode: .pinned), now: t0)
+        let later = tracker.scene(now: t0.addingTimeInterval(OrbSceneTracker.cardLinger * 3))
+        XCTAssertEqual(later.cardMode, .pinned)
+        XCTAssertEqual(later.card, card)
+        XCTAssertTrue(later.showsConversation)
+    }
+
+    func testThePeekIsTheCardAlone() {
+        let s = scene(VoiceHostState(phase: .working, card: card))
+        XCTAssertEqual(s.cardMode, .peek)
+        XCTAssertFalse(s.showsConversation)
+    }
+
+    func testTheExpandedConversationStaysOpenWhileATakeRecords() {
+        let s = scene(VoiceHostState(phase: .listening(.agent), card: card, cardMode: .expanded))
+        XCTAssertEqual(s.cardMode, .expanded)
+        XCTAssertTrue(s.showsConversation)
+        XCTAssertEqual(s.form, .orb)
+        XCTAssertEqual(s.motion, .pulse, "the orb still shows the take")
+    }
+
+    func testTheConversationOpensWithoutACardYet() {
+        XCTAssertTrue(scene(VoiceHostState(cardMode: .expanded)).showsConversation)
+        XCTAssertTrue(scene(VoiceHostState(cardMode: .pinned)).showsConversation)
+    }
+
+    func testFullScreenHidesTheConversationToo() {
+        let s = scene(VoiceHostState(hiddenForFullScreen: true, cardMode: .expanded))
+        XCTAssertTrue(s.hidden)
+        XCTAssertFalse(s.showsConversation)
+    }
+
     // MARK: Open session
 
     func testTheCardOffersTheSessionWhenThereIsOne() {
