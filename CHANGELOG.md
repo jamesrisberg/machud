@@ -7,6 +7,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 ## [Unreleased]
 
 ### Added
+- A **Multi-desktop loadouts** switch under Experimental in MacHUD's settings, off by default
+  (`machud settings set experimental.multiDesktopLoadouts=true` from a script). It takes effect at once.
 - **Save Diagnostics** in the MacHUD menu's Advanced submenu, and `machud diagnose` for scripts and agents (the MCP tool
   `machud_diagnose`): when something on the HUD vanishes (the voice orb, the tool dock, a widget), it saves
   a file with where every MacHUD window really is, according to macOS and to the app, next to the displays,

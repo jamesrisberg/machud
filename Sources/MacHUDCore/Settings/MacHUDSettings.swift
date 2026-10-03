@@ -38,6 +38,10 @@ final class MacHUDSettings {
               default: .int(Int(MenuBarConfig.defaultAutoCollapse)), group: "Menu Bar", help: "0 never collapses on its own."),
         .init(key: "menuBar.consumeSiblings", title: "Show MacHUD apps' menus here", type: .bool, default: .bool(true),
               group: "Menu Bar", help: "MacHUD's menu gets an Apps section and the apps hide their own menu bar icons while MacHUD runs."),
+        .init(key: ExperimentalLoadouts.settingKey, title: ExperimentalLoadouts.settingTitle, type: .bool,
+              default: .bool(false), group: "Experimental",
+              help: "Loadouts that span several desktops or displays: capturing every screen, walking desktops, and "
+                + "switching desktops to fetch a window. Off, a loadout is the screen in front of you. Still being worked on."),
     ])
 
     private let store: LayoutStore
@@ -79,7 +83,8 @@ final class MacHUDSettings {
          "toolDock.position": (config.toolDock ?? ToolDockConfig()).dockPosition.rawValue,
          "toolDock.autoHide": (config.toolDock ?? ToolDockConfig()).isAutoHide,
          "toolDock.iconSize": Int((config.toolDock ?? ToolDockConfig()).icon),
-         "toolDock.magnify": (config.toolDock ?? ToolDockConfig()).isMagnified]
+         "toolDock.magnify": (config.toolDock ?? ToolDockConfig()).isMagnified,
+         ExperimentalLoadouts.settingKey: config.multiDesktopLoadouts]
     }
 
     /// The config-file settings among `values` (enabled and orbs live elsewhere).
@@ -121,6 +126,10 @@ final class MacHUDSettings {
         }
         if case .bool(let on)? = values["toolDock.magnify"] { dock.magnify = on }
         if dock != (c.toolDock ?? ToolDockConfig()) { c.toolDock = dock }
+        if case .bool(let on)? = values[ExperimentalLoadouts.settingKey], on != c.multiDesktopLoadouts {
+            c.experimental = c.experimental ?? Experimental()
+            c.experimental?.multiDesktopLoadouts = on
+        }
         return c
     }
 }

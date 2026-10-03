@@ -93,6 +93,15 @@ Multi-screen loadouts carry `screens[]` instead of (or as well as) the single
 An assignment's `space` is the desktop the whole assignment belongs to (what a
 capture that walked the desktops writes); a slot's own `space` wins over it.
 
+## One screen, or several
+
+A loadout is one screen: the display under the pointer, on the desktop showing. Loadouts that
+span several displays or desktops (per-display `screens[]`, or a slot that names a desktop), and
+what exists only for them, are experimental: they work only while
+`experimental.multiDesktopLoadouts` is on (MacHUD's settings, Experimental, **Multi-desktop
+loadouts**, or `settings set experimental.multiDesktopLoadouts=true`). It is off by default and
+takes effect at once.
+
 ## Missing displays
 
 An assignment whose display is not attached is not lost. `whenScreenMissing`
@@ -240,7 +249,7 @@ MacHUD also serves the HUDKit contract every MacHUD-aware app implements (see HU
 | `hello` | | `hudkit` version, `app`, `name`, `panels[] {id, title, symbol, ...}`, `verbs` |
 | `state` | | `panels[] {id, visible, mode, badge?, status?}`, sibling panels included |
 | `subscribe` | `events=state` (optional) | keeps the connection open and pushes `{"event": "state", "panels": [...]}` lines whenever a panel changes: through the socket, a hotkey, the menu, its close button, or a sibling app's own push |
-| `settings` | `get [key=]` / `set k=v ...` / `schema` | MacHUD's own settings: `enabled` (bool), `trigger` (shift/option/control/command/always), `gap` (int), `browser` (bundle id, empty = default), `orbsHidden` (bool), `menuBar.enabled` (bool), `menuBar.autoCollapseSeconds` (int, 0 = never), `menuBar.consumeSiblings` (bool, default true). `set` validates every value first; `schema` returns the `HUDSettingsSchema` the settings window renders |
+| `settings` | `get [key=]` / `set k=v ...` / `schema` | MacHUD's own settings: `enabled` (bool), `trigger` (shift/option/control/command/always), `gap` (int), `browser` (bundle id, empty = default), `orbsHidden` (bool), `toolDock.enabled`, `toolDock.position`, `toolDock.autoHide`, `toolDock.iconSize` (int, 24 to 96), `toolDock.magnify`, `hotkeys.loadoutMenu` and `hotkeys.dock` (`control+option+space` form, empty = off), `menuBar.enabled` (bool), `menuBar.autoCollapseSeconds` (int, 0 = never), `menuBar.consumeSiblings` (bool, default true), `experimental.multiDesktopLoadouts` (bool, default false; see [One screen, or several](#one-screen-or-several)). `set` validates every value first; `schema` returns the `HUDSettingsSchema` the settings window renders |
 | `action` | `name=` | no app-specific actions yet |
 
 
@@ -1036,6 +1045,10 @@ are in [MCP.md](MCP.md).
   absent means the main display). An `edge` key is read as that edge's position (and `offset`
   ignored); neither is written.
   `startupLoadout`: the name of a loadout applied at launch (see HUD loadouts).
+  `experimental`: `{"multiDesktopLoadouts": false, "spacesPrivateAPI": false}`, every key optional (these are
+  the defaults). `multiDesktopLoadouts` turns on loadouts that span several desktops or displays (see
+  [One screen, or several](#one-screen-or-several)); `spacesPrivateAPI` lets such an apply try SkyLight's private
+  move-to-desktop call for a window on another desktop.
   `catalog`: `{"url": "https://jamesrisberg.github.io/machud/catalog.json", "installDir": null, "refreshHours": 6}`,
   every key optional (these are the defaults). `url` may be `file://` or a path; `installDir` replaces the
   /Applications-else-~/Applications choice and is also searched for apps (see App catalog).
