@@ -406,7 +406,7 @@ public struct VoiceApproval: Codable, Equatable, Sendable {
 public enum VoiceHostAction: Codable, Equatable, Sendable {
     /// The orb was clicked: start an agent take, or stop the current take, or dismiss.
     case orbClicked
-    /// Start a take directly (socket, radial menu).
+    /// Start a take directly (the socket's `ask` and `dictate`).
     case start(VoiceMode)
     /// Stop recording and send the take on.
     case stop

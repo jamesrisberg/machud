@@ -25,8 +25,8 @@ import HUDKit
 /// change, and the window is put back in step with that intent if it drifted.
 @MainActor
 public final class VoiceOrbPresenter: VoiceHostPresenting {
-    /// The screen the orb is on: the one with a notch, else the menu-bar screen. The
-    /// full-screen observer watches this screen.
+    /// The screen the orb is on (`VoiceOrbScreen`: the primary screen), the one the full-screen
+    /// check watches.
     public private(set) var screen: NSScreen?
 
     private weak var actions: VoiceHostActing?
