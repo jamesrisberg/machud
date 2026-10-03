@@ -283,7 +283,11 @@ extension AppDelegate {
                 done(["ok": false, "error": "no such loadout"]); return
             }
             let clear = ["1", "true", "yes"].contains((args["clear"] ?? "0").lowercased())
-            let screen = args["screen"].flatMap { ScreenRef.parse($0)?.resolve() }
+            let ref = args["screen"].flatMap { ScreenRef.parse($0) }
+            let screen = ref?.resolve()
+            if let ref, screen == nil {
+                done(["ok": false, "error": "no screen matching \(ref.label)"]); return
+            }
             if ["1", "true", "yes"].contains((args["plan"] ?? "0").lowercased()) {
                 done(self.engine.planJSON(loadout, screen: screen)); return
             }
