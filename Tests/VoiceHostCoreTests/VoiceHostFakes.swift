@@ -281,8 +281,16 @@ final class RecordingPresenter: VoiceHostPresenting {
     var conversations: [[ConversationRow]] = []
     /// What `orbWindowReport` returns.
     var orbWindow: VoiceOrbWindowReport?
-    func render(_ state: VoiceHostState) { states.append(state) }
+    /// The latest `renderFullScreenEvidence`.
+    var fullScreenEvidence: VoiceFullScreenEvidence?
+    /// `fullScreenEvidence` at each render.
+    var evidenceAtRender: [VoiceFullScreenEvidence?] = []
+    func render(_ state: VoiceHostState) {
+        states.append(state)
+        evidenceAtRender.append(fullScreenEvidence)
+    }
     func renderConversation(_ rows: [ConversationRow]) { conversations.append(rows) }
+    func renderFullScreenEvidence(_ evidence: VoiceFullScreenEvidence?) { fullScreenEvidence = evidence }
     func orbWindowReport() -> VoiceOrbWindowReport? { orbWindow }
 }
 

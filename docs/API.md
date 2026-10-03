@@ -928,6 +928,19 @@ the orb is anchored to; a headless voice host (`MACHUD_VOICE_HEADLESS=1`) has no
 `{x, y, w, h}` in points, AppKit screen coordinates (origin at the bottom left of the primary
 screen).
 
+The orb's window is kept in step with what the host intends. Once a desktop switch, a wake or a
+display change has settled (HUDKit's `HUDEnvironmentMonitor`: 0.35 s after the last notification
+of a burst), the voice host reads the orb's screen again after a wake or display change, then
+orders in at full opacity an orb meant to be shown whose window is ordered out, or is not opaque
+while no fade runs, and orders out one meant to be hidden whose window is still in once its fade
+is over. Keeping the window on the desktop being shown is HUDKit's (its presence keeper). The
+voice host logs each show and hide of the orb with its reason (for a full-screen app, the window
+above), each repair, and the screen and geometry the orb is anchored to at start and whenever they
+change, to the unified log at notice level with every value public: subsystem
+`com.jrisberg.machud.voice`, category `orb`
+(`log show --predicate 'subsystem == "com.jrisberg.machud.voice" AND category == "orb"'`). A check
+that finds the window as intended logs nothing.
+
 The host reads its environment: `MACHUD_VOICE_SOCKET` (its socket), `MACHUD_CONFIG` (the folder
 of that path holds `voice.json`), `MACHUD_VOICE_PARENT_PIPE=1` (exit when stdin reaches end of
 file), `MACHUD_NO_HOTKEYS` (no fn key tap), `MACHUD_VOICE_NO_MIC=1` (simulated capture, the

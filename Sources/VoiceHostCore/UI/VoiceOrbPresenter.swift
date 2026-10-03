@@ -18,6 +18,11 @@ import HUDKit
 /// return to `peek`. The expanded panel takes key status without activating the voice host
 /// (a non-activating panel made key), and the app that was in front gets the keyboard back
 /// when it collapses.
+///
+/// The orb is shown unless a full-screen app hides it (`hiddenForFullScreen`). `OrbPresence`
+/// shows and hides its window and logs each with its reason; once a Space change, wake or screen
+/// change has settled (`HUDEnvironmentMonitor`) the screen is read again after a wake or screen
+/// change, and the window is put back in step with that intent if it drifted.
 @MainActor
 public final class VoiceOrbPresenter: VoiceHostPresenting {
     /// The screen the orb is on: the one with a notch, else the menu-bar screen. The
@@ -54,7 +59,15 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
     /// Set while the expanded conversation collapses, when giving up key status is expected.
     private var collapsing = false
     private var cardGrow = CardGrow()
-    private var visible = false
+    /// Shows, hides and reconciles the orb's window.
+    private lazy var presence = OrbPresence(window: orbWindow, fade: { [weak self] alpha, done in
+        guard let self else { return }
+        self.fade(self.orbWindow, to: alpha, completion: done)
+    }, log: log)
+    /// The orb is meant to be on screen.
+    private var visible: Bool { presence.isShown }
+    /// Where the orb's lines go (`OrbLog`, the unified log).
+    private let log: (String) -> Void
 
     private var displayTimer: Timer?
     private var lastTick = Date()
@@ -62,9 +75,15 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
     private var orbHovered = false
     private var cardHovered = false
     private var observers: [NSObjectProtocol] = []
+    private var settled: HUDEnvironmentMonitor.Observation?
 
-    public init(actions: VoiceHostActing) {
+    public convenience init(actions: VoiceHostActing) {
+        self.init(actions: actions, log: OrbLog.notice)
+    }
+
+    init(actions: VoiceHostActing, log: @escaping (String) -> Void) {
         self.actions = actions
+        self.log = log
         let screen = Self.orbScreen()
         self.screen = screen
         geometry = screen.map(HUDNotchGeometry.init(screen:))
@@ -97,6 +116,7 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
 
         wireInput()
         observeEnvironment()
+        presence.anchor(screenID: screen.map(HUDScreenSnapshot.id(for:)), geometry: geometry, reason: "start")
     }
 
     public func render(_ state: VoiceHostState) {
@@ -115,6 +135,10 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
         refreshConversation(force: true)
     }
 
+    public func renderFullScreenEvidence(_ evidence: VoiceFullScreenEvidence?) {
+        presence.fullScreenEvidence = evidence
+    }
+
     // MARK: Scene
 
     private func apply(now: Date) {
@@ -122,29 +146,12 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
         orbView.scene = scene
         orbView.history = history
         orbView.reduceMotion = reduceMotion
-        applyVisibility()
+        presence.apply(hidden: scene.hidden)
         applyConversation(now: now)
         applyCard()
         layoutOrb()
         startDisplayTimerIfNeeded()
         scheduleDeadline(now: now)
-    }
-
-    private func applyVisibility() {
-        let show = !scene.hidden
-        guard show != visible else { return }
-        visible = show
-        orbWindow.ignoresMouseEvents = !show
-        if show {
-            orbWindow.alphaValue = 0
-            orbWindow.orderFrontRegardless()
-            fade(orbWindow, to: 1)
-        } else {
-            fade(orbWindow, to: 0) { [weak self] in
-                guard let self, !self.visible else { return }
-                self.orbWindow.orderOut(nil)
-            }
-        }
     }
 
     /// The card grows out of the orb and folds back into it, driven by `cardGrow` from the
@@ -356,7 +363,7 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
 
     private func fade(_ window: NSWindow, to alpha: CGFloat, completion: (() -> Void)? = nil) {
         NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.2
+            context.duration = OrbLayout.fadeDuration
             window.animator().alphaValue = alpha
         }, completionHandler: {
             MainActor.assumeIsolated { completion?() }
@@ -486,7 +493,7 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
     // MARK: Report
 
     public func orbWindowReport() -> VoiceOrbWindowReport? {
-        let screenID = screen.map(HUDScreenSnapshot.id(for:)).flatMap { Int($0) }
+        let screenID = presence.anchor?.screenID.flatMap { Int($0) }
         return VoiceOrbWindowReport(
             number: orbWindow.windowNumber, isVisible: orbWindow.isVisible, isOnActiveSpace: orbWindow.isOnActiveSpace,
             alpha: Double(orbWindow.alphaValue), frame: VoiceRect(orbWindow.frame), level: orbWindow.level.rawValue,
@@ -499,8 +506,9 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
     private func observeEnvironment() {
         let center = NotificationCenter.default
         observers.append(center.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.screensChanged() }
+            MainActor.assumeIsolated { self?.screensChanged(reason: "screen parameters changed") }
         })
+        settled = HUDEnvironmentMonitor.shared.observeSettled { [weak self] change in self?.environmentSettled(change) }
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -511,12 +519,23 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
         })
     }
 
-    private func screensChanged() {
+    /// Once the desktop has settled after a change: after a wake or a screen change the screen is
+    /// read again (`NSScreen` can still be stale at the raw notification), then the orb's window
+    /// is put back in step with what the presenter intends.
+    private func environmentSettled(_ change: HUDEnvironmentMonitor.Change) {
+        let reason = "settled after \(change)"
+        if OrbPresence.refreshesScreen(after: change) { screensChanged(reason: reason) }
+        presence.reconcile(after: reason)
+    }
+
+    /// Moves the orb to its screen's current geometry and re-anchors it there.
+    private func screensChanged(reason: String) {
         guard let screen = Self.orbScreen() else { return }
         self.screen = screen
         geometry = HUDNotchGeometry(screen: screen)
         orbView.geometry = geometry
-        orbWindow.setFrame(.zero, display: false)
+        presence.anchor(screenID: HUDScreenSnapshot.id(for: screen), geometry: geometry, reason: reason)
+        orbWindow.anchorUnderNotch(size: OrbLayout.windowSize(stretch: animator.stretch, geometry: geometry), geometry: geometry)
         apply(now: Date())
     }
 

@@ -165,6 +165,10 @@ enum OrbLayout {
         return CGRect(x: x, y: top - size.height, width: size.width, height: size.height)
     }
 
+    /// Seconds for the orb, a card under Reduce Motion, the conversation and the scrim to fade
+    /// in or out.
+    static let fadeDuration: Double = 0.2
+
     // MARK: Card grow
 
     /// Seconds for the card to grow out of the orb, and to fold back into it.

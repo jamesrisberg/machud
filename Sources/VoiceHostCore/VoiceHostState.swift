@@ -441,6 +441,9 @@ public protocol VoiceHostActing: AnyObject {
 public protocol VoiceHostPresenting: AnyObject {
     func render(_ state: VoiceHostState)
     func renderConversation(_ rows: [ConversationRow])
+    /// The window that made the orb's screen full screen, given before the state that hides the
+    /// orb is rendered; nil when the orb is not hidden.
+    func renderFullScreenEvidence(_ evidence: VoiceFullScreenEvidence?)
     /// The orb's window as AppKit has it now, for `state`'s `orb`; nil from a presenter that
     /// puts no orb on screen.
     func orbWindowReport() -> VoiceOrbWindowReport?
@@ -449,6 +452,7 @@ public protocol VoiceHostPresenting: AnyObject {
 extension VoiceHostPresenting {
     /// A presenter that shows no conversation ignores it.
     public func renderConversation(_ rows: [ConversationRow]) {}
+    public func renderFullScreenEvidence(_ evidence: VoiceFullScreenEvidence?) {}
     public func orbWindowReport() -> VoiceOrbWindowReport? { nil }
 }
 

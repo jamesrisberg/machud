@@ -355,9 +355,11 @@ public final class VoiceHostController: VoiceHostActing {
 
     /// A full-screen app hides the orb and the card: an expanded or pinned card folds back to
     /// the peek, so it neither comes back over the screen nor takes the keyboard later.
-    /// `evidence` is the window that made the orb's screen full screen; it is kept while hidden.
+    /// `evidence` is the window that made the orb's screen full screen; it is kept while hidden
+    /// and given to the presenter before the state that hides the orb.
     func setHiddenForFullScreen(_ hidden: Bool, evidence: VoiceFullScreenEvidence? = nil) {
         fullScreenEvidence = hidden ? evidence : nil
+        presenter?.renderFullScreenEvidence(fullScreenEvidence)
         var next = state
         next.hiddenForFullScreen = hidden
         if hidden { next.cardMode = .peek }

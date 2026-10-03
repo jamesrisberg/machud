@@ -1321,9 +1321,11 @@ final class VoiceHostControllerTests: XCTestCase {
         XCTAssertTrue(controller.state.hiddenForFullScreen)
         XCTAssertEqual(presenter.states.last?.hiddenForFullScreen, true)
         XCTAssertEqual(controller.fullScreenEvidence, safari)
+        XCTAssertEqual(presenter.evidenceAtRender.last, safari, "the presenter has it when it renders the hide")
         controller.setHiddenForFullScreen(false, evidence: safari)
         XCTAssertFalse(controller.state.hiddenForFullScreen)
         XCTAssertNil(controller.fullScreenEvidence, "kept only while the orb is hidden")
+        XCTAssertEqual(presenter.evidenceAtRender.last, .some(nil))
     }
 
     func testEveryChangeIsRendered() {
