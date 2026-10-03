@@ -34,13 +34,13 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
 
     let orbWindow: HUDPanelWindow
     private let orbView: OrbView
-    private let cardWindow: HUDPanelWindow
+    let cardWindow: HUDPanelWindow
     private let cardView = OrbCardView(frame: .zero)
     /// The card window is on screen (open, growing, or folding back into the orb).
     private var cardShown = false
-    private let conversationWindow: HUDPanelWindow
+    let conversationWindow: HUDPanelWindow
     private let conversationView = ConversationPanelView(frame: .zero)
-    private let scrimWindow: HUDPanelWindow
+    let scrimWindow: HUDPanelWindow
     private let scrimView = ConversationScrimView(frame: .zero)
     /// The conversation as the controller last rendered it.
     private var rows: [ConversationRow] = []
@@ -73,22 +73,23 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
         scene = tracker.scene(now: Date())
 
         let size = OrbLayout.windowSize(stretch: 0, geometry: geometry)
-        orbWindow = Self.makePanel(size: size)
+        orbWindow = Self.makePanel("voice-orb", size: size)
         orbWindow.hasShadow = false
         orbView = OrbView(frame: CGRect(origin: .zero, size: size), geometry: geometry)
         orbView.autoresizingMask = [.width, .height]
         orbWindow.contentView = orbView
         orbWindow.setAccessibilityLabel("Voice assistant")
 
-        cardWindow = Self.makePanel(size: CGSize(width: OrbLayout.cardWidth, height: 1))
+        cardWindow = Self.makePanel("voice-card", size: CGSize(width: OrbLayout.cardWidth, height: 1))
         cardWindow.contentView = cardView
         cardWindow.setAccessibilityLabel("Voice assistant reply")
 
-        conversationWindow = Self.makePanel(size: CGSize(width: OrbLayout.pinnedWidth, height: OrbLayout.pinnedMinHeight))
+        conversationWindow = Self.makePanel("voice-conversation",
+                                            size: CGSize(width: OrbLayout.pinnedWidth, height: OrbLayout.pinnedMinHeight))
         conversationView.autoresizingMask = [.width, .height]
         conversationWindow.contentView = conversationView
         conversationWindow.setAccessibilityLabel("Conversation with the agent")
-        scrimWindow = Self.makePanel(size: geometry.screenFrame.size)
+        scrimWindow = Self.makePanel("voice-scrim", size: geometry.screenFrame.size)
         scrimWindow.hasShadow = false
         scrimView.autoresizingMask = [.width, .height]
         scrimWindow.contentView = scrimView
@@ -523,9 +524,11 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
         VoiceOrbScreen.current()
     }
 
-    private static func makePanel(size: CGSize) -> HUDPanelWindow {
+    /// `identifier` names the window in HUDKit's presence log.
+    private static func makePanel(_ identifier: String, size: CGSize) -> HUDPanelWindow {
         let panel = HUDPanelWindow(contentRect: CGRect(origin: .zero, size: size), keyable: false,
                                    level: HUDPanelWindow.notchAnchorLevel)
+        panel.identifier = NSUserInterfaceItemIdentifier(identifier)
         // The orb and card stay put under the notch.
         panel.isMovableByWindowBackground = false
         panel.isMovable = false

@@ -16,6 +16,13 @@ final class VoiceOrbPresenterTests: XCTestCase {
                                                frame: VoiceRect(CGRect(x: 0, y: 0, width: 2560, height: 1440)), layer: 0))
     }
 
+    func testItsWindowsHaveIdentifiersForHUDKitsLog() {
+        let presenter = VoiceOrbPresenter(actions: actions)
+        let windows = [presenter.orbWindow, presenter.cardWindow, presenter.conversationWindow, presenter.scrimWindow]
+        XCTAssertEqual(windows.map { $0.identifier?.rawValue },
+                       ["voice-orb", "voice-card", "voice-conversation", "voice-scrim"])
+    }
+
     func testTheOrbsWindowIsReportedAsAppKitHasIt() throws {
         let presenter = VoiceOrbPresenter(actions: actions)
         let report = try XCTUnwrap(presenter.orbWindowReport())
