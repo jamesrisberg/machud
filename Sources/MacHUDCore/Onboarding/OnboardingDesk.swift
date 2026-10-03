@@ -40,6 +40,12 @@ struct OnboardingLoadoutSummary: Equatable {
     var aspect: Double
     var screen: String
 
+    /// The line under the captured regions, naming where to edit the loadout later.
+    var savedNote: String {
+        let edit = "Edit it any time from the menu bar: Loadouts › \(name) › Edit Layout…"
+        return screen.isEmpty ? "Saved. \(edit)" : "Captured on \(screen). \(edit)"
+    }
+
     var json: [String: Any] {
         ["name": name, "screen": screen, "regions": regions.map { r -> [String: Any] in
             ["label": r.label, "x": r.frame.x, "y": r.frame.y, "w": r.frame.w, "h": r.frame.h]

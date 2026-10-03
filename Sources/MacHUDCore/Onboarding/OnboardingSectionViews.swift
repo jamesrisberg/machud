@@ -357,8 +357,7 @@ struct LoadoutStep: View {
                                 Spacer()
                             }
                             RegionsMiniMap(summary: loadout).frame(height: 240)
-                            Text(loadout.screen.isEmpty ? "Saved. Edit it any time from the menu bar's Edit Layouts…"
-                                 : "Captured on \(loadout.screen). Edit it any time from the menu bar's Edit Layouts…")
+                            Text(loadout.savedNote)
                                 .font(.system(size: 11)).foregroundStyle(OnboardingStyle.secondary)
                         } else {
                             Text("Regions").font(.system(size: 14, weight: .semibold))

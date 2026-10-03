@@ -43,6 +43,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 ### Fixed
 - With multi-desktop loadouts on, the wheel says how many desktops a captured multi-desktop
   loadout covers (it said none).
+- After the first capture, onboarding points to the menu item that edits it (Loadouts › its name ›
+  Edit Layout…) instead of an "Edit Layouts…" item that does not exist.
 - The wake word no longer stays off after the microphone stops for it (an audio device change, a
   microphone that would not start): it tries again after 2 seconds, 10 seconds, then every minute,
   and the Voice settings say why it is not listening meanwhile.
