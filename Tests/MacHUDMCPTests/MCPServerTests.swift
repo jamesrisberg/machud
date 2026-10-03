@@ -137,7 +137,7 @@ final class MCPServerTests: XCTestCase {
             ["ok": true, "startup": "Desk", "loadouts": [
                 ["name": "Desk", "layout": "", "slots": [], "hud": ["dock": ["position": "bottom"]]],
                 ["name": "Work", "layout": "Thirds", "slots": [["regionID": "a"], ["regionID": "b"]], "hotkey": ["key": "1"]],
-            ]]
+            ], "heldBack": 1, "heldBackNote": "1 loadout spans several desktops or displays…"]
         }
         fake.replies["status"] = { _ in ["ok": true, "activeLoadout": "Work", "regions": []] }
         let list = call("list_loadouts")
@@ -149,6 +149,10 @@ final class MCPServerTests: XCTestCase {
         XCTAssertEqual(loadouts[1]["lastApplied"] as? Bool, true)
         XCTAssertEqual(loadouts[1]["windows"] as? Int, 2)
         XCTAssertEqual(loadouts[1]["layout"] as? String, "Thirds")
+        // The loadouts MacHUD holds back while multi-desktop loadouts are off are counted, not listed.
+        XCTAssertEqual((list["structuredContent"] as? [String: Any])?["heldBack"] as? Int, 1)
+        XCTAssertEqual((list["structuredContent"] as? [String: Any])?["heldBackNote"] as? String,
+                       "1 loadout spans several desktops or displays…")
 
         fake.replies["apply"] = { _ in ["ok": true, "placed": ["a"], "failed": [:]] }
         let applied = call("apply_loadout", ["name": "Work", "clear": true, "screen": "main"])
@@ -310,6 +314,34 @@ final class MCPServerTests: XCTestCase {
         XCTAssertEqual(text(result), "no loadout Nope")
     }
 
+    /// With multi-desktop loadouts off MacHUD refuses the every-screen capture; the tool passes
+    /// its words on unchanged.
+    func testEveryScreenCaptureRefusalIsPassedOn() {
+        let refusal = "Capturing every screen is experimental. Turn on Multi-desktop loadouts under Experimental in MacHUD's settings to use it."
+        fake.replies["capture"] = { args in args["screens"] == "all" ? ["ok": false, "error": refusal] : ["ok": true] }
+        let result = call("capture_loadout", ["name": "All", "all_screens": true])
+        XCTAssertEqual(result["isError"] as? Bool, true)
+        XCTAssertEqual(text(result), refusal)
+        XCTAssertEqual(call("capture_loadout", ["name": "Here"])["isError"] as? Bool, false)
+    }
+
+    /// An agent reads that a loadout is one screen, and that spanning ones are experimental.
+    func testLoadoutToolsSayALoadoutIsOneScreen() throws {
+        let list = try XCTUnwrap(request("tools/list")["result"] as? [String: Any])["tools"] as? [[String: Any]] ?? []
+        func description(_ name: String) -> String {
+            list.first { $0["name"] as? String == name }?["description"] as? String ?? ""
+        }
+        for name in ["apply_loadout", "capture_loadout"] {
+            let text = description(name)
+            XCTAssertTrue(text.contains("the display the pointer is on"), "\(name): \(text)")
+            XCTAssertTrue(text.contains("the desktop showing"), "\(name): \(text)")
+            XCTAssertTrue(text.contains("experimental Multi-desktop loadouts setting"), "\(name): \(text)")
+        }
+        XCTAssertTrue(description("apply_loadout").contains("never switches desktops"), description("apply_loadout"))
+        XCTAssertTrue(description("list_loadouts").contains("experimental Multi-desktop loadouts setting"),
+                      description("list_loadouts"))
+    }
+
     func testMacHUDNotRunningIsAToolError() {
         fake.stop()
         let result = call("list_loadouts")
@@ -323,7 +355,8 @@ final class MCPServerTests: XCTestCase {
         fake.replies["screens"] = { _ in ["ok": true, "screens": [["index": 0, "name": "Built-in", "main": true, "builtin": true,
                                                                     "w": 1512, "h": 982, "spaces": 3, "currentSpace": 1,
                                                                     "persistentID": "x"]]] }
-        fake.replies["loadouts"] = { _ in ["ok": true, "startup": "", "loadouts": [["name": "Work", "layout": "Halves", "slots": []]]] }
+        fake.replies["loadouts"] = { _ in ["ok": true, "startup": "", "loadouts": [["name": "Work", "layout": "Halves", "slots": []]],
+                                           "heldBack": 2, "heldBackNote": "2 loadouts span…"] }
         fake.replies["status"] = { _ in ["ok": true, "activeLoadout": "Work"] }
         fake.replies["tooldock"] = { _ in ["ok": true, "enabled": true, "position": "bottom", "visible": true, "buttons": []] }
         fake.replies["panels"] = { _ in ["ok": true, "panels": [["id": "xyz.machud.scratch/pad", "visible": true]]] }
@@ -339,6 +372,8 @@ final class MCPServerTests: XCTestCase {
         XCTAssertEqual((status["screens"] as? [[String: Any]])?.first?["spaces"] as? Int, 3)
         XCTAssertNil((status["screens"] as? [[String: Any]])?.first?["persistentID"])
         XCTAssertEqual((status["loadouts"] as? [[String: Any]])?.first?["lastApplied"] as? Bool, true)
+        XCTAssertEqual(status["loadoutsHeldBack"] as? Int, 2)
+        XCTAssertEqual(status["loadoutsHeldBackNote"] as? String, "2 loadouts span…")
         XCTAssertEqual((status["toolDock"] as? [String: Any])?["position"] as? String, "bottom")
         XCTAssertNil((status["toolDock"] as? [String: Any])?["buttons"])
         XCTAssertEqual((status["parked"] as? [[String: Any]])?.first?["label"] as? String, "Safari")

@@ -60,6 +60,10 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   with a single window (Messages, Signal, Slack…) is left where it is and the toast names it.
   Windows on another display are still moved over, and minimised ones restored. `spaces.policy`
   in layouts.json applies only with the setting on.
+- The MCP tools tell an agent that a loadout is one screen: `apply_loadout` arranges the display
+  the pointer is on without switching desktops, `capture_loadout` saves the screen the user is
+  looking at, and `list_loadouts` (and `machud_status`) count the loadouts held back as
+  experimental instead of listing them.
 
 ### Fixed
 - With multi-desktop loadouts on, the wheel says how many desktops a captured multi-desktop

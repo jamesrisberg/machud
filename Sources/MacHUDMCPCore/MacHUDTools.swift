@@ -102,26 +102,31 @@ public final class MacHUDTools: @unchecked Sendable {
                  properties: [:]),
             tool("list_loadouts",
                  "List saved loadouts (window arrangements plus HUD setup): name, layout, how many windows, "
-                 + "whether it holds a HUD part, its hotkey, and which is the startup and the last applied one.",
+                 + "whether it holds a HUD part, its hotkey, and which is the startup and the last applied one. "
+                 + "Loadouts that span several displays or desktops are only counted (heldBack) unless the "
+                 + "experimental Multi-desktop loadouts setting is on.",
                  properties: [:], readOnly: true),
             tool("apply_loadout",
-                 "Apply a saved loadout: launch or find each app and move its windows into place, then its HUD "
-                 + "part. Visible to the user. Use dry_run first for an unfamiliar loadout; the reply lists each "
-                 + "slot's result.",
+                 "Apply a saved loadout to one screen, the display the pointer is on (or `screen`) on the desktop "
+                 + "showing; it never switches desktops. Launches or finds each app and moves its windows into "
+                 + "place, then its HUD part. Visible to the user. Use dry_run first for an unfamiliar loadout; "
+                 + "the reply lists each slot's result. A loadout that spans several displays or desktops needs "
+                 + "the experimental Multi-desktop loadouts setting.",
                  properties: [
                      "name": ["type": "string", "description": "The loadout's name (list_loadouts)."],
                      "clear": ["type": "boolean", "description": "First minimise the other windows on the screens it covers. Default false."],
-                     "screen": ["type": "string", "description": "For a one-screen loadout: display name, main, builtin or index. Default: the display under the mouse."],
+                     "screen": ["type": "string", "description": "The display to arrange: display name, main, builtin or index. Default: the display under the pointer."],
                      "dry_run": ["type": "boolean", "description": "Only return the placement plan; nothing moves. Default false."],
                  ], required: ["name"], destructive: false),
             tool("capture_loadout",
-                 "Save the current arrangement as a loadout named `name` (replacing one of that name): the "
-                 + "windows on one display (default: under the mouse) or on all displays, and optionally the HUD "
-                 + "(tool dock position and running apps' panels).",
+                 "Save the screen the user is looking at as a loadout named `name` (replacing one of that name): "
+                 + "the windows on the display the pointer is on (or `screen`) as they are on the desktop showing, "
+                 + "and optionally the HUD (tool dock position and running apps' panels). all_screens needs the "
+                 + "experimental Multi-desktop loadouts setting.",
                  properties: [
                      "name": ["type": "string", "description": "The loadout's name."],
-                     "all_screens": ["type": "boolean", "description": "Capture every display into one loadout. Default false."],
-                     "screen": ["type": "string", "description": "The display to capture when not all_screens: display name, main, builtin or index."],
+                     "all_screens": ["type": "boolean", "description": "Capture every display into one loadout (experimental Multi-desktop loadouts only). Default false."],
+                     "screen": ["type": "string", "description": "The display to capture: display name, main, builtin or index. Default: the display under the pointer."],
                      "hud": ["type": "string", "enum": ["none", "include", "only"],
                              "description": "none: windows only (default); include: windows and the HUD; only: just the HUD."],
                  ], required: ["name"], destructive: true),
@@ -258,7 +263,7 @@ public final class MacHUDTools: @unchecked Sendable {
             switch name {
             case "machud_status": return try status()
             case "machud_diagnose": return try machud("diagnose", [:])
-            case "list_loadouts": return .ok(["loadouts": try loadouts()])
+            case "list_loadouts": return .ok(try loadouts())
             case "apply_loadout": return try applyLoadout(args)
             case "capture_loadout": return try captureLoadout(args)
             case "show_panel": return try panel(args, show: true)
@@ -323,11 +328,15 @@ public final class MacHUDTools: @unchecked Sendable {
         return .ok(reply)
     }
 
-    private func loadouts() throws -> [[String: Any]] {
+    /// `loadouts` (one entry per loadout MacHUD offers) and, when MacHUD holds some back while
+    /// multi-desktop loadouts are off, `heldBack` and `heldBackNote`.
+    private func loadouts() throws -> [String: Any] {
         let reply = try send("loadouts", [:])
         let startup = reply["startup"] as? String ?? ""
         let active = (try? send("status", [:]))?["activeLoadout"] as? String
-        return (reply["loadouts"] as? [[String: Any]] ?? []).map { loadout in
+        var out: [String: Any] = [:]
+        for key in ["heldBack", "heldBackNote"] { out[key] = reply[key] }
+        out["loadouts"] = (reply["loadouts"] as? [[String: Any]] ?? []).map { loadout in
             let name = loadout["name"] as? String ?? ""
             let slots = (loadout["slots"] as? [Any])?.count ?? 0
             let screens = loadout["screens"] as? [[String: Any]] ?? []
@@ -343,6 +352,7 @@ public final class MacHUDTools: @unchecked Sendable {
             if let hotkey = loadout["hotkey"], !(hotkey is NSNull) { d["hotkey"] = hotkey }
             return d
         }
+        return out
     }
 
     private func applyLoadout(_ args: Arguments) throws -> ToolResult {
@@ -560,7 +570,16 @@ public final class MacHUDTools: @unchecked Sendable {
                 s.filter { ["index", "name", "main", "builtin", "w", "h", "spaces", "currentSpace"].contains($0.key) }
             }
         }
-        part("loadouts") { try loadouts() }
+        var heldBack: [String: Any] = [:]
+        part("loadouts") {
+            let reply = try loadouts()
+            heldBack = reply.filter { $0.key != "loadouts" }
+            return reply["loadouts"] ?? []
+        }
+        if let count = heldBack["heldBack"] {
+            out["loadoutsHeldBack"] = count
+            out["loadoutsHeldBackNote"] = heldBack["heldBackNote"]
+        }
         part("widgets") {
             let reply = try send("widgets", ["action": "list"])
             let instances = reply["instances"] as? [[String: Any]] ?? []
