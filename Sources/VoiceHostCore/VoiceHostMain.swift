@@ -163,10 +163,15 @@ final class VoiceHost {
         terminationSource = source
     }
 
-    /// The orb sits on the primary (menu-bar) screen; see `VoiceOrbScreen`.
+    /// The orb sits on the primary (menu-bar) screen; see `VoiceOrbScreen`. The window that made
+    /// that screen full screen goes with the hide.
     private func updateFullScreen() {
-        let screen = VoiceOrbScreen.current()
-        controller.setHiddenForFullScreen(screen.map { fullscreen.isFullScreen(screenID: HUDScreenSnapshot.id(for: $0)) } ?? false)
+        let screenID = VoiceOrbScreen.current().map(HUDScreenSnapshot.id(for:))
+        let hidden = screenID.map { fullscreen.isFullScreen(screenID: $0) } ?? false
+        let window = hidden ? screenID.flatMap { fullscreen.evidence(screenID: $0) } : nil
+        controller.setHiddenForFullScreen(hidden, evidence: window.map {
+            VoiceFullScreenEvidence($0, app: NSRunningApplication(processIdentifier: $0.ownerPID)?.localizedName)
+        })
     }
 
     /// MacHUD holds our stdin open; end-of-file means it is gone, so the host goes too.
@@ -194,5 +199,12 @@ final class VoiceHost {
         let plist = executable.deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Info.plist")
         return NSDictionary(contentsOf: plist)?["CFBundleShortVersionString"] as? String ?? "dev"
+    }
+}
+
+extension VoiceFullScreenEvidence {
+    /// The full-screen observer's window, with its owner's app name.
+    init(_ window: HUDWindowSnapshot, app: String?) {
+        self.init(id: window.windowID, pid: window.ownerPID, app: app, frame: VoiceRect(window.bounds), layer: window.layer)
     }
 }

@@ -165,7 +165,7 @@ final class OrbView: NSView {
     private func drawSpin(_ ctx: CGContext, rect: CGRect, color: NSColor) {
         let radius = min(rect.width, rect.height) / 2 - 1.25
         let center = CGPoint(x: rect.midX, y: rect.midY)
-        let start = reduceMotion ? -CGFloat.pi / 2 : CGFloat(animator.phase * 4.2)
+        let start = Self.spinStartAngle(phase: animator.phase, reduceMotion: reduceMotion)
         ctx.saveGState()
         ctx.setLineCap(.round)
         ctx.setLineWidth(1.75)
@@ -173,6 +173,13 @@ final class OrbView: NSView {
         ctx.addArc(center: center, radius: radius, startAngle: start, endAngle: start + .pi * 0.55, clockwise: false)
         ctx.strokePath()
         ctx.restoreGState()
+    }
+
+    /// Where the working arc starts at `phase` seconds of motion: at the top under Reduce Motion,
+    /// else turning 4.2 radians a second, wrapped into one turn. CoreGraphics refuses an arc angle
+    /// as large as 1e4 radians, which `phase` reaches after 40 minutes of motion.
+    static func spinStartAngle(phase: Double, reduceMotion: Bool) -> CGFloat {
+        reduceMotion ? -CGFloat.pi / 2 : CGFloat((phase * 4.2).truncatingRemainder(dividingBy: 2 * .pi))
     }
 
     /// SpeakFree's recording group: record dot plus level bars, centered in the body.

@@ -119,6 +119,26 @@ final class OrbAnimatorTests: XCTestCase {
         XCTAssertLessThanOrEqual(animator.level, 1)
     }
 
+    func testANonFiniteLevelIsIgnored() {
+        var animator = OrbAnimator()
+        animator.advance(dt: 1.0 / 60, scene: scene(.orb, .pulse), level: 0.5, reduceMotion: false)
+        let before = animator.level
+        for bad in [Double.nan, .infinity, -.infinity] {
+            animator.advance(dt: 1.0 / 60, scene: scene(.orb, .pulse), level: bad, reduceMotion: false)
+            XCTAssertEqual(animator.level, before, "\(bad)")
+        }
+        animator.advance(dt: 1.0 / 60, scene: scene(.orb, .pulse), level: 1, reduceMotion: false)
+        XCTAssertGreaterThan(animator.level, before, "the next level moves it again")
+    }
+
+    func testLevelHistorySkipsANonFiniteLevel() {
+        var history = LevelHistory(capacity: 3)
+        history.append(0.5)
+        history.append(.nan)
+        history.append(.infinity)
+        XCTAssertEqual(history.values, [0, 0, 0.5])
+    }
+
     func testLevelHistoryScrollsNewestLast() {
         var history = LevelHistory(capacity: 4)
         XCTAssertEqual(history.values, [0, 0, 0, 0])

@@ -279,8 +279,19 @@ final class FakeTakeJournal: TakeJournaling {
 final class RecordingPresenter: VoiceHostPresenting {
     var states: [VoiceHostState] = []
     var conversations: [[ConversationRow]] = []
-    func render(_ state: VoiceHostState) { states.append(state) }
+    /// What `orbWindowReport` returns.
+    var orbWindow: VoiceOrbWindowReport?
+    /// The latest `renderFullScreenEvidence`.
+    var fullScreenEvidence: VoiceFullScreenEvidence?
+    /// `fullScreenEvidence` at each render.
+    var evidenceAtRender: [VoiceFullScreenEvidence?] = []
+    func render(_ state: VoiceHostState) {
+        states.append(state)
+        evidenceAtRender.append(fullScreenEvidence)
+    }
     func renderConversation(_ rows: [ConversationRow]) { conversations.append(rows) }
+    func renderFullScreenEvidence(_ evidence: VoiceFullScreenEvidence?) { fullScreenEvidence = evidence }
+    func orbWindowReport() -> VoiceOrbWindowReport? { orbWindow }
 }
 
 /// A manual clock and scheduler.

@@ -44,9 +44,57 @@ final class VoiceHostCommandsTests: XCTestCase {
 
     func testStateIsTheStateJSON() throws {
         let reply = commands.handle("state", [:])
+        XCTAssertTrue(JSONSerialization.isValidJSONObject(reply))
         let object = try XCTUnwrap(reply["state"])
         let data = try JSONSerialization.data(withJSONObject: object)
         XCTAssertEqual(try JSONDecoder().decode(VoiceHostState.self, from: data), controller.state)
+        // No presenter draws an orb here: only what the host intends for it.
+        XCTAssertEqual(reply["orb"] as? [String: String], ["intended": "shown"])
+    }
+
+    func testStateSaysWhichWindowHidTheOrb() throws {
+        let safari = VoiceFullScreenEvidence(id: 4321, pid: 567, app: "Safari",
+                                             frame: VoiceRect(CGRect(x: 0, y: 0, width: 2560, height: 1440)), layer: 0)
+        controller.setHiddenForFullScreen(true, evidence: safari)
+        let reply = commands.handle("state", [:])
+        XCTAssertTrue(JSONSerialization.isValidJSONObject(reply))
+        let orb = try XCTUnwrap(reply["orb"] as? [String: Any])
+        XCTAssertEqual(orb["intended"] as? String, "hiddenForFullScreen")
+        let hiddenBy = try XCTUnwrap(orb["hiddenBy"] as? [String: Any])
+        XCTAssertEqual(hiddenBy["id"] as? Int, 4321)
+        XCTAssertEqual(hiddenBy["pid"] as? Int, 567)
+        XCTAssertEqual(hiddenBy["app"] as? String, "Safari")
+        XCTAssertEqual(hiddenBy["layer"] as? Int, 0)
+        XCTAssertEqual(hiddenBy["frame"] as? [String: Double], ["x": 0, "y": 0, "w": 2560, "h": 1440])
+        XCTAssertNil(orb["window"], "no orb is drawn here")
+        XCTAssertNil((reply["state"] as? [String: Any])?["orb"], "not part of the published state")
+
+        controller.setHiddenForFullScreen(false)
+        XCTAssertEqual(commands.handle("state", [:])["orb"] as? [String: String], ["intended": "shown"],
+                       "the evidence goes once the orb shows again")
+    }
+
+    func testStateReportsTheOrbsWindow() throws {
+        let presenter = RecordingPresenter()
+        presenter.orbWindow = VoiceOrbWindowReport(
+            number: 812, isVisible: true, isOnActiveSpace: false, alpha: 0.5,
+            frame: VoiceRect(CGRect(x: 1265, y: 1384, width: 29, height: 31)), level: 25,
+            screen: VoiceOrbWindowReport.Screen(id: 1, frame: VoiceRect(CGRect(x: 0, y: 0, width: 2560, height: 1440)),
+                                                hasNotch: false))
+        controller.presenter = presenter
+        let reply = commands.handle("state", [:])
+        XCTAssertTrue(JSONSerialization.isValidJSONObject(reply))
+        let window = try XCTUnwrap((reply["orb"] as? [String: Any])?["window"] as? [String: Any])
+        XCTAssertEqual(window["number"] as? Int, 812)
+        XCTAssertEqual(window["isVisible"] as? Bool, true)
+        XCTAssertEqual(window["isOnActiveSpace"] as? Bool, false)
+        XCTAssertEqual(window["alpha"] as? Double, 0.5)
+        XCTAssertEqual(window["level"] as? Int, 25)
+        XCTAssertEqual(window["frame"] as? [String: Double], ["x": 1265, "y": 1384, "w": 29, "h": 31])
+        let screen = try XCTUnwrap(window["screen"] as? [String: Any])
+        XCTAssertEqual(screen["id"] as? Int, 1)
+        XCTAssertEqual(screen["frame"] as? [String: Double], ["x": 0, "y": 0, "w": 2560, "h": 1440])
+        XCTAssertEqual(screen["hasNotch"] as? Bool, false)
     }
 
     func testSettingsSetSavesAppliesAndReturnsTheStoredValue() throws {
@@ -96,6 +144,27 @@ final class VoiceHostCommandsTests: XCTestCase {
         XCTAssertEqual(end["reason"] as? String, "stop")
         XCTAssertNotNil(end["seconds"])
         XCTAssertEqual(end["trigger"] as? [String: String], ["source": "socket", "action": "ask"])
+    }
+
+    func testANonFiniteLevelIsIgnored() throws {
+        _ = commands.handle("action", ["name": "ask"])
+        // First in the take: fed to the endpointer, it would make its floor and threshold
+        // non-finite, and lastTakeEnd with them.
+        dictation.level(.nan)
+        dictation.level(.infinity)
+        XCTAssertEqual(controller.state.inputLevel, 0, "the previous level stands")
+        dictation.level(0.3)
+        dictation.level(-.infinity)
+        dictation.level(.nan)
+        XCTAssertEqual(controller.state.inputLevel, 0.3)
+        XCTAssertNotNil(commands.handle("state", [:])["state"] as? [String: Any], "the state still encodes")
+
+        _ = commands.handle("action", ["name": "stop"])
+        let end = try XCTUnwrap(controller.state.lastTakeEnd)
+        XCTAssertEqual(end.floor.map(\.isFinite), true)
+        XCTAssertEqual(end.threshold.map(\.isFinite), true)
+        let state = try XCTUnwrap(commands.handle("state", [:])["state"] as? [String: Any], "the state still encodes")
+        XCTAssertNotNil(state["lastTakeEnd"] as? [String: Any])
     }
 
     func testTheSocketsClickIsNotTheOrbs() {

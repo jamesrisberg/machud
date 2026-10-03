@@ -23,11 +23,26 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - The voice host's account of each take and of the wake word's listening is in the system log
   (`log show --predicate 'subsystem == "com.jrisberg.machud.voice"'`), readable rather than
   redacted.
+- `machud voice state` says whether the voice orb is meant to be showing and, while a full-screen
+  app hides it, which app and window did; it also gives the orb window's place, transparency and
+  whether it is on the current desktop. Save Diagnostics records this too.
+- The voice orb notes in the system log each time it shows or hides and why (for a full-screen
+  app, which app and window), each repair, and each change of the screen it sits on
+  (`log show --predicate 'subsystem == "com.jrisberg.machud.voice" AND category == "orb"'`).
 
 ### Fixed
 - The wake word no longer stays off after the microphone stops for it (an audio device change, a
   microphone that would not start): it tries again after 2 seconds, 10 seconds, then every minute,
   and the Voice settings say why it is not listening meanwhile.
+- The voice orb puts itself back within about half a second of the next desktop switch, wake or
+  display change if its window was left away or transparent while it should show, or still up
+  while a full-screen app should hide it; it also finds its place again once a wake or display
+  change has settled.
+- The voice orb's working arc keeps turning however long MacHUD has been running; after about 40
+  minutes of animation it was no longer drawn.
+- A glitched microphone level reading can no longer freeze the voice orb's listening pulse.
+- A glitched microphone level reading no longer makes `machud voice state` answer with an empty
+  state, or throws off when a hands-free take ends: the reading is ignored.
 
 ## [0.3.1] - 2026-10-02
 
