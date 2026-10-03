@@ -397,13 +397,13 @@ extension AppDelegate {
     }
 
     /// `diagnose`: the read-only snapshot of where the family's windows really are, as a socket verb
-    /// and as the status menu's Save Diagnostics item. After the tool dock, the widgets and the
-    /// voice host, whose replies it embeds.
+    /// and as Save Diagnostics in the status menu's Advanced submenu. After the tool dock, the
+    /// widgets and the voice host, whose replies it embeds.
     fileprivate func installDiagnostics() {
         let service = DiagnoseLive.service(externals: externals, toolDock: toolDock, widgets: widgets, voice: voice)
         service.registerControl(control)
         diagnostics = DiagnoseMenu(service: service)
-        statusMenu.maintenanceSection = { [weak diagnostics] in diagnostics.map { [$0.menuItem()] } ?? [] }
+        statusMenu.advancedSection = { [weak diagnostics] in diagnostics.map { [$0.menuItem()] } ?? [] }
     }
 
     /// First-run onboarding: the full-screen overlay at launch until it is finished or skipped,

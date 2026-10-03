@@ -874,7 +874,7 @@ control socket, for `open-session` and `feed add`).
 
 ## Diagnostics
 
-`diagnose` (also the status menu's **Save Diagnostics**, and the MCP tool `machud_diagnose`) writes one
+`diagnose` (also the status menu's **Advanced › Save Diagnostics**, and the MCP tool `machud_diagnose`) writes one
 JSON file that holds what the window server and AppKit know about the family's windows, for the day
 something on the HUD (the voice orb, the tool dock, a widget) vanishes or sits on the wrong desktop.
 Run it before relaunching anything: a relaunch clears the state it records. It reads only: no window
@@ -894,7 +894,7 @@ Top-level keys:
 | `machud` | `version`, `build`, `pid`, `launchedAt`, `isolated` |
 | `displays[]` | `name`, `id`, `persistentID`, `primary`, `frame`, `visibleFrame`, `spaces {identifier, all[], current, currentIndex, currentIsFullScreen}`: the display's desktops by `ManagedSpaceID` in Mission Control order (the list is `com.apple.spaces` as the Dock last wrote it, the current one is read live) |
 | `frontmostApp` | `name`, `pid` |
-| `processes[]` | MacHUD, then the voice host (`MacHUDVoice`), then every running sibling app: `role`, `name`, `pid`, `bundleID`, and `windows[]` for each window the window server lists for that pid (`CGWindowListCopyWindowInfo` with every window, ordered-out ones and every desktop included): `id`, `level`, `alpha`, `onScreen`, `frame`, `spaces[]` (null when the window server cannot say), `display`. MacHUD's own windows also carry `appKit {identifier or title, class, isVisible, isOnActiveSpace, alpha, level, collectionBehavior, collectionBehaviorNames[], frame}`, and `appKitWindowsNotListedByTheServer[]` holds AppKit windows the server does not list |
+| `processes[]` | MacHUD, then the voice host (`MacHUDVoice`), then every running sibling app (the apps MacHUD discovered and any other running application whose bundle identifier starts with `xyz.machud.`): `role`, `name`, `pid`, `bundleID`, and `windows[]` for each window the window server lists for that pid (`CGWindowListCopyWindowInfo` with every window, ordered-out ones and every desktop included): `id`, `level`, `alpha`, `onScreen`, `frame`, `spaces[]` (null when the window server cannot say), `display`. MacHUD's own windows also carry `appKit {identifier or title, class, isVisible, isOnActiveSpace, alpha, level, collectionBehavior, collectionBehaviorNames[], frame}`, and `appKitWindowsNotListedByTheServer[]` holds AppKit windows the server does not list |
 | `fullFrameWindows[]` | on-screen layer-0 windows of any app whose frame equals a display's full frame (the test the voice orb's full-screen check applies): `app`, `pid`, `id`, `alpha`, `frame`, `display`, `ownedByFrontmost` |
 | `replies` | the replies of `tooldock`, `widgets list`, `voice status` and `voice state` as `tooldock`, `widgets`, `voiceStatus` and `voiceState` (null for one that could not be gathered). `voice state` has its `card` and `partialTranscript` removed (they hold dictated and spoken text), named in `redacted` |
 | `anomalies[]` | the same sentences the reply carries |
@@ -902,15 +902,24 @@ Top-level keys:
 Frames are Cocoa screen points like the other verbs'. Window titles of other apps are never read, and MacHUD's
 own are named only when a window has no identifier.
 
-`anomalies[]` names: a MacHUD window AppKit calls visible that the window server does not list as on screen
-(or at all) while AppKit places it on the active desktop or it joins all desktops; a family window on some
-desktops of its display but not the one showing, when it is on two or more of them or is above layer 0
-(not evaluated while the display shows a full-screen app's desktop); a voice host that reports the orb hidden
-for a full-screen app, naming the window that fills the screen or saying none does; a voice host that is not
-connected (not when voice is off or not part of the build); and a connected voice host none of whose windows is
-on screen.
+`anomalies[]` names:
+- a MacHUD window AppKit calls visible that the window server does not list as on screen (or at all) while
+  AppKit places it on the active desktop or it joins all desktops. The window server's list lags AppKit until
+  the run loop turns, so a mismatch is read again about 0.3 s later and reported only if it still holds (the
+  reply takes that long only then);
+- a family window on some desktops of its display but not the one showing: when it is on two or more of them
+  (an all-desktops window missing the showing one), or, above layer 0 and on a single desktop, when it is
+  meant to be seen: a MacHUD window AppKit calls visible, a hover panel its app reports shown and not parked
+  (the app's panel state MacHUD holds), or a desktop-level window of an app with a widget placed. A dormant
+  panel, ordered out and merely remembering the desktop it was last shown on, is not an anomaly. Not
+  evaluated while the display shows a full-screen app's desktop;
+- a voice host that reports the orb hidden for a full-screen app, naming the window that fills the screen or
+  saying none does;
+- a voice host that is not connected (not when voice is off or not part of the build);
+- a connected voice host with windows, none of them on screen (not while the orb is hidden for a full-screen
+  app, which the item above reports; a muted voice host still shows its orb).
 
-The status menu's **Save Diagnostics** item (above Advanced) runs the same code, then shows a toast
+The status menu's **Advanced › Save Diagnostics** item (below Reload Config) runs the same code, then shows a toast
 (`Diagnostics saved. Nothing looks wrong.` or `Diagnostics saved. 2 things look wrong.`; `Could not save
 diagnostics` with the reason on a failure) and selects the file in Finder. The verb never reveals the file.
 

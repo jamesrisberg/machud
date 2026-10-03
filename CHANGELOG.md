@@ -7,7 +7,7 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 ## [Unreleased]
 
 ### Added
-- **Save Diagnostics** in the MacHUD menu, and `machud diagnose` for scripts and agents (the MCP tool
+- **Save Diagnostics** in the MacHUD menu's Advanced submenu, and `machud diagnose` for scripts and agents (the MCP tool
   `machud_diagnose`): when something on the HUD vanishes (the voice orb, the tool dock, a widget), it saves
   a file with where every MacHUD window really is, according to macOS and to the app, next to the displays,
   desktops, any full-screen window and the dock's, widgets' and voice host's state (never what you dictated or

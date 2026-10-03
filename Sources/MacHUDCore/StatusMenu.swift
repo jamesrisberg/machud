@@ -4,7 +4,7 @@ import ServiceManagement
 
 /// The menu bar menu. Top to bottom: MacHUD itself (snapping, login item, permissions,
 /// settings), the menu bar manager and MacHUD's own panels, Loadouts, the apps with the tool
-/// dock they live on, Save Diagnostics, Advanced, Quit.
+/// dock they live on, Advanced, Quit.
 final class StatusMenu: NSObject, NSMenuDelegate {
     private let store: LayoutStore
     private let item: NSStatusItem
@@ -23,8 +23,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     var toolDockSection: (() -> [NSMenuItem])?
     /// The Widgets submenu, after Tool Dock.
     var widgetsSection: (() -> [NSMenuItem])?
-    /// Maintenance items (Save Diagnostics), right above Advanced.
-    var maintenanceSection: (() -> [NSMenuItem])?
+    /// Extra items at the end of the Advanced submenu (Save Diagnostics).
+    var advancedSection: (() -> [NSMenuItem])?
 
     init(store: LayoutStore) {
         self.store = store
@@ -102,28 +102,33 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             menu.addItem(.separator())
         }
 
+        menu.addItem(advancedItem())
+        menu.addItem(.separator())
+
         let quit = NSMenuItem(title: "Quit MacHUD", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        for item in Self.tail(maintenance: maintenanceSection?() ?? [], advanced: advancedItem(), quit: quit) { menu.addItem(item) }
+        menu.addItem(quit)
     }
 
-    /// The bottom of the menu, top to bottom: the maintenance items, Advanced, a separator, Quit.
-    static func tail(maintenance: [NSMenuItem], advanced: NSMenuItem, quit: NSMenuItem) -> [NSMenuItem] {
-        maintenance + [advanced, .separator(), quit]
-    }
-
-    /// The config file itself.
+    /// The config file itself, and the extra items other parts of the app add (Save Diagnostics).
     private func advancedItem() -> NSMenuItem {
         let item = NSMenuItem(title: "Advanced", action: nil, keyEquivalent: "")
         let sub = NSMenu()
+        var base: [NSMenuItem] = []
         for (title, selector, key) in [("Edit layouts.json…", #selector(editLayouts), ""),
                                        ("Reveal layouts.json in Finder", #selector(revealLayouts), ""),
                                        ("Reload Config", #selector(reload), "r")] {
             let mi = NSMenuItem(title: title, action: selector, keyEquivalent: key)
             mi.target = self
-            sub.addItem(mi)
+            base.append(mi)
         }
+        for entry in Self.advancedEntries(base: base, extras: advancedSection?() ?? []) { sub.addItem(entry) }
         item.submenu = sub
         return item
+    }
+
+    /// The Advanced submenu top to bottom: the config items, then (after a separator) the extras.
+    static func advancedEntries(base: [NSMenuItem], extras: [NSMenuItem]) -> [NSMenuItem] {
+        extras.isEmpty ? base : base + [.separator()] + extras
     }
 
     @objc private func toggleEnabled() { store.enabled.toggle() }

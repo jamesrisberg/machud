@@ -88,6 +88,8 @@ enum DiagnoseSnapshot {
         var name: String
         var bundleID: String?
         var pid: Int32
+        /// The app's own reported panel state says one of its hover panels is shown (not parked).
+        var showsHoverPanel = false
     }
 
     struct App: Equatable {
@@ -122,6 +124,9 @@ enum DiagnoseSnapshot {
     struct Result {
         var document: [String: Any]
         var anomalies: [String]
+        /// An AppKit-versus-server anomaly was found. The window server's list lags AppKit until the
+        /// run loop turns, so the caller takes a second reading before reporting it.
+        var appKitMismatch = false
     }
 
     /// Keys of `voice state` that hold what the user dictated or the agent answered. They are
@@ -144,9 +149,10 @@ enum DiagnoseSnapshot {
         let fullFrame = fullFrameWindows(listed, displays: displays, frontmost: front)
         let appKit = p.appKitWindows()
         let ownListed = Dictionary(listed.filter { $0.pid == machud.pid }.map { ($0.id, $0) }) { a, _ in a }
-        let anomalies = findAnomalies(rows: rows, appKit: appKit, ownListed: ownListed,
-                                      ownName: processes.first { $0.role == .machud }?.name ?? "MacHUD",
-                                      fullFrame: fullFrame, frontmost: front, processes: processes, replies: p.replies)
+        let found = findAnomalies(rows: rows, appKit: appKit, ownListed: ownListed,
+                                  ownName: processes.first { $0.role == .machud }?.name ?? "MacHUD",
+                                  fullFrame: fullFrame, frontmost: front, processes: processes, replies: p.replies)
+        let anomalies = found.anomalies
 
         let appKitByNumber = Dictionary(appKit.map { ($0.number, $0) }) { a, _ in a }
         let document: [String: Any] = [
@@ -163,7 +169,7 @@ enum DiagnoseSnapshot {
             "replies": repliesJSON(p.replies),
             "anomalies": anomalies,
         ]
-        return Result(document: document, anomalies: anomalies)
+        return Result(document: document, anomalies: anomalies, appKitMismatch: found.appKitMismatch)
     }
 
     /// The machud process first, then the voice host, then the siblings by name.
@@ -220,9 +226,10 @@ enum DiagnoseSnapshot {
     // MARK: - Anomalies
 
     private static func findAnomalies(rows: [Row], appKit: [AppKitWindow], ownListed: [Int: ServerWindow], ownName: String,
-                                  fullFrame: [FullFrame], frontmost: App?, processes: [FamilyProcess],
-                                  replies: [String: [String: Any]]) -> [String] {
+                                      fullFrame: [FullFrame], frontmost: App?, processes: [FamilyProcess],
+                                      replies: [String: [String: Any]]) -> (anomalies: [String], appKitMismatch: Bool) {
         var out: [String] = []
+        var appKitMismatch = false
 
         // AppKit has the window ordered in and visible, so a user on the window's desktop should
         // see it; the window server disagrees. A window that is simply on another desktop is not
@@ -235,24 +242,29 @@ enum DiagnoseSnapshot {
             let named = "\(ownName) window #\(window.number) (\(window.label))"
             guard let server = ownListed[window.number] else {
                 out.append("\(named) is visible to AppKit but the window server does not list it at all")
+                appKitMismatch = true
                 continue
             }
             if !server.isOnScreen, window.isOnActiveSpace || window.joinsAllSpaces {
                 out.append("\(named) is visible to AppKit but the window server does not list it as on screen")
+                appKitMismatch = true
             }
         }
 
-        // On some desktops of its display but not the one showing: the window server dropped part
-        // of an all-desktops window's membership. A layer-0 window on one other desktop is an
-        // ordinary window, and a full-screen app's desktop is skipped because windows without
+        // On some desktops of its display but not the one showing. Two or more desktops is the
+        // signature of an all-desktops window the window server dropped from the showing one. On a
+        // single desktop it counts only for a window meant to be seen: a dormant panel is ordered out
+        // and merely remembers the desktop it was last shown on. A layer-0 window on one other desktop
+        // is an ordinary window, and a full-screen app's desktop is skipped because windows without
         // `.fullScreenAuxiliary` (the widgets) are not on it.
+        let widgetApps = Set((replies["widgets"]?["instances"] as? [[String: Any]] ?? []).compactMap { $0["app"] as? String })
         for row in rows {
             let window = row.window
             guard window.alpha > 0, !window.frame.isEmpty, let spaces = row.spaces, let display = row.display,
                   let current = display.currentSpaceID, let currentIndex = display.currentIndex,
                   !display.currentIsFullScreen, !spaces.contains(current) else { continue }
             let here = display.spaceIDs.enumerated().filter { spaces.contains($0.element) }.map { $0.offset + 1 }
-            guard !here.isEmpty, here.count >= 2 || window.level != 0 else { continue }
+            guard !here.isEmpty, here.count >= 2 || (window.level != 0 && meantToBeSeen(row, appKit: appKit, widgetApps: widgetApps)) else { continue }
             let appKitLabel = appKit.first { $0.number == window.id && row.process.role == .machud }?.label
             let detail = ([appKitLabel] + ["level \(window.level)"]).compactMap { $0 }.joined(separator: ", ")
             let list = (here.count == 1 ? "desktop " : "desktops ") + here.map(String.init).joined(separator: ", ")
@@ -266,7 +278,23 @@ enum DiagnoseSnapshot {
         if hidden { out.append(hiddenForFullScreen(fullFrame: fullFrame, frontmost: frontmost)) }
 
         out.append(contentsOf: voiceHostAnomalies(rows: rows, processes: processes, replies: replies, hidden: hidden))
-        return out
+        return (out, appKitMismatch)
+    }
+
+    /// Whether the user should be seeing this single-desktop window now: MacHUD's own window AppKit
+    /// calls visible; a sibling's hover panel its app reports shown (the app's state is per panel, so
+    /// this is per app); a desktop-level window of an app with a widget placed. The voice host's
+    /// windows are covered by the voice host rules.
+    private static func meantToBeSeen(_ row: Row, appKit: [AppKitWindow], widgetApps: Set<String>) -> Bool {
+        switch row.process.role {
+        case .machud:
+            return appKit.contains { $0.number == row.window.id && $0.isVisible && $0.alpha > 0 }
+        case .voiceHost:
+            return false
+        case .sibling:
+            return row.process.showsHoverPanel
+                || (row.window.level < 0 && row.process.bundleID.map(widgetApps.contains) == true)
+        }
     }
 
     private static func hiddenForFullScreen(fullFrame: [FullFrame], frontmost: App?) -> String {

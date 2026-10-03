@@ -12,16 +12,23 @@ final class DiagnoseService {
     private let sources: [String: Source]
     private let providers: ([String: [String: Any]]) -> DiagnoseSnapshot.Providers
     private let store: DiagnoseStore
+    private let settle: TimeInterval
+    private let schedule: (TimeInterval, @escaping @MainActor () -> Void) -> Void
 
     /// - Parameters:
     ///   - sources: the replies to embed, by the key the snapshot files them under (`tooldock`,
     ///     `widgets`, `voiceStatus`, `voiceState`).
     ///   - providers: everything else the snapshot reads, given the gathered replies.
     init(sources: [String: Source], providers: @escaping ([String: [String: Any]]) -> DiagnoseSnapshot.Providers,
-         store: DiagnoseStore) {
+         store: DiagnoseStore, settle: TimeInterval = 0.3,
+         schedule: @escaping (TimeInterval, @escaping @MainActor () -> Void) -> Void = { delay, work in
+             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated { work() } }
+         }) {
         self.sources = sources
         self.providers = providers
         self.store = store
+        self.settle = settle
+        self.schedule = schedule
     }
 
     /// `diagnose`: `{"ok": true, "path": ..., "anomalies": [...]}`.
@@ -33,18 +40,27 @@ final class DiagnoseService {
     }
 
     /// Gathers the replies, then reads the windows (so the snapshot is as recent as the slowest
-    /// reply), writes the file and answers. A failed write still reports the anomalies.
+    /// reply), writes the file and answers. The window server's list lags AppKit until the run loop
+    /// turns, so an AppKit-versus-server mismatch is reported only if it still holds `settle` seconds
+    /// later; the reply waits that long only when a mismatch was seen. A failed write still reports
+    /// the anomalies.
     func run(done: @escaping ([String: Any]) -> Void) {
         gather { [self] replies in
             let providers = providers(replies)
-            let result = DiagnoseSnapshot.build(providers)
-            do {
-                let url = try store.write(result.document, at: providers.now())
-                done(["ok": true, "path": url.path, "anomalies": result.anomalies])
-            } catch {
-                done(["ok": false, "error": "could not write the snapshot to \(store.directory.path): \(error.localizedDescription)",
-                      "anomalies": result.anomalies])
-            }
+            let first = DiagnoseSnapshot.build(providers)
+            guard first.appKitMismatch else { finish(first, providers, done: done); return }
+            schedule(settle) { [self] in finish(DiagnoseSnapshot.build(providers), providers, done: done) }
+        }
+    }
+
+    private func finish(_ result: DiagnoseSnapshot.Result, _ providers: DiagnoseSnapshot.Providers,
+                        done: @escaping ([String: Any]) -> Void) {
+        do {
+            let url = try store.write(result.document, at: providers.now())
+            done(["ok": true, "path": url.path, "anomalies": result.anomalies])
+        } catch {
+            done(["ok": false, "error": "could not write the snapshot to \(store.directory.path): \(error.localizedDescription)",
+                  "anomalies": result.anomalies])
         }
     }
 

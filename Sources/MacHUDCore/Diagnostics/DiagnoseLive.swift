@@ -94,20 +94,50 @@ enum DiagnoseLive {
         }
     }
 
-    /// MacHUD, its voice host (while it runs) and every running sibling app, once each.
-    static func processes(externals: ExternalPanels?, voice: VoiceServices?) -> [DiagnoseSnapshot.FamilyProcess] {
-        var out = [DiagnoseSnapshot.FamilyProcess(role: .machud, name: "MacHUD", bundleID: Bundle.main.bundleIdentifier, pid: getpid())]
-        if let pid = voice?.supervisor.pid, pid != getpid() {
-            out.append(.init(role: .voiceHost, name: "MacHUDVoice", bundleID: nil, pid: pid))
+    struct RunningApp: Equatable {
+        var bundleID: String?
+        var name: String
+        var pid: Int32
+    }
+
+    /// The bundle identifier prefix of the MacHUD family's apps.
+    static let familyBundlePrefix = "xyz.machud."
+
+    /// MacHUD, its voice helper while it runs, the apps MacHUD discovered, and every other running
+    /// application of the family (`xyz.machud.*`), once each by pid: a family app outside MacHUD's
+    /// search paths is still one whose windows matter.
+    static func familyProcesses(ownPID: Int32, ownBundleID: String?, voicePID: Int32?, discovered: [DiagnoseSnapshot.FamilyProcess],
+                                running: [RunningApp]) -> [DiagnoseSnapshot.FamilyProcess] {
+        var out = [DiagnoseSnapshot.FamilyProcess(role: .machud, name: "MacHUD", bundleID: ownBundleID, pid: ownPID)]
+        if let voicePID, voicePID != ownPID { out.append(.init(role: .voiceHost, name: "MacHUDVoice", bundleID: nil, pid: voicePID)) }
+        for process in discovered where !out.contains(where: { $0.pid == process.pid }) { out.append(process) }
+        for app in running where app.bundleID?.hasPrefix(familyBundlePrefix) == true && !out.contains(where: { $0.pid == app.pid }) {
+            out.append(.init(role: .sibling, name: app.name, bundleID: app.bundleID, pid: app.pid))
         }
+        return out
+    }
+
+    static func runningApps() -> [RunningApp] {
+        NSWorkspace.shared.runningApplications.map {
+            RunningApp(bundleID: $0.bundleIdentifier, name: $0.localizedName ?? $0.bundleIdentifier ?? "unknown", pid: $0.processIdentifier)
+        }
+    }
+
+    static func processes(externals: ExternalPanels?, voice: VoiceServices?,
+                          running: (() -> [RunningApp])? = nil) -> [DiagnoseSnapshot.FamilyProcess] {
+        var discovered: [DiagnoseSnapshot.FamilyProcess] = []
         if let supervisor = externals?.supervisor {
             for record in supervisor.all {
-                for pid in supervisor.livePIDs(record.app.id) where !out.contains(where: { $0.pid == pid }) {
-                    out.append(.init(role: .sibling, name: record.app.name, bundleID: record.app.id, pid: pid))
+                // What the app itself reports: a hover panel shown and not parked.
+                let hover = Set(record.app.manifest.presentedPanels.filter { $0.kind == .hover }.map(\.id))
+                let shown = record.panels.contains { hover.contains($0.key) && $0.value.visible && $0.value.mode != .parked }
+                for pid in supervisor.livePIDs(record.app.id) {
+                    discovered.append(.init(role: .sibling, name: record.app.name, bundleID: record.app.id, pid: pid, showsHoverPanel: shown))
                 }
             }
         }
-        return out
+        return familyProcesses(ownPID: getpid(), ownBundleID: Bundle.main.bundleIdentifier, voicePID: voice?.supervisor.pid,
+                               discovered: discovered, running: running?() ?? runningApps())
     }
 
     /// Every window the window server lists, on every desktop and ordered out ones included.

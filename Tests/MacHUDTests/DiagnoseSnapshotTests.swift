@@ -272,12 +272,90 @@ final class DiagnoseSnapshotTests: XCTestCase {
 
     // MARK: - Anomalies: on some desktops of its display but not the current one
 
-    func testAHoverLevelWindowOnlyOnAnotherDesktopIsAnAnomaly() {
+    func testAMacHUDWindowAppKitCallsVisibleButOnlyOnAnotherDesktopIsAnAnomaly() {
         let stuck = window(700, pid: 100, level: 4, onScreen: false, frame: CGRect(x: 900, y: 0, width: 760, height: 80), owner: "MacHUD")
-        let result = build(providers(windows: [orb, stuck, widget], spaces: [812: everySpace, 700: [13], 900: everySpace]))
+        let kit = appKit(700, identifier: "tooldock.strip", visible: true, onActive: false, level: 4)
+        let result = build(providers(windows: [orb, stuck, widget], spaces: [812: everySpace, 700: [13], 900: everySpace], appKit: [kit]))
         XCTAssertEqual(result.anomalies,
-                       ["MacHUD window #700 (level 4) is on desktop 3 of 4 on DELL U2720Q but not on the one showing (desktop 1)"])
+                       ["MacHUD window #700 (tooldock.strip, level 4) is on desktop 3 of 4 on DELL U2720Q but not on the one showing (desktop 1)"])
     }
+
+    func testAMacHUDWindowAppKitHasOrderedOutIsDormantNotAnAnomaly() {
+        let remembered = window(700, pid: 100, level: 4, onScreen: false, owner: "MacHUD")
+        let hiddenKit = appKit(700, identifier: "tooldock.strip", visible: false, onActive: false, level: 4)
+        XCTAssertEqual(build(providers(windows: [orb, remembered, widget], spaces: [812: everySpace, 700: [13], 900: everySpace],
+                                       appKit: [hiddenKit])).anomalies, [])
+        XCTAssertEqual(build(providers(windows: [orb, remembered, widget], spaces: [812: everySpace, 700: [13], 900: everySpace])).anomalies,
+                       [], "no AppKit view of it at all")
+    }
+
+    private let scratch = Snapshot.FamilyProcess(role: .sibling, name: "Scratch", bundleID: "xyz.machud.scratch", pid: 310)
+    private var scratchPanel: Snapshot.ServerWindow {
+        window(179_586, pid: 310, level: 3, onScreen: false, frame: CGRect(x: 78, y: 606, width: 560, height: 400), owner: "Scratch")
+    }
+
+    func testADormantSiblingPanelRememberingItsLastDesktopIsNotAnAnomaly() {
+        // Ordered out, alpha 1, on the one desktop it was last shown on; its app says the panel is hidden.
+        let result = build(providers(windows: [orb, scratchPanel], spaces: [812: everySpace, 179_586: [13]],
+                                     processes: [machud, voice, scratch]))
+        XCTAssertEqual(result.anomalies, [])
+    }
+
+    func testASiblingPanelItsAppReportsVisibleButOnlyOnAnotherDesktopIsAnAnomaly() {
+        var shown = scratch
+        shown.showsHoverPanel = true
+        let result = build(providers(windows: [orb, scratchPanel], spaces: [812: everySpace, 179_586: [13]],
+                                     processes: [machud, voice, shown]))
+        XCTAssertEqual(result.anomalies,
+                       ["Scratch window #179586 (level 3) is on desktop 3 of 4 on DELL U2720Q but not on the one showing (desktop 1)"])
+    }
+
+    func testAWindowedSiblingPanelOnAnotherDesktopIsNotAnAnomalyEvenWhileShown() {
+        var shown = scratch
+        shown.showsHoverPanel = true
+        let windowed = window(179_590, pid: 310, level: 0, onScreen: false, owner: "Scratch")
+        XCTAssertEqual(build(providers(windows: [orb, windowed], spaces: [812: everySpace, 179_590: [13]],
+                                       processes: [machud, voice, shown])).anomalies, [], "a window on its own desktop is ordinary")
+    }
+
+    func testAnAllDesktopsWindowMissingTheShowingOneIsAnAnomalyEvenWhenDormant() {
+        let result = build(providers(windows: [orb, scratchPanel], spaces: [812: everySpace, 179_586: [12, 13, 14]],
+                                     processes: [machud, voice, scratch]))
+        XCTAssertEqual(result.anomalies,
+                       ["Scratch window #179586 (level 3) is on desktops 2, 3, 4 of 4 on DELL U2720Q but not on the one showing (desktop 1)"])
+    }
+
+    func testADesktopLevelWidgetOfARunningWidgetAppOnAnotherDesktopIsAnAnomaly() {
+        var replies = healthyReplies
+        replies["widgets"] = ["ok": true, "instances": [["instance": "A", "app": "xyz.machud.widgethud", "type": "clock"]]]
+        let stranded = window(900, pid: 300, level: -2_147_483_623, onScreen: false, owner: "widgetHUD")
+        let result = build(providers(windows: [orb, stranded], spaces: [812: everySpace, 900: [13]], replies: replies))
+        XCTAssertEqual(result.anomalies,
+                       ["widgetHUD window #900 (level -2147483623) is on desktop 3 of 4 on DELL U2720Q but not on the one showing (desktop 1)"])
+    }
+
+    func testADesktopLevelWindowOfAnAppWithNoPlacedWidgetIsNotAnAnomaly() {
+        let leftover = window(900, pid: 300, level: -2_147_483_623, onScreen: false, owner: "widgetHUD")
+        XCTAssertEqual(build(providers(windows: [orb, leftover], spaces: [812: everySpace, 900: [13]])).anomalies, [],
+                       "the healthy replies place no widget")
+    }
+
+    // MARK: - Anomalies: the window server lags AppKit
+
+    func testAnAppKitVersusServerMismatchIsFlaggedForConfirmation() {
+        let hidden = window(700, pid: 100, level: 4, onScreen: false, owner: "MacHUD")
+        let mismatch = build(providers(windows: [orb, hidden], spaces: [812: everySpace, 700: []],
+                                       appKit: [appKit(700, identifier: "tooldock.strip", visible: true, onActive: true)]))
+        XCTAssertTrue(mismatch.appKitMismatch)
+        XCTAssertFalse(build(providers()).appKitMismatch)
+        // The desktops rule is about the server's own list, so it needs no second reading.
+        let kit = appKit(700, identifier: "tooldock.strip", visible: true, onActive: false, level: 4)
+        let stuck = build(providers(windows: [orb, hidden], spaces: [812: everySpace, 700: [13]], appKit: [kit]))
+        XCTAssertEqual(stuck.anomalies.count, 1)
+        XCTAssertFalse(stuck.appKitMismatch)
+    }
+
+    // MARK: - Anomalies: on some desktops of its display but not the current one (continued)
 
     func testAWindowWhoseMembershipWasPartlyDroppedIsAnAnomaly() {
         let partial = window(900, pid: 300, level: 0, onScreen: false, owner: "widgetHUD")
@@ -369,6 +447,23 @@ final class DiagnoseSnapshotTests: XCTestCase {
 
     func testAHeadlessVoiceHostWithNoWindowsIsNotAnAnomaly() {
         XCTAssertEqual(build(providers(windows: [dock])).anomalies, [])
+    }
+
+    func testAMutedVoiceHostStillShowsItsOrbSoAMissingOneIsAnAnomaly() {
+        let ordered = window(812, pid: 200, level: 25, onScreen: false, owner: "MacHUDVoice")
+        var replies = healthyReplies
+        replies["voiceState"] = ["ok": true, "state": ["muted": true, "hiddenForFullScreen": false, "phase": ["name": "idle"]]]
+        let result = build(providers(windows: [ordered, dock], spaces: [812: [], 700: everySpace], replies: replies))
+        XCTAssertEqual(result.anomalies, ["No MacHUDVoice window is on screen (the voice host has 1 window, none showing)"])
+    }
+
+    func testAHiddenForFullScreenVoiceHostIsReportedOnlyAsThat() {
+        let ordered = window(812, pid: 200, level: 25, onScreen: false, owner: "MacHUDVoice")
+        var replies = healthyReplies
+        replies["voiceState"] = ["ok": true, "state": ["muted": true, "hiddenForFullScreen": true]]
+        let result = build(providers(windows: [ordered, dock], spaces: [812: [], 700: everySpace], replies: replies))
+        XCTAssertEqual(result.anomalies.count, 1, "\(result.anomalies)")
+        XCTAssertTrue(result.anomalies[0].hasPrefix("The voice host reports the orb hidden for a full-screen app"))
     }
 
     func testNoVoiceHostWindowOnScreenWhileHiddenForFullScreenIsOneAnomalyNotTwo() {

@@ -57,14 +57,16 @@ final class DiagnoseMenuTests: XCTestCase {
         XCTAssertTrue(item.isEnabled)
     }
 
-    func testItSitsAboveAdvancedAndQuit() {
+    func testItSitsAtTheEndOfTheAdvancedSubmenu() {
         let menu = DiagnoseMenu(service: service())
-        let advanced = NSMenuItem(title: "Advanced", action: nil, keyEquivalent: "")
-        let quit = NSMenuItem(title: "Quit MacHUD", action: nil, keyEquivalent: "q")
-        let tail = StatusMenu.tail(maintenance: [menu.menuItem()], advanced: advanced, quit: quit)
-        XCTAssertEqual(tail.map { $0.isSeparatorItem ? "-" : $0.title }, ["Save Diagnostics", "Advanced", "-", "Quit MacHUD"])
-        XCTAssertEqual(StatusMenu.tail(maintenance: [], advanced: advanced, quit: quit).map { $0.isSeparatorItem ? "-" : $0.title },
-                       ["Advanced", "-", "Quit MacHUD"], "nothing registered, nothing added")
+        let base = ["Edit layouts.json…", "Reveal layouts.json in Finder", "Reload Config"].map {
+            NSMenuItem(title: $0, action: nil, keyEquivalent: "")
+        }
+        let entries = StatusMenu.advancedEntries(base: base, extras: [menu.menuItem()])
+        XCTAssertEqual(entries.map { $0.isSeparatorItem ? "-" : $0.title },
+                       ["Edit layouts.json…", "Reveal layouts.json in Finder", "Reload Config", "-", "Save Diagnostics"])
+        XCTAssertEqual(StatusMenu.advancedEntries(base: base, extras: []).map(\.title),
+                       ["Edit layouts.json…", "Reveal layouts.json in Finder", "Reload Config"], "nothing registered, nothing added")
     }
 
     // MARK: - What it says

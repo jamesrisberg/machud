@@ -25,6 +25,7 @@ machud layouts                      # regions with ids and geometry
 machud loadouts                     # saved loadouts (including HUD-only ones)
 machud status                       # what is in each region right now
 machud windows                      # every on-screen window with CGWindow numbers
+machud diagnose                     # snapshot of where every MacHUD window really is: path + what looks wrong
 machud screens                      # displays (persistentID), desktop count and current desktop
 machud apps                         # sibling apps: health, reachable, panels
 machud hello                        # contract handshake: app id com.jrisberg.machud, hudkit version, verbs
