@@ -15,7 +15,7 @@ final class FakeMacHUD {
     private(set) var requests: [(command: String, args: [String: String])] = []
 
     static let commands = ["apps", "panels", "loadouts", "status", "screens", "tooldock", "park", "unpark", "voice",
-                           "sessions", "feed", "summon", "dismiss", "apply", "capture", "widgets"]
+                           "sessions", "feed", "summon", "dismiss", "apply", "capture", "widgets", "diagnose"]
 
     init() {
         dir = URL(fileURLWithPath: "/tmp/mcp-\(getpid())-\(Int.random(in: 0..<100_000))", isDirectory: true)

@@ -29,6 +29,7 @@ display). Region geometry in `layouts` is fractions of the screen's visible area
 | `layouts` | | `active` layout name, `layouts[]` with `regions[] {id, name, x, y, w, h}`; each carries `hidden` (true: kept for one loadout, not offered to snap into) |
 | `loadouts` | | `loadouts[]` (full `Loadout` objects: `name`, `layout`, `slots[] {regionID, occupant}`, `hotkey`, `screens?`, `hud?` — see HUD loadouts) and `startup` (the `startupLoadout`, or empty). The editing actions are under [Layouts and loadouts](#layouts-and-loadouts) |
 | `windows` | | `windows[] {window, pid, bundleID, app, title, x, y, w, h}` for every on-screen user window; windows MacHUD opened also carry `panel`, `web` or `browser` + `host` |
+| `diagnose` | | saves a snapshot of where every MacHUD-family window really is and answers `path` (the file) and `anomalies[]` (what looks wrong, one sentence each); changes nothing on screen or in any setting. See [Diagnostics](#diagnostics) |
 | `status` | `screen=<ref>` (optional) | `layout`, `activeLoadout`, `regions[] {region, name, x, y, w, h, screen, space, occupant?, window?, iou, fits}` — what sits in each region now, plus `redirected[]` when the last apply had to stand in for a missing display |
 | `screens` | | `screens[] {index, name, persistentID, main, builtin, x, y, w, h, spaces, currentSpace}`; `persistentID` (`<vendor>-<model>-<serial>`, hex) is what loadouts pin displays to |
 | `spaces` | `screen=<ref>` (optional) | desktop count, current desktop, which Mission Control shortcuts are enabled, `privateAPI` |
@@ -871,6 +872,44 @@ config folder, for its `saveRecordings` and a shared history),
 `MACHUD_VOICE_KEYCHAIN_SERVICE` (the Keychain service for secrets) and `MACHUD_SOCKET` (MacHUD's
 control socket, for `open-session` and `feed add`).
 
+## Diagnostics
+
+`diagnose` (also the MCP tool `machud_diagnose`) writes one
+JSON file that holds what the window server and AppKit know about the family's windows, for the day
+something on the HUD (the voice orb, the tool dock, a widget) vanishes or sits on the wrong desktop.
+Run it before relaunching anything: a relaunch clears the state it records. It reads only: no window
+moves and no setting changes. The reply is `{"ok": true, "path": ..., "anomalies": [...]}`.
+
+The file is `~/Library/Logs/MacHUD/diagnose-<yyyyMMdd-HHmmss>.json` (local time; a second snapshot in the
+same second gets a `-2` suffix), readable by the user only. The newest 20 `diagnose-*.json` files stay;
+older ones are removed and nothing else in the folder is touched. An isolated instance (see Running several
+instances) writes to a `diagnostics` folder beside `MACHUD_CONFIG`, or, with only `MACHUD_SOCKET`, to
+`<socket path without extension>-diagnostics`, never to the real folder.
+
+Top-level keys:
+
+| Key | Holds |
+| --- | --- |
+| `createdAt` | UTC timestamp |
+| `machud` | `version`, `build`, `pid`, `launchedAt`, `isolated` |
+| `displays[]` | `name`, `id`, `persistentID`, `primary`, `frame`, `visibleFrame`, `spaces {identifier, all[], current, currentIndex, currentIsFullScreen}`: the display's desktops by `ManagedSpaceID` in Mission Control order (the list is `com.apple.spaces` as the Dock last wrote it, the current one is read live) |
+| `frontmostApp` | `name`, `pid` |
+| `processes[]` | MacHUD, then the voice host (`MacHUDVoice`), then every running sibling app: `role`, `name`, `pid`, `bundleID`, and `windows[]` for each window the window server lists for that pid (`CGWindowListCopyWindowInfo` with every window, ordered-out ones and every desktop included): `id`, `level`, `alpha`, `onScreen`, `frame`, `spaces[]` (null when the window server cannot say), `display`. MacHUD's own windows also carry `appKit {identifier or title, class, isVisible, isOnActiveSpace, alpha, level, collectionBehavior, collectionBehaviorNames[], frame}`, and `appKitWindowsNotListedByTheServer[]` holds AppKit windows the server does not list |
+| `fullFrameWindows[]` | on-screen layer-0 windows of any app whose frame equals a display's full frame (the test the voice orb's full-screen check applies): `app`, `pid`, `id`, `alpha`, `frame`, `display`, `ownedByFrontmost` |
+| `replies` | the replies of `tooldock`, `widgets list`, `voice status` and `voice state` as `tooldock`, `widgets`, `voiceStatus` and `voiceState` (null for one that could not be gathered). `voice state` has its `card` and `partialTranscript` removed (they hold dictated and spoken text), named in `redacted` |
+| `anomalies[]` | the same sentences the reply carries |
+
+Frames are Cocoa screen points like the other verbs'. Window titles of other apps are never read, and MacHUD's
+own are named only when a window has no identifier.
+
+`anomalies[]` names: a MacHUD window AppKit calls visible that the window server does not list as on screen
+(or at all) while AppKit places it on the active desktop or it joins all desktops; a family window on some
+desktops of its display but not the one showing, when it is on two or more of them or is above layer 0
+(not evaluated while the display shows a full-screen app's desktop); a voice host that reports the orb hidden
+for a full-screen app, naming the window that fills the screen or saying none does; a voice host that is not
+connected (not when voice is off or not part of the build); and a connected voice host none of whose windows is
+on screen.
+
 ## MCP tool server
 
 `Contents/Helpers/machud-mcp` serves MacHUD to agents as an MCP tool server over stdio, using the
@@ -913,6 +952,7 @@ are in [MCP.md](MCP.md).
   it; MacHUD reads only `enabled`, to decide whether to start it.
 - `~/.config/machud/state/catalog.json` — the last catalog fetched; `state/onboarding.json` records the onboarding (`status`, `step`).
 - `~/.config/machud/state/tooldock.json` — frames of panels dismissed from the tool dock (restored by summon).
+- `~/Library/Logs/MacHUD/diagnose-<yyyyMMdd-HHmmss>.json` — `diagnose` snapshots, the newest 20 (see Diagnostics).
 - `~/Library/Application Support/MacHUD/docks.json` — where each dock strip sits (`HUDDockRegistry`);
   `MACHUD_DOCKS_FILE` overrides it.
 - `~/Library/Application Support/MacHUD/host.json` — this MacHUD hosts the siblings' menus
@@ -926,7 +966,8 @@ watch window drags (the real one already snaps them); `MACHUD_DRAG=1` turns its
 drag snapping back on. Its tool dock publishes to
 `docks.json` beside `MACHUD_CONFIG` (or `MACHUD_DOCKS_FILE`), not the shared file, and its
 `host.json` there too (else `<MACHUD_SOCKET>.host.json`, or `MACHUD_HOST_FILE`), so it never hides
-the real siblings' icons.
+the real siblings' icons. Its `diagnose` snapshots go to a `diagnostics` folder beside `MACHUD_CONFIG` (else
+beside the socket), not to `~/Library/Logs/MacHUD`.
 Its voice host listens on `$MACHUD_VOICE_SOCKET`, else `<MACHUD_SOCKET>-voice.sock` (else
 `machud-voice.sock` beside `MACHUD_CONFIG`), never the real one's, and inherits the isolation
 variables. MacHUD also starts it with `MACHUD_VOICE_NO_MIC=1`, `MACHUD_VOICE_NO_BRAIN=1`,
