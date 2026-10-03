@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var feed: FeedBroker!
     private var voice: VoiceServices!
     private var onboarding: OnboardingServices!
+    private var diagnostics: DiagnoseMenu!
     private var startup: StartupLoadout?
     private var library: LoadoutLibrary!
     private var trustTimer: Timer?
@@ -82,6 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         installMenuHost()
         installWidgets()
         installOnboarding()
+        installDiagnostics()
         // Every visibility change (socket, hotkey, menu, close button, sibling push)
         // reaches `subscribe`rs, not only the ones made through the socket.
         panels.onStateChange = { [weak router, weak toolDock] in
@@ -392,6 +394,16 @@ extension AppDelegate {
         machud.settingsWindow.model.voice = services.settingsModel
         voice = services
         services.start()
+    }
+
+    /// `diagnose`: the read-only snapshot of where the family's windows really are, as a socket verb
+    /// and as Save Diagnostics in the status menu's Advanced submenu. After the tool dock, the
+    /// widgets and the voice host, whose replies it embeds.
+    fileprivate func installDiagnostics() {
+        let service = DiagnoseLive.service(externals: externals, toolDock: toolDock, widgets: widgets, voice: voice)
+        service.registerControl(control)
+        diagnostics = DiagnoseMenu(service: service)
+        statusMenu.advancedSection = { [weak diagnostics] in diagnostics.map { [$0.menuItem()] } ?? [] }
     }
 
     /// First-run onboarding: the full-screen overlay at launch until it is finished or skipped,

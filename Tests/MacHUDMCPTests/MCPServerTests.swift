@@ -114,7 +114,7 @@ final class MCPServerTests: XCTestCase {
         let result = try XCTUnwrap(request("tools/list")["result"] as? [String: Any])
         let list = try XCTUnwrap(result["tools"] as? [[String: Any]])
         XCTAssertEqual(list.compactMap { $0["name"] as? String }, [
-            "machud_status", "list_loadouts", "apply_loadout", "capture_loadout", "show_panel", "hide_panel",
+            "machud_status", "machud_diagnose", "list_loadouts", "apply_loadout", "capture_loadout", "show_panel", "hide_panel",
             "toggle_panel", "list_app_actions", "app_action", "tool_dock", "park_window", "unpark",
             "open_session", "feed_add", "say", "list_widgets", "add_widget", "change_widget", "widget_mode",
         ])
@@ -354,6 +354,43 @@ final class MCPServerTests: XCTestCase {
         XCTAssertEqual(apps[0]["olderContract"] as? Bool, true)
         XCTAssertEqual(apps[1]["outdated"] as? Bool, false)
         XCTAssertEqual(apps[1]["olderContract"] as? Bool, false)
+    }
+
+    func testDiagnoseSavesASnapshotAndReturnsItsPathAndAnomalies() throws {
+        fake.replies["diagnose"] = { _ in
+            ["ok": true, "path": "/Users/me/Library/Logs/MacHUD/diagnose-20261003-181500.json",
+             "anomalies": ["MacHUDVoice window #812 is on desktop 3 of 4 on DELL but not the one showing (desktop 1)"]]
+        }
+        let result = call("machud_diagnose")
+        XCTAssertEqual(result["isError"] as? Bool, false, text(result))
+        let content = try XCTUnwrap(result["structuredContent"] as? [String: Any])
+        XCTAssertEqual(content["path"] as? String, "/Users/me/Library/Logs/MacHUD/diagnose-20261003-181500.json")
+        XCTAssertEqual((content["anomalies"] as? [String])?.count, 1)
+        XCTAssertNil(content["ok"], "the reply is the tool's result without ok")
+        XCTAssertEqual(fake.requests("diagnose"), [[:]], "no arguments reach MacHUD")
+    }
+
+    func testDiagnoseTakesNoArgumentsAndSaysItChangesNothingOnScreen() throws {
+        loadApps()
+        let result = try XCTUnwrap(request("tools/list")["result"] as? [String: Any])
+        let list = try XCTUnwrap(result["tools"] as? [[String: Any]])
+        let tool = try XCTUnwrap(list.first { $0["name"] as? String == "machud_diagnose" })
+        let schema = try XCTUnwrap(tool["inputSchema"] as? [String: Any])
+        XCTAssertEqual((schema["properties"] as? [String: Any])?.count, 0)
+        XCTAssertNil(schema["required"])
+        let annotations = try XCTUnwrap(tool["annotations"] as? [String: Any])
+        XCTAssertEqual(annotations["destructiveHint"] as? Bool, false)
+        XCTAssertEqual(annotations["openWorldHint"] as? Bool, false)
+        let description = tool["description"] as? String ?? ""
+        XCTAssertTrue(description.contains("changes nothing on screen"), description)
+        XCTAssertTrue(description.contains("before restarting"), "the point is to capture the state before a relaunch clears it")
+    }
+
+    func testDiagnoseRefusedIsAToolError() {
+        fake.replies["diagnose"] = { _ in ["ok": false, "error": "could not write /nope/diagnose.json"] }
+        let result = call("machud_diagnose")
+        XCTAssertEqual(result["isError"] as? Bool, true)
+        XCTAssertEqual(text(result), "could not write /nope/diagnose.json")
     }
 
     func testStatusReportsAMissingPartWithoutFailing() throws {

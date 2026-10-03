@@ -64,6 +64,8 @@ enum MacHUDHostContext {
             "- `show_panel`, `hide_panel`, `toggle_panel {app, panel?}`: an app's panels.",
             "- `list_app_actions {app}`, `app_action {app, verb, args?}`: whatever an app declares.",
             "- `tool_dock`, `park_window`, `unpark`, `open_session {id}`, `feed_add {text}`, `say {text}`.",
+            "- `machud_diagnose`: when the orb, the tool dock or a widget is missing or on the wrong desktop, call it "
+                + "before restarting anything; it saves a snapshot of where every MacHUD window is and lists what looks wrong.",
         ]
         guard let snapshot else {
             lines += ["", "MacHUD did not report its apps and loadouts; ask `machud_status`."]

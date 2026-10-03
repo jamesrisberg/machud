@@ -97,7 +97,8 @@ Each loadout can also have its own hotkey. All hotkeys live in `layouts.json`.
   the Tool Dock, **Widgets** (Reveal, Edit Widgets…, Add Widget, and each widget's Settings…,
   Float Above Windows and Remove), then **Apps** (Launch All Apps and Quit All Apps, plus Relaunch Outdated Apps
   while an app runs an older build than its bundle on disk, then each app with Show, its own menu,
-  Hide/Park, Show on Tool Dock, Settings, Relaunch and Launch or Quit) and Get Apps…; **Advanced** for the JSON file.
+  Hide/Park, Show on Tool Dock, Settings, Relaunch and Launch or Quit) and Get Apps…; **Advanced** for the JSON file and **Save Diagnostics**
+  (a snapshot of where MacHUD's windows really are, for when one vanishes; also `machud diagnose`).
 - Capturing asks for the loadout's name, whether to also keep its layout on its own (for
   ⇧-drag and other loadouts, under its own name) or only for this loadout, and whether to
   save the tool dock and the apps' panels with it. Windows MacHUD has parked are captured

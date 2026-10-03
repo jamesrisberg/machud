@@ -91,6 +91,15 @@ public final class MacHUDTools: @unchecked Sendable {
                  + "startup and which was applied last), the tool dock, every installed HUD app with its panels, "
                  + "action verbs and whether it runs, parked windows, and the voice host's state. Start here.",
                  properties: [:], readOnly: true),
+            tool("machud_diagnose",
+                 "Save a snapshot of where every MacHUD window really is, for when something on the HUD (the voice "
+                 + "orb, the tool dock, a widget) is missing, flickers or sits on the wrong desktop: the window "
+                 + "server's and AppKit's view of each MacHUD-family window (level, alpha, on screen, frame, "
+                 + "desktops), the displays and desktops, any full-screen window, and the tool dock's, widgets' and "
+                 + "voice host's own state, with no dictated or reply text. Returns the file's path and a short "
+                 + "list of anomalies. Call it before restarting anything: a restart clears the evidence. It "
+                 + "changes nothing on screen and in no setting; it writes one file and keeps the newest 20.",
+                 properties: [:]),
             tool("list_loadouts",
                  "List saved loadouts (window arrangements plus HUD setup): name, layout, how many windows, "
                  + "whether it holds a HUD part, its hotkey, and which is the startup and the last applied one.",
@@ -248,6 +257,7 @@ public final class MacHUDTools: @unchecked Sendable {
         do {
             switch name {
             case "machud_status": return try status()
+            case "machud_diagnose": return try machud("diagnose", [:])
             case "list_loadouts": return .ok(["loadouts": try loadouts()])
             case "apply_loadout": return try applyLoadout(args)
             case "capture_loadout": return try captureLoadout(args)

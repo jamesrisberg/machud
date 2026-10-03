@@ -23,6 +23,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     var toolDockSection: (() -> [NSMenuItem])?
     /// The Widgets submenu, after Tool Dock.
     var widgetsSection: (() -> [NSMenuItem])?
+    /// Extra items at the end of the Advanced submenu (Save Diagnostics).
+    var advancedSection: (() -> [NSMenuItem])?
 
     init(store: LayoutStore) {
         self.store = store
@@ -107,19 +109,26 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(quit)
     }
 
-    /// The config file itself.
+    /// The config file itself, and the extra items other parts of the app add (Save Diagnostics).
     private func advancedItem() -> NSMenuItem {
         let item = NSMenuItem(title: "Advanced", action: nil, keyEquivalent: "")
         let sub = NSMenu()
+        var base: [NSMenuItem] = []
         for (title, selector, key) in [("Edit layouts.json…", #selector(editLayouts), ""),
                                        ("Reveal layouts.json in Finder", #selector(revealLayouts), ""),
                                        ("Reload Config", #selector(reload), "r")] {
             let mi = NSMenuItem(title: title, action: selector, keyEquivalent: key)
             mi.target = self
-            sub.addItem(mi)
+            base.append(mi)
         }
+        for entry in Self.advancedEntries(base: base, extras: advancedSection?() ?? []) { sub.addItem(entry) }
         item.submenu = sub
         return item
+    }
+
+    /// The Advanced submenu top to bottom: the config items, then (after a separator) the extras.
+    static func advancedEntries(base: [NSMenuItem], extras: [NSMenuItem]) -> [NSMenuItem] {
+        extras.isEmpty ? base : base + [.separator()] + extras
     }
 
     @objc private func toggleEnabled() { store.enabled.toggle() }
