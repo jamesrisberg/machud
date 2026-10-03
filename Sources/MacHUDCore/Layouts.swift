@@ -183,6 +183,12 @@ struct Loadout: Codable, Equatable {
     /// Every slot in the loadout, one-screen form plus per-display assignments.
     var allSlots: [Slot] { slots + (screens ?? []).flatMap(\.slots) }
 
+    /// Whether the loadout names displays or desktops: per-display assignments, or a slot bound
+    /// to a desktop. The one-screen form (`layout` + `slots`, no desktop) does not.
+    var spansScreensOrDesktops: Bool {
+        !(screens ?? []).isEmpty || slots.contains { $0.space != nil }
+    }
+
     /// Assign (or clear) a region's occupant. Replacing the occupant keeps the slot's
     /// desktop, stacking and parking settings.
     mutating func set(_ occupant: Occupant?, regionID: String) {
@@ -361,11 +367,16 @@ struct GridSize: Codable, Equatable {
     static let `default` = GridSize(cols: 96, rows: 54)
 }
 
-/// Off-by-default behaviour that relies on private system interfaces.
+/// Off-by-default behaviour: features still being worked on, and ones that rely on private
+/// system interfaces.
 struct Experimental: Codable, Equatable {
     /// Move an existing window to another desktop with SkyLight's private
     /// `CGSMoveWindowsToManagedSpace`, instead of reporting `onOtherSpace`.
     var spacesPrivateAPI: Bool?
+    /// Loadouts that span several desktops or displays, and what exists for them: capturing
+    /// every screen, walking desktops, switching desktops to fetch a window (see
+    /// `ExperimentalLoadouts`). Off, a loadout is one screen: the desktop the user is on.
+    var multiDesktopLoadouts: Bool?
 }
 
 struct Config: Codable, Equatable {
