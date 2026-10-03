@@ -37,7 +37,8 @@ import VoiceKit
 ///
 /// The wake word listens only for a phrase whose model is installed (`wakeModels`). While it is
 /// on and cannot listen, `wakeProblem` says why, and turning it on shows that under the orb;
-/// a model installed later arms it at once (`wakeModelsChanged`).
+/// a model installed later arms it at once (`wakeModelsChanged`). A listener that stops by
+/// itself is started again after `wakeRestartDelays` until it listens.
 @MainActor
 public final class VoiceHostController: VoiceHostActing {
     public private(set) var state = VoiceHostState() {
@@ -92,6 +93,9 @@ public final class VoiceHostController: VoiceHostActing {
     static let conversationSaveDelay: TimeInterval = 1
     /// Progress lines kept on the card.
     static let progressLimit = 4
+    /// How long a wake listener that stopped by itself waits before each restart: the first,
+    /// the second, then every one after.
+    static let wakeRestartDelays: [TimeInterval] = [2, 10, 60]
 
     private let dictation: DictationDriving
     private let keys: VoiceKeySource?
@@ -200,8 +204,21 @@ public final class VoiceHostController: VoiceHostActing {
     private var brainHealth: BrainHealth = .stopped
     /// The chosen runtime's problem on this Mac, for the settings last applied.
     private var runtimeProblem: String?
-    /// Why the running wake listener stopped by itself; cleared when it starts again.
+    /// Why the wake listener stopped by itself. Kept until it listens again, across a restart
+    /// with the same voice settings (a take ended, voice unmuted); new voice settings clear it.
     private var wakeListenerProblem: String?
+    /// The backoff's step: restarts since the listener last stayed up for the longest delay.
+    private var wakeRestarts = 0
+    /// The pending restart; an earlier one that fires finds it changed and does nothing.
+    private var wakeRestartToken: UUID?
+    /// When the listener began listening (uptime), until it fails or is started or stopped.
+    private var wakeListeningSince: TimeInterval?
+    /// The failures since the listener last listened: the reason last logged and how many
+    /// restarts they have taken. A failure is logged when the run begins or its reason changes.
+    private var wakeFailureRun: (reason: String, attempts: Int)?
+    /// The listener failed in a way starting it again cannot fix (`WakeFailure.retryable` false):
+    /// it waits for a change to its model or to the voice settings.
+    private var wakeWaitsForChange = false
     /// The conversation with the agent, every turn and snapshot reduced to rows.
     private(set) var conversation: ConversationLog
     private var conversationSaveScheduled = false
@@ -301,6 +318,9 @@ public final class VoiceHostController: VoiceHostActing {
         if appliedVoice != settings.voice {
             appliedVoice = settings.voice
             speaker?.configure(settings.voice)
+            // The wake listener starts afresh with them: what stopped it before is forgotten.
+            wakeListenerProblem = nil
+            wakeRestarts = 0
         }
         refreshKeys()
         refreshWake()
@@ -319,6 +339,13 @@ public final class VoiceHostController: VoiceHostActing {
     /// phrase's model is in place, and keep `wakeProblem` current.
     func wakeModelsChanged() {
         refreshWake()
+        // A model that would not load may load now.
+        if wakeWaitsForChange, let wake, let settings = runningWake, take == nil {
+            wakeWaitsForChange = false
+            wakeFailureRun?.attempts += 1
+            log("wake listener restarting: its model changed")
+            wake.start(settings)
+        }
         refreshWakeProblem()
     }
 
@@ -1128,7 +1155,8 @@ public final class VoiceHostController: VoiceHostActing {
     }
 
     /// The wake word listens while it is wanted, its phrase's model is installed and no take is
-    /// recording.
+    /// recording. Starting it afresh or stopping it ends any restart under way; the reason it last
+    /// stopped and the backoff's step stay until it listens (or `apply` gets new voice settings).
     private func refreshWake() {
         defer { refreshWakeProblem() }
         guard let wake else { return }
@@ -1139,7 +1167,10 @@ public final class VoiceHostController: VoiceHostActing {
             log("wake listener stopped: \(wanted == nil ? wakeStopReason : "its settings changed")")
         }
         runningWake = wanted
-        wakeListenerProblem = nil
+        wakeRestartToken = nil
+        wakeWaitsForChange = false
+        wakeListeningSince = nil
+        wakeFailureRun = nil
         guard let wanted else { return }
         log("wake listener starting: \"\(wanted.wakePhrase)\", threshold \(String(format: "%.2f", wanted.wakeThreshold))")
         wake.start(wanted)
@@ -1154,18 +1185,63 @@ public final class VoiceHostController: VoiceHostActing {
         return Self.wakeModelMissing
     }
 
+    /// Listening clears the reason the listener stopped (the backoff's step stays until it has
+    /// stayed up a while; see `wakeListenerFailed`).
     private func wakeListeningChanged(_ listening: Bool) {
         let was = state.wakeListening
         state.wakeListening = listening
-        if listening, !was { log("wake listener listening") }
+        guard listening, !was else { return }
+        wakeListeningSince = now()
+        if let run = wakeFailureRun {
+            log("wake listener listening again after \(run.attempts) attempt\(run.attempts == 1 ? "" : "s")")
+            wakeFailureRun = nil
+        } else {
+            log("wake listener listening")
+        }
+        if wakeListenerProblem != nil {
+            wakeListenerProblem = nil
+            refreshWakeProblem()
+        }
     }
 
-    /// The listener could not start or stopped by itself: `wakeProblem` says why until it is
-    /// started again.
-    private func wakeListenerFailed(_ problem: String) {
-        wakeListenerProblem = problem
+    /// The listener could not start or stopped by itself: say why and, while it is still wanted
+    /// and starting it again may help, do so after the next of `wakeRestartDelays`. The step
+    /// starts over only once the listener has stayed up for the longest delay, so one that
+    /// fails again soon after listening does not loop every few seconds. A failure only a model
+    /// or settings change fixes waits for that change. A take, a mute or a settings change in
+    /// between ends the wait (the listener is then started afresh, or not at all).
+    private func wakeListenerFailed(_ failure: WakeFailure) {
+        let listened = wakeListeningSince.map { now() - $0 }
+        wakeListeningSince = nil
+        if let listened, let longest = Self.wakeRestartDelays.last, listened >= longest { wakeRestarts = 0 }
+        wakeListenerProblem = failure.reason
         refreshWakeProblem()
-        log("wake listener failed: \(problem)")
+        guard runningWake != nil else { return log("wake listener failed: \(failure.reason)") }
+        let logs = wakeFailureRun?.reason != failure.reason
+        wakeFailureRun = (failure.reason, wakeFailureRun?.attempts ?? 0)
+        guard failure.retryable else {
+            wakeWaitsForChange = true
+            if logs {
+                log("wake listener failed: \(failure.reason); not restarting until its model or the voice settings change")
+            }
+            return
+        }
+        let delay = Self.wakeRestartDelays[min(wakeRestarts, Self.wakeRestartDelays.count - 1)]
+        if logs { log("wake listener failed: \(failure.reason); restarting in \(Int(delay)) s") }
+        let token = UUID()
+        wakeRestartToken = token
+        schedule(delay) { [weak self] in
+            guard let self, wakeRestartToken == token else { return }
+            restartFailedWake()
+        }
+    }
+
+    private func restartFailedWake() {
+        wakeRestartToken = nil
+        guard let wake, let settings = runningWake, wakeListenerProblem != nil, take == nil else { return }
+        wakeRestarts += 1
+        wakeFailureRun?.attempts += 1
+        wake.start(settings)
     }
 
     /// Why the wake word is on and not listening; nil while it is off, muted or able to listen.

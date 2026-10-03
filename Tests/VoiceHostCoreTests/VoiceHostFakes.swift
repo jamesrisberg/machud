@@ -224,13 +224,26 @@ final class FakeModels: VoiceModelProviding {
 final class FakeWake: WakeDriving {
     var onWake: ((WakeDetection) -> Void)?
     var onListeningChanged: ((Bool) -> Void)?
-    var onProblem: ((String) -> Void)?
+    var onProblem: ((WakeFailure) -> Void)?
     var starts: [VoiceSettings] = []
     var stops = 0
     var listening = false
+    /// Each start fails with this (the microphone still refuses) while it is set.
+    var startFailure: WakeFailure?
+    /// A start listens at once; false leaves it starting until `listen()`.
+    var listensOnStart = true
 
     func start(_ settings: VoiceSettings) {
         starts.append(settings)
+        if let startFailure {
+            onProblem?(startFailure)
+            return
+        }
+        if listensOnStart { listen() }
+    }
+
+    /// The start under way reaches listening.
+    func listen() {
         listening = true
         onListeningChanged?(true)
     }
@@ -240,11 +253,11 @@ final class FakeWake: WakeDriving {
         onWake?(WakeDetection(score: score, phrase: phrase))
     }
 
-    /// Listening stops by itself, as a failed microphone does.
-    func fail(_ reason: String) {
+    /// Listening stops by itself: the microphone (retryable) or the model (not).
+    func fail(_ reason: String, retryable: Bool = true) {
         listening = false
         onListeningChanged?(false)
-        onProblem?(reason)
+        onProblem?(WakeFailure(reason: reason, retryable: retryable))
     }
 
     func stop() {

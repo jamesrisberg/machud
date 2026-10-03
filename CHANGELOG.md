@@ -24,6 +24,11 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   (`log show --predicate 'subsystem == "com.jrisberg.machud.voice"'`), readable rather than
   redacted.
 
+### Fixed
+- The wake word no longer stays off after the microphone stops for it (an audio device change, a
+  microphone that would not start): it tries again after 2 seconds, 10 seconds, then every minute,
+  and the Voice settings say why it is not listening meanwhile.
+
 ## [0.3.1] - 2026-10-02
 
 ### Fixed

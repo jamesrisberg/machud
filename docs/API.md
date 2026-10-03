@@ -874,7 +874,9 @@ working`), which stops a reply being spoken and shows on the orb.
 The voice host logs each take's start, end and outcome (counts, never words), and the wake
 listener's start, stop and failures, to the unified log at notice level with every value public:
 subsystem `com.jrisberg.machud.voice`, category `take`
-(`log show --predicate 'subsystem == "com.jrisberg.machud.voice" AND category == "take"'`).
+(`log show --predicate 'subsystem == "com.jrisberg.machud.voice" AND category == "take"'`). A run
+of listener failures with the same reason is logged once, when it begins (again if the reason
+changes), and its end once the listener listens again, with how many restarts it took.
 
 `state` is `{phase, inputLevel, partialTranscript, card?, hiddenForFullScreen, brainAvailable,
 brainProblem?, sessionKey?, sessionProvider?, activeRuntime?, wakeListening, wakeProblem?, muted,
@@ -884,7 +886,16 @@ again after. While the wake word is on (and voice is on and not muted) but not l
 `wakeProblem` says why: its phrase's model is not downloaded (`Download the Hey Jarvis model to
 use the wake word.`), is downloading or failed to, the microphone is not allowed, or listening
 stopped (an audio device change it could not recover from); turning the wake word on shows it
-briefly under the orb too. `brainAvailable` is true
+briefly under the orb too. A listener that could not start or stopped by itself because of its
+audio (the input device changed, the microphone was refused or stopped, detection fell behind) is
+started again 2 s later, then 10 s after that, then every 60 s, while the wake word is still
+wanted and no take is recording; the step starts over at 2 s only after the listener has listened
+for 60 s before failing again. A phrase without a model or a model that will not load is not
+retried on a timer: it waits until the model changes (is downloaded or installed) or the voice
+settings change. `wakeProblem` gives the reason it stopped until it listens again, also through a
+take (during it and after, while the listener starts again) and after a mute (absent while muted,
+back from the unmute); new voice settings start the listener afresh and clear it.
+`brainAvailable` is true
 when the brain can take a turn; otherwise `brainProblem` says why, in words for the user: voice
 or the brain is off, the brain companion's own reason (`Choose a workspace folder for the
 agent.`, a missing Node.js), the chosen runtime's tool is not installed (`Codex is not
