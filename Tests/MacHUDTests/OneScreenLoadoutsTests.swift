@@ -120,3 +120,46 @@ final class OneScreenApplyTests: XCTestCase {
         }
     }
 }
+
+/// The socket forms that exist only for spanning loadouts.
+@MainActor
+final class MultiDesktopVerbTests: XCTestCase {
+    private let off = Config.defaults
+    private var on: Config {
+        var c = Config.defaults
+        c.experimental = Experimental(multiDesktopLoadouts: true)
+        return c
+    }
+
+    func testEveryScreenWalkAndPerDisplayCapturesAreRefused() throws {
+        let refused: [([String: String], String)] = [
+            (["name": "X", "screens": "all"], "Capturing every screen"),
+            (["name": "X", "screens": "*", "hud": "1"], "Capturing every screen"),
+            (["name": "X", "screens": "all", "desktops": "1,2"], "Capturing every screen"),
+            (["name": "X", "desktops": "1,3"], "Walking desktops"),
+            (["name": "X", "desktops": "1", "screen": "main"], "Walking desktops"),
+            (["name": "X", "screens": "Main@main,Side@builtin"], "Capturing a layout per display"),
+        ]
+        for (args, action) in refused {
+            let reason = try XCTUnwrap(MultiDesktopVerbs.refusal(capture: args, in: off), "\(args)")
+            XCTAssertEqual(reason, ExperimentalLoadouts.refusal(forAction: action, in: off), "\(args)")
+            XCTAssertNil(MultiDesktopVerbs.refusal(capture: args, in: on), "\(args) with the setting on")
+        }
+    }
+
+    func testOneScreenCapturesAreNotRefused() {
+        for args in [["name": "X"], ["name": "X", "screen": "builtin"], ["name": "X", "layout": "Main"],
+                     ["name": "X", "hud": "only"], ["name": "X", "hud": "1"],
+                     ["name": "X", "hud": "only", "screens": "all"]] {
+            XCTAssertNil(MultiDesktopVerbs.refusal(capture: args, in: off), "\(args)")
+        }
+    }
+
+    func testSwitchingDesktopsIsRefusedButReadingThemIsNot() throws {
+        let reason = try XCTUnwrap(MultiDesktopVerbs.refusal(spaces: ["action": "switch", "n": "2"], in: off))
+        XCTAssertEqual(reason, ExperimentalLoadouts.refusal(forAction: "Switching desktops", in: off))
+        XCTAssertNil(MultiDesktopVerbs.refusal(spaces: [:], in: off))
+        XCTAssertNil(MultiDesktopVerbs.refusal(spaces: ["action": "status", "screen": "main"], in: off))
+        XCTAssertNil(MultiDesktopVerbs.refusal(spaces: ["action": "switch", "n": "2"], in: on))
+    }
+}

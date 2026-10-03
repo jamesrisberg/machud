@@ -19,7 +19,11 @@ extension LoadoutEngine {
             done(["ok": true, "screens": screens])
         }
 
-        control.register("spaces") { args, done in
+        control.register("spaces") { [weak self] args, done in
+            guard let self else { done(["ok": false, "error": "engine gone"]); return }
+            if let refusal = MultiDesktopVerbs.refusal(spaces: args, in: self.store.config) {
+                done(["ok": false, "error": refusal]); return
+            }
             let monitors = Spaces.monitors()
             let ref = args["screen"].flatMap { ScreenRef.parse($0) }
             guard let screen = ref.map({ $0.resolve() }) ?? NSScreen.main else {
@@ -78,6 +82,9 @@ extension LoadoutEngine {
                     done(["ok": true, "slots": loadout.allSlots.count, "loadout": Self.json(loadout)])
                 }
                 return
+            }
+            if let refusal = MultiDesktopVerbs.refusal(capture: args, in: self.store.config) {
+                done(["ok": false, "error": refusal]); return
             }
             let withHUD = ["1", "true", "yes", "on"].contains(hudMode ?? "")
             let done: ([String: Any]) -> Void = { [weak self] reply in
@@ -174,5 +181,31 @@ extension LoadoutEngine {
         return ["switchToDesktop": direct,
                 "moveLeft": Spaces.shortcut(Spaces.Key.moveLeft)?.enabled ?? false,
                 "moveRight": Spaces.shortcut(Spaces.Key.moveRight)?.enabled ?? false]
+    }
+}
+
+/// The socket forms that exist only for loadouts spanning several desktops or displays, and why
+/// each is refused while `experimental.multiDesktopLoadouts` is off (see `ExperimentalLoadouts`).
+/// Pure, so the forms are unit tested.
+enum MultiDesktopVerbs {
+    /// `capture screens=all`, `desktops=…` and `screens=<layout>@<ref>,…`; nil for the one-screen
+    /// forms (the default, `screen=`, `layout=`) and `hud=only`.
+    static func refusal(capture args: [String: String], in config: Config) -> String? {
+        guard args["hud"]?.lowercased() != "only" else { return nil }
+        let action: String
+        if let screens = args["screens"] {
+            action = ["all", "*"].contains(screens.lowercased()) ? "Capturing every screen" : "Capturing a layout per display"
+        } else if args["desktops"] != nil {
+            action = "Walking desktops"
+        } else {
+            return nil
+        }
+        return ExperimentalLoadouts.refusal(forAction: action, in: config)
+    }
+
+    /// `spaces action=switch`; reading the desktops is never refused.
+    static func refusal(spaces args: [String: String], in config: Config) -> String? {
+        guard args["action"] == "switch" else { return nil }
+        return ExperimentalLoadouts.refusal(forAction: "Switching desktops", in: config)
     }
 }

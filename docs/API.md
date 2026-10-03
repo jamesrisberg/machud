@@ -53,12 +53,12 @@ display). Region geometry in `layouts` is fractions of the screen's visible area
 | `preview` | `loadout` (default: the active one), `action=show\|apply\|cancel` | draw the plan over every display (regions coloured by action, Apply / Cancel); `apply` / `cancel` answer it. Returns `visible`, `loadout` |
 | `capture` | `name`, optional `screen=<ref>` | **derive a layout from the windows on that screen** (one region per window at the window's exact frame, stacked windows included) and a loadout of the same name that fills it; both are saved and the layout becomes active. Regions of an existing layout with that name are reused where they still match, so editor tweaks survive a recapture. Returns `layout`, `regions`, `slots`, `screen`, `loadout` |
 | `capture` | `name`, `layout=<name>` (+ optional `screen`) | fill only: snapshot which window sits in each region of an existing layout, without touching its regions |
-| `capture` | `name`, `screens=all`, optional `desktops=…` | **derive a layout per display** (and per desktop) from the windows on it: one `ScreenAssignment` per attached display, each with its own layout named `<name> · <display>` (`· Desktop N` when desktops are walked), on that display's current desktop. `desktops=1,3` walks those desktops on every display, `desktops=main:1,2;builtin:1` per display; the desktop that was showing is restored afterwards. A window seen on several desktops (an "all desktops" app) is captured once, on the first desktop it was seen on. Returns `layout`, `regions`, `slots`, `screens[] {screen, layout, regions, slots, space?}`, `loadout` |
-| `capture` | `name`, `desktops=…` (+ optional `screen`) | the same walk on one display |
-| `capture` | `name`, `screens=<layout>@<ref>,<layout>@<ref>` | fill only, one existing layout per display |
+| `capture` | `name`, `screens=all`, optional `desktops=…` | multi-desktop loadouts only (see [One screen, or several](#one-screen-or-several)): **derive a layout per display** (and per desktop) from the windows on it: one `ScreenAssignment` per attached display, each with its own layout named `<name> · <display>` (`· Desktop N` when desktops are walked), on that display's current desktop. `desktops=1,3` walks those desktops on every display, `desktops=main:1,2;builtin:1` per display; the desktop that was showing is restored afterwards. A window seen on several desktops (an "all desktops" app) is captured once, on the first desktop it was seen on. Returns `layout`, `regions`, `slots`, `screens[] {screen, layout, regions, slots, space?}`, `loadout` |
+| `capture` | `name`, `desktops=…` (+ optional `screen`) | multi-desktop loadouts only: the same walk on one display |
+| `capture` | `name`, `screens=<layout>@<ref>,<layout>@<ref>` | multi-desktop loadouts only: fill only, one existing layout per display |
 | `capture` | `name`, `hud=only` | **the HUD only**: the tool dock's position and every running sibling's panels into the loadout `name` (created with no layout or slots if it does not exist; an existing one keeps its windows). Returns `loadout` |
 | `capture` | any of the above plus `hud=1` | the windows as above, then the HUD added to the same loadout; the reply also carries `hud`. Re-capturing windows without `hud=` keeps a loadout's existing `hud` |
-| `spaces` | `action=switch`, `n=<desktop>`, `screen=<ref>` (optional) | switch that display to desktop `n` via the Mission Control shortcuts |
+| `spaces` | `action=switch`, `n=<desktop>`, `screen=<ref>` (optional) | multi-desktop loadouts only: switch that display to desktop `n` via the Mission Control shortcuts |
 | `clear` | | minimise every user window **on every desktop** except MacHUD's own, running sibling apps' (external panels) and hidden apps' |
 | `restore` | | un-minimise everything the last `clear` (or `apply … clear=1`) minimised; returns `restored` |
 | `place` | `window` (CGWindow number from `windows`), `region` (region id, name, or index) | move one window into one region |
@@ -108,6 +108,10 @@ takes effect at once. While it is off:
 - `apply` (and `plan=1`, and the preview) refuses a spanning loadout by name before anything
   moves, saying how to turn the setting on. The startup loadout and the re-apply after a
   display change do not run one either; a toast says so.
+- `capture` takes one display, on the desktop showing: the default form, `screen=`, `layout=`
+  and `hud=only` work as described; `screens=all`, `desktops=` and `screens=<layout>@<ref>`
+  answer `ok: false` with an `error` naming the setting. `spaces action=switch` does too;
+  `spaces`, `screens` and `status` still report the desktops.
 
 ## Missing displays
 
