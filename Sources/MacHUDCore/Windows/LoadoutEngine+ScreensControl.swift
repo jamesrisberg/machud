@@ -79,6 +79,9 @@ extension LoadoutEngine {
         guard let name = args["name"], !name.isEmpty else {
             done(["ok": false, "error": "name required"]); return
         }
+        if let refusal = MultiDesktopVerbs.refusal(capture: args, in: self.store.config) {
+            done(["ok": false, "error": refusal]); return
+        }
         // `hud=only`: just the tool dock and the siblings' panels; `hud=1`: the windows
         // as below, then the HUD added to the same loadout.
         let hudMode = args["hud"]?.lowercased()
@@ -88,9 +91,6 @@ extension LoadoutEngine {
                 done(["ok": true, "slots": loadout.allSlots.count, "loadout": Self.json(loadout)])
             }
             return
-        }
-        if let refusal = MultiDesktopVerbs.refusal(capture: args, in: self.store.config) {
-            done(["ok": false, "error": refusal]); return
         }
         let withHUD = ["1", "true", "yes", "on"].contains(hudMode ?? "")
         let done: ([String: Any]) -> Void = { [weak self] reply in
@@ -189,23 +189,24 @@ extension LoadoutEngine {
     }
 }
 
-/// The socket forms that exist only for loadouts spanning several desktops or displays, and why
-/// each is refused while `experimental.multiDesktopLoadouts` is off (see `ExperimentalLoadouts`).
-/// Pure, so the forms are unit tested.
+/// The socket forms that exist only for loadouts spanning several desktops or displays, and the
+/// names of loadouts held back, and why each is refused while `experimental.multiDesktopLoadouts`
+/// is off (see `ExperimentalLoadouts`). Pure, so the forms are unit tested.
 enum MultiDesktopVerbs {
-    /// `capture screens=all`, `desktops=…` and `screens=<layout>@<ref>,…`; nil for the one-screen
-    /// forms (the default, `screen=`, `layout=`) and `hud=only`.
+    /// `capture screens=all`, `desktops=…` and `screens=<layout>@<ref>,…`, and any capture
+    /// (`hud=only` too) into the name of a loadout held back, which it would replace unseen; nil
+    /// for the one-screen forms (the default, `screen=`, `layout=`) and `hud=only` otherwise.
     static func refusal(capture args: [String: String], in config: Config) -> String? {
-        guard args["hud"]?.lowercased() != "only" else { return nil }
-        let action: String
-        if let screens = args["screens"] {
-            action = ["all", "*"].contains(screens.lowercased()) ? "Capturing every screen" : "Capturing a layout per display"
-        } else if args["desktops"] != nil {
-            action = "Walking desktops"
-        } else {
-            return nil
+        if args["hud"]?.lowercased() != "only" {
+            var action: String?
+            if let screens = args["screens"] {
+                action = ["all", "*"].contains(screens.lowercased()) ? "Capturing every screen" : "Capturing a layout per display"
+            } else if args["desktops"] != nil {
+                action = "Walking desktops"
+            }
+            if let action, let refusal = ExperimentalLoadouts.refusal(forAction: action, in: config) { return refusal }
         }
-        return ExperimentalLoadouts.refusal(forAction: action, in: config)
+        return args["name"].flatMap { ExperimentalLoadouts.refusal(forName: $0, in: config) }
     }
 
     /// `spaces action=switch`; reading the desktops is never refused.

@@ -85,6 +85,46 @@ final class OneScreenApplyTests: XCTestCase {
         XCTAssertEqual(refused.detailLines { $0 }, [expected], "the toast says why")
     }
 
+    /// The `capture` verb, every one-screen form, with a hidden loadout's name: refused, and
+    /// layouts.json is left byte for byte as it was.
+    func testTheCaptureVerbLeavesAHiddenLoadoutAlone() throws {
+        let engine = try engine(multiDesktop: nil)
+        let before = try Data(contentsOf: LayoutStore.configURL)
+        for form in [[:], ["screen": "main"], ["layout": "Main"], ["hud": "only"], ["hud": "1"], ["screens": "all"]] {
+            let args = form.merging(["name": "Studio"]) { a, _ in a }
+            // Only reach the verb once the rule says it refuses: a capture that went ahead would
+            // read the windows on this Mac.
+            guard let expected = MultiDesktopVerbs.refusal(capture: args, in: engine.store.config) else {
+                XCTFail("\(args) is not refused"); continue
+            }
+            var reply: [String: Any]?
+            engine.handleCapture(args) { reply = $0 }
+            XCTAssertEqual(reply?["ok"] as? Bool, false, "\(args)")
+            XCTAssertEqual(reply?["error"] as? String, expected, "\(args)")
+        }
+        XCTAssertEqual(try Data(contentsOf: LayoutStore.configURL), before, "layouts.json is untouched")
+    }
+
+    /// With the setting off, a one-screen loadout whose app's only window is on a hidden desktop
+    /// plans no desktop switch and no fetch, wherever that window is.
+    func testAOneScreenPlanForAWindowOnAHiddenDesktopNeverSwitches() throws {
+        let engine = try engine(multiDesktop: nil)
+        let screens = [PlacementPlan.Screen(name: "DELL", frame: CGRect(x: 0, y: 0, width: 2560, height: 1440), currentSpace: 3, spaces: 4),
+                       PlacementPlan.Screen(name: "Built-in", frame: CGRect(x: 2560, y: 0, width: 1728, height: 1117), currentSpace: 1, spaces: 2)]
+        for (screen, space) in [(0, 1), (1, 2)] {
+            for kind in [NewWindowClass.menu, .browser, .single] {
+                let hidden = PlacementPlan.Candidate(number: 7, frame: CGRect(x: 0, y: 0, width: 400, height: 300),
+                                                     screen: screen, space: space, visible: false)
+                let input = PlacementPlan.SlotInput(regionID: "a", regionName: "A", occupant: "App", screen: 0, space: nil,
+                                                    rect: CGRect(x: 0, y: 0, width: 800, height: 600), candidates: [hidden],
+                                                    running: true, newWindow: kind)
+                let step = PlacementPlan.step(for: input, screens: screens, mode: engine.planMode)
+                XCTAssertNotEqual(step.action, .switchSpace, "\(kind) on \(screen):\(space): \(step.reason)")
+                XCTAssertNil(step.bring, "\(kind) on \(screen):\(space)")
+            }
+        }
+    }
+
     func testThePlanAndThePreviewAreRefusedToo() throws {
         let engine = try engine(multiDesktop: nil)
         for name in ["Studio", "Pinned"] {
@@ -165,6 +205,28 @@ final class MultiDesktopVerbTests: XCTestCase {
                      ["name": "X", "hud": "only", "screens": "all"]] {
             XCTAssertNil(MultiDesktopVerbs.refusal(capture: args, in: off), "\(args)")
         }
+    }
+
+    /// A capture with a hidden loadout's name would replace it unseen: every form is refused,
+    /// `hud=only` included, with the foundation's sentence for that loadout.
+    func testNoCaptureFormTakesAHiddenLoadoutsName() throws {
+        let config = try JSONDecoder().decode(Config.self, from: Data(OneScreenFixture.json(multiDesktop: nil).utf8))
+        let forms: [[String: String]] = [[:], ["screen": "main"], ["layout": "Main"], ["hud": "only"], ["hud": "1"]]
+        for name in ["Studio", "Pinned"] {
+            let expected = try XCTUnwrap(ExperimentalLoadouts.refusal(forName: name, in: config))
+            for form in forms {
+                let args = form.merging(["name": name]) { a, _ in a }
+                XCTAssertEqual(MultiDesktopVerbs.refusal(capture: args, in: config), expected, "\(args)")
+            }
+        }
+        for form in forms {
+            XCTAssertNil(MultiDesktopVerbs.refusal(capture: form.merging(["name": "Desk"]) { a, _ in a }, in: config),
+                         "an offered loadout is recaptured as always: \(form)")
+            XCTAssertNil(MultiDesktopVerbs.refusal(capture: form.merging(["name": "New"]) { a, _ in a }, in: config))
+        }
+        var on = config
+        on.experimental = Experimental(multiDesktopLoadouts: true)
+        XCTAssertNil(MultiDesktopVerbs.refusal(capture: ["name": "Studio"], in: on))
     }
 
     func testSwitchingDesktopsIsRefusedButReadingThemIsNot() throws {

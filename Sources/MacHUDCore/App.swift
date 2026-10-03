@@ -266,7 +266,10 @@ extension AppDelegate {
         control.register("edit") { [weak self] args, done in
             guard let self else { done(["ok": false, "error": "app gone"]); return }
             if let name = args["loadout"] {
-                guard self.store.loadout(named: name) != nil else { done(["ok": false, "error": "no such loadout"]); return }
+                guard let loadout = self.store.loadout(named: name) else { done(["ok": false, "error": "no such loadout"]); return }
+                if let refusal = ExperimentalLoadouts.refusal(for: loadout, in: self.store.config) {
+                    done(["ok": false, "error": refusal]); return
+                }
                 LoadoutMenu.shared?.editLoadout?(name)
             } else if ["1", "true", "yes"].contains((args["new"] ?? "0").lowercased()) {
                 LoadoutMenu.shared?.openNewLayout?()
