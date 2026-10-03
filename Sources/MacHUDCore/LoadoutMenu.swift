@@ -296,7 +296,7 @@ final class LoadoutMenu {
                 return
             }
             let name = answer.name
-            if let reason = Self.nameRefusal(name, in: self.store.config) {
+            if let reason = ExperimentalLoadouts.refusal(forName: name, in: self.store.config) {
                 NSLog("MacHUD: refused to capture over hidden loadout '%@'", name)
                 self.showRefusal("Could not capture \(name): a hidden loadout has that name", reason)
                 return
@@ -337,14 +337,6 @@ final class LoadoutMenu {
     /// bar), when more than one display has windows.
     nonisolated static func capturesEveryScreen(allScreens: Bool?, screensWithWindows: Int, multiDesktop: Bool) -> Bool {
         multiDesktop && (allScreens ?? (screensWithWindows > 1))
-    }
-
-    /// Why a capture may not be saved as `name`: a loadout hidden while multi-desktop loadouts
-    /// are off already has it, and saving would replace that loadout unseen. Nil when the name
-    /// is free or names an offered loadout (a recapture replaces that one, as always).
-    nonisolated static func nameRefusal(_ name: String, in config: Config) -> String? {
-        guard let existing = config.loadouts?.first(where: { $0.name == name }) else { return nil }
-        return ExperimentalLoadouts.refusal(for: existing, in: config)
     }
 
     static func captureDetail(of capture: LoadoutEngine.ArrangementCapture) -> String {
@@ -678,7 +670,7 @@ final class LoadoutMenu {
             alert.addButton(withTitle: "Cancel")
             let field = NSTextField(frame: CGRect(x: 0, y: 0, width: 300, height: 24))
             let config = self.store.config
-            field.stringValue = config.startupLoadout.flatMap { Self.nameRefusal($0, in: config) == nil ? $0 : nil } ?? "My HUD"
+            field.stringValue = config.startupLoadout.flatMap { ExperimentalLoadouts.refusal(forName: $0, in: config) == nil ? $0 : nil } ?? "My HUD"
             let box = NSButton(checkboxWithTitle: "Put it back when MacHUD starts", target: nil, action: nil)
             box.state = .on
             let stack = NSStackView(views: [field, box])
@@ -692,7 +684,7 @@ final class LoadoutMenu {
             guard alert.runModal() == .alertFirstButtonReturn else { return }
             let name = field.stringValue.trimmingCharacters(in: .whitespaces)
             guard !name.isEmpty else { return }
-            if let reason = Self.nameRefusal(name, in: self.store.config) {
+            if let reason = ExperimentalLoadouts.refusal(forName: name, in: self.store.config) {
                 NSLog("MacHUD: refused to save the HUD into hidden loadout '%@'", name)
                 self.showRefusal("Could not save the HUD as \(name): a hidden loadout has that name", reason)
                 return

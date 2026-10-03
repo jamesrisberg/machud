@@ -66,4 +66,14 @@ final class ExperimentalLoadoutsTests: XCTestCase {
         XCTAssertNil(ExperimentalLoadouts.refusal(for: twoDesktops, in: on))
         XCTAssertNil(ExperimentalLoadouts.refusal(forAction: "Capturing every screen", in: on))
     }
+
+    /// Saving a capture (or the HUD) under a held-back loadout's name would replace it unseen.
+    func testAHeldBackLoadoutsNameCannotBeCapturedOrSavedOver() {
+        let off = config([oneScreen, twoDesktops], on: nil)
+        XCTAssertEqual(ExperimentalLoadouts.refusal(forName: "Walk", in: off), ExperimentalLoadouts.refusal(for: twoDesktops, in: off))
+        XCTAssertNotNil(ExperimentalLoadouts.refusal(forName: "Walk", in: off))
+        XCTAssertNil(ExperimentalLoadouts.refusal(forName: "Desk", in: off), "recapturing an offered loadout replaces it, as always")
+        XCTAssertNil(ExperimentalLoadouts.refusal(forName: "New", in: off))
+        XCTAssertNil(ExperimentalLoadouts.refusal(forName: "Walk", in: config([oneScreen, twoDesktops], on: true)))
+    }
 }

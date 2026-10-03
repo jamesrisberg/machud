@@ -132,15 +132,6 @@ final class LoadoutMenuTests: XCTestCase {
         XCTAssertEqual(refusals.first?.detail, ExperimentalLoadouts.refusal(forAction: "Capturing every screen", in: store.config))
     }
 
-    func testACaptureMayNotTakeTheNameOfAHiddenLoadout() throws {
-        let off = try LoadoutsFixture.config(multiDesktop: false)
-        let desk = try XCTUnwrap(off.loadouts?.first)
-        XCTAssertEqual(LoadoutMenu.nameRefusal("Desk", in: off), ExperimentalLoadouts.refusal(for: desk, in: off))
-        XCTAssertNil(LoadoutMenu.nameRefusal("Code", in: off), "recapturing an offered loadout replaces it, as always")
-        XCTAssertNil(LoadoutMenu.nameRefusal("New", in: off))
-        XCTAssertNil(LoadoutMenu.nameRefusal("Desk", in: try LoadoutsFixture.config(multiDesktop: true)))
-    }
-
     // MARK: - What a capture covers
 
     func testACaptureCoversTheScreenUnderThePointerUnlessMultiDesktopLoadoutsAreOn() {

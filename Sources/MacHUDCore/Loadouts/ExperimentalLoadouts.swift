@@ -33,6 +33,15 @@ enum ExperimentalLoadouts {
         return "\(action) is experimental. \(howToTurnOn)"
     }
 
+    /// Why a capture or HUD save may not be saved as `name`: a loadout held back while the
+    /// feature is off already has it, and saving would replace that loadout unseen. Nil when
+    /// the name is free, belongs to an offered loadout (a recapture replaces it, as always), or
+    /// the feature is on.
+    static func refusal(forName name: String, in config: Config) -> String? {
+        guard let existing = config.loadouts?.first(where: { $0.name == name }) else { return nil }
+        return refusal(for: existing, in: config)
+    }
+
     static let howToTurnOn = "Turn on \(settingTitle) under Experimental in MacHUD's settings to use it."
 }
 
