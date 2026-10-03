@@ -47,6 +47,10 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - The capture sheet's "Include the tool dock and the apps' panels (the HUD)" box starts unticked.
 - The Loadouts settings tab draws a one-screen loadout on one screen, without naming a display,
   since it goes on whichever screen you apply it to.
+- From scripts too: while **Multi-desktop loadouts** is off, `machud loadouts` leaves out the
+  loadouts that span several desktops or displays (and says how many), and `machud apply` refuses
+  one by name, saying how to turn the setting on, before anything moves. The startup loadout and
+  the re-apply when displays change skip one too, with a toast.
 
 ### Fixed
 - With multi-desktop loadouts on, the wheel says how many desktops a captured multi-desktop

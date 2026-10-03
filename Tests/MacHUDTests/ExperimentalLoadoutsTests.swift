@@ -52,6 +52,16 @@ final class ExperimentalLoadoutsTests: XCTestCase {
         XCTAssertEqual(ExperimentalLoadouts.heldBack(in: on), 0)
     }
 
+    func testTheHeldBackNoteCountsInTheRightNumber() {
+        XCTAssertNil(ExperimentalLoadouts.heldBackNote(count: 0))
+        XCTAssertEqual(ExperimentalLoadouts.heldBackNote(count: 1),
+                       "1 loadout is hidden: it spans several desktops or displays. "
+                       + "Turn on Multi-desktop loadouts under Experimental in MacHUD's settings to use it.")
+        XCTAssertEqual(ExperimentalLoadouts.heldBackNote(count: 3),
+                       "3 loadouts are hidden: they span several desktops or displays. "
+                       + "Turn on Multi-desktop loadouts under Experimental in MacHUD's settings to use them.")
+    }
+
     func testRefusalsNameTheLoadoutOrActionAndTheSetting() throws {
         let off = config([oneScreen, twoDesktops], on: nil)
         XCTAssertNil(ExperimentalLoadouts.refusal(for: oneScreen, in: off))

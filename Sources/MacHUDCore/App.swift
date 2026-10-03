@@ -218,6 +218,11 @@ extension AppDelegate {
            apply: { [weak engine] loadout in
             NSLog("MacHUD: applying startup loadout '%@'", loadout.name)
             engine?.apply(loadout, clear: false) { report in
+                // A refusal is already in the log (see `LoadoutEngine.apply`).
+                if let refused = report.refused {
+                    Toast.show("Startup loadout not applied", detail: refused, seconds: 8)
+                    return
+                }
                 NSLog("MacHUD: startup loadout '%@': %@", loadout.name, "\(report.json)")
             }
         })
@@ -549,6 +554,11 @@ extension AppDelegate {
         store.pinDisplays()
         guard Env.autoApply, let name = engine.activeLoadout, let loadout = store.loadout(named: name) else { return }
         engine.apply(loadout, clear: false) { report in
+            // A refusal is already in the log (see `LoadoutEngine.apply`).
+            if let refused = report.refused {
+                Toast.show("Displays changed", detail: "Did not re-apply \(name). \(refused)", seconds: 8)
+                return
+            }
             NSLog("MacHUD: displays changed, re-applied %@: %d placed, %d failed",
                   name, report.placed.count, report.failed.count)
             Toast.show("Displays changed", detail: "Re-applied \(name)")

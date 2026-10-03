@@ -235,7 +235,8 @@ final class LoadoutLibrary {
 
     static let actions = ["list", "rename", "duplicate", "delete", "startup"]
 
-    /// `loadouts [list]|rename name= to=|duplicate name= [to=]|delete name=|startup [name=]`.
+    /// `loadouts [list]|rename name= to=|duplicate name= [to=]|delete name=|startup [name=]`. The
+    /// list holds the loadouts on offer (`ExperimentalLoadouts.offered`) and counts the rest.
     func handle(_ args: [String: String]) -> [String: Any] {
         // `machud loadouts delete name=X` arrives as `_: delete, delete: 1, name: X`.
         let action = args["action"] ?? args["_"] ?? Self.actions.first { args[$0] == "1" } ?? "list"
@@ -243,8 +244,15 @@ final class LoadoutLibrary {
         let edit: LoadoutEdit
         switch action {
         case "list":
-            return ["ok": true, "startup": store.config.startupLoadout ?? "",
-                    "loadouts": store.loadouts.map(Self.json)]
+            let config = store.config
+            var reply: [String: Any] = ["ok": true, "startup": config.startupLoadout ?? "",
+                                        "loadouts": ExperimentalLoadouts.offered(in: config).map(Self.json)]
+            let held = ExperimentalLoadouts.heldBack(in: config)
+            if let note = ExperimentalLoadouts.heldBackNote(count: held) {
+                reply["heldBack"] = held
+                reply["heldBackNote"] = note
+            }
+            return reply
         case "rename":
             guard let name, let to = args["to"] else { return ["ok": false, "error": "loadouts rename needs name= and to="] }
             edit = .rename(name, to: to)

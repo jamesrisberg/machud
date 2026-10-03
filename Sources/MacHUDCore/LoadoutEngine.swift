@@ -55,8 +55,11 @@ final class LoadoutEngine {
         var actual: [String: CGRect] = [:]
         /// What became of the loadout's `hud` part, if it has one.
         var hud: HUDLoadoutEngine.Report?
+        /// Why the loadout was not applied at all (see `ExperimentalLoadouts`); nothing moved.
+        var refused: String?
 
         var json: [String: Any] {
+            if let refused { return ["ok": false, "loadout": loadout, "error": refused] }
             let hudOK = hud?.apps.values.allSatisfy { $0 == "applied" } ?? true
             var d: [String: Any] = ["ok": failed.isEmpty && hudOK, "loadout": loadout, "placed": placed,
                                     "failed": failed, "cleared": cleared]
@@ -240,8 +243,16 @@ final class LoadoutEngine {
     /// Apply `loadout` on `screen` (default: screen under the mouse).
     /// `clear`: minimize every other window (and close MacHUD-owned web windows) first.
     /// A loadout's `hud` part (tool dock and sibling panels) goes after its windows, so it
-    /// has the last word on a sibling panel that is in both.
+    /// has the last word on a sibling panel that is in both. A loadout that spans desktops or
+    /// displays while that is off is refused before anything moves (`ApplyReport.refused`).
     func apply(_ loadout: Loadout, clear: Bool, screen: NSScreen? = nil, completion: @escaping (ApplyReport) -> Void) {
+        if let refusal = ExperimentalLoadouts.refusal(for: loadout, in: store.config) {
+            NSLog("MacHUD: not applying '%@': %@", loadout.name, refusal)
+            var report = ApplyReport(loadout: loadout.name)
+            report.refused = refusal
+            completion(report)
+            return
+        }
         activeLoadout = loadout.name
         let completion: (ApplyReport) -> Void = { [weak self] report in
             completion(report)

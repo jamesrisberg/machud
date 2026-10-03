@@ -159,6 +159,7 @@ extension LoadoutEngine {
     /// `apply loadout=X plan=1`: what apply would do, slot by slot, without doing it.
     func planJSON(_ loadout: Loadout, screen: NSScreen? = nil) -> [String: Any] {
         let (steps, report) = plan(loadout, screen: screen)
+        if report.refused != nil { return report.json }
         var d: [String: Any] = ["ok": true, "loadout": loadout.name, "policy": store.spacesPolicy.rawValue,
                                 "plan": steps.map(\.json)]
         if loadout.hud != nil { d["hud"] = true }
@@ -167,9 +168,14 @@ extension LoadoutEngine {
         return d
     }
 
-    /// The same plan as values, for the preview overlay.
+    /// The same plan as values, for the preview overlay. Refused, like apply, for a loadout
+    /// that spans desktops or displays while that is off.
     func plan(_ loadout: Loadout, screen: NSScreen? = nil) -> (steps: [PlacementPlan.Step], report: ApplyReport) {
         var report = ApplyReport(loadout: loadout.name)
+        if let refusal = ExperimentalLoadouts.refusal(for: loadout, in: store.config) {
+            report.refused = refusal
+            return ([], report)
+        }
         // A HUD-only loadout has no layout and no windows to place.
         guard !loadout.allSlots.isEmpty || loadout.hud == nil else { return ([], report) }
         let groups = resolveGroups(loadout, screen: screen, report: &report)
@@ -381,8 +387,9 @@ extension LoadoutEngine.ApplyReport {
     }
 
     /// Toast lines: every slot that did something other than a plain in-place fit, and
-    /// every failure.
+    /// every failure; for a refused loadout, why.
     func detailLines(labels: (String) -> String) -> [String] {
+        if let refused { return [refused] }
         var lines: [String] = []
         var covered = Set<String>()
         for step in steps {

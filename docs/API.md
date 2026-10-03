@@ -27,7 +27,7 @@ display). Region geometry in `layouts` is fractions of the screen's visible area
 | `help` | | `commands`: every command the running app accepts |
 | `ping` | | `pid` |
 | `layouts` | | `active` layout name, `layouts[]` with `regions[] {id, name, x, y, w, h}`; each carries `hidden` (true: kept for one loadout, not offered to snap into) |
-| `loadouts` | | `loadouts[]` (full `Loadout` objects: `name`, `layout`, `slots[] {regionID, occupant}`, `hotkey`, `screens?`, `hud?` — see HUD loadouts) and `startup` (the `startupLoadout`, or empty). The editing actions are under [Layouts and loadouts](#layouts-and-loadouts) |
+| `loadouts` | | `loadouts[]` (full `Loadout` objects: `name`, `layout`, `slots[] {regionID, occupant}`, `hotkey`, `screens?`, `hud?` — see HUD loadouts) and `startup` (the `startupLoadout`, or empty). While multi-desktop loadouts are off, loadouts that span several desktops or displays are left out and counted in `heldBack`, with `heldBackNote` saying why (see [One screen, or several](#one-screen-or-several)). The editing actions are under [Layouts and loadouts](#layouts-and-loadouts) |
 | `windows` | | `windows[] {window, pid, bundleID, app, title, x, y, w, h}` for every on-screen user window; windows MacHUD opened also carry `panel`, `web` or `browser` + `host` |
 | `diagnose` | | saves a snapshot of where every MacHUD-family window really is and answers `path` (the file) and `anomalies[]` (what looks wrong, one sentence each); changes nothing on screen or in any setting. See [Diagnostics](#diagnostics) |
 | `status` | `screen=<ref>` (optional) | `layout`, `activeLoadout`, `regions[] {region, name, x, y, w, h, screen, space, occupant?, window?, iou, fits}` — what sits in each region now, plus `redirected[]` when the last apply had to stand in for a missing display |
@@ -48,8 +48,8 @@ display). Region geometry in `layouts` is fractions of the screen's visible area
 | `loadouts delete` | `name` | delete a loadout and the hidden layouts it owns; clears `startupLoadout` if it was this one. Returns `removedLayouts[]` |
 | `loadouts startup` | `name` (omit, or `name=none`, to clear) | set `startupLoadout`, the loadout applied at launch |
 | `reload` | | re-read `~/.config/machud/layouts.json` |
-| `apply` | `loadout`, `clear=1`, `screen=<ref>` (optional) | launch/find each occupant and place it in its region; with `clear`, first minimise the other windows showing on each screen the loadout covers (on the desktops it visits); then the loadout's `hud` part, if any (see HUD loadouts). `screen` picks the display for the one-screen form (default: under the mouse). Returns `placed[]`, `failed{}`, `cleared`, `redirected[]` when a display was missing, `hud {dock?, apps {id: "applied" or why not}}`, and `slots[]`: the plan step per slot plus `result` (`placed`/`failed`), `error`, and `actual` {x, y, w, h} when the app kept a different frame. See [Placement plan](#placement-plan) |
-| `apply` | `loadout`, `plan=1` (+ optional `screen`) | **dry run**: `plan[]` of `{slot, region, occupant, action, from?, to, reason, window?}` without moving anything, plus `policy`, `failed{}` / `redirected[]` for missing displays and layouts |
+| `apply` | `loadout`, `clear=1`, `screen=<ref>` (optional) | launch/find each occupant and place it in its region; with `clear`, first minimise the other windows showing on each screen the loadout covers (on the desktops it visits); then the loadout's `hud` part, if any (see HUD loadouts). `screen` picks the display for the one-screen form (default: under the mouse). A loadout that spans several desktops or displays while multi-desktop loadouts are off is refused before anything moves: `ok: false` and `error` say why. Returns `placed[]`, `failed{}`, `cleared`, `redirected[]` when a display was missing, `hud {dock?, apps {id: "applied" or why not}}`, and `slots[]`: the plan step per slot plus `result` (`placed`/`failed`), `error`, and `actual` {x, y, w, h} when the app kept a different frame. See [Placement plan](#placement-plan) |
+| `apply` | `loadout`, `plan=1` (+ optional `screen`) | **dry run**: `plan[]` of `{slot, region, occupant, action, from?, to, reason, window?}` without moving anything, plus `policy`, `failed{}` / `redirected[]` for missing displays and layouts. Refused like `apply` |
 | `preview` | `loadout` (default: the active one), `action=show\|apply\|cancel` | draw the plan over every display (regions coloured by action, Apply / Cancel); `apply` / `cancel` answer it. Returns `visible`, `loadout` |
 | `capture` | `name`, optional `screen=<ref>` | **derive a layout from the windows on that screen** (one region per window at the window's exact frame, stacked windows included) and a loadout of the same name that fills it; both are saved and the layout becomes active. Regions of an existing layout with that name are reused where they still match, so editor tweaks survive a recapture. Returns `layout`, `regions`, `slots`, `screen`, `loadout` |
 | `capture` | `name`, `layout=<name>` (+ optional `screen`) | fill only: snapshot which window sits in each region of an existing layout, without touching its regions |
@@ -75,7 +75,8 @@ attached and unambiguous; `main`, `builtin` and `index` stay roles.
 
 When the set of attached displays changes (debounced 1 s; resolution and
 arrangement changes do not count), the active loadout is re-applied without
-`clear`.
+`clear`; one that spans several desktops or displays while multi-desktop loadouts are
+off is not, and a toast says so.
 
 Multi-screen loadouts carry `screens[]` instead of (or as well as) the single
 `layout` + `slots` pair, and any slot may name a desktop:
@@ -100,7 +101,13 @@ span several displays or desktops (per-display `screens[]`, or a slot that names
 what exists only for them, are experimental: they work only while
 `experimental.multiDesktopLoadouts` is on (MacHUD's settings, Experimental, **Multi-desktop
 loadouts**, or `settings set experimental.multiDesktopLoadouts=true`). It is off by default and
-takes effect at once.
+takes effect at once. While it is off:
+
+- `loadouts` lists only the one-screen loadouts and counts the others in `heldBack`. Nothing
+  is converted or deleted: turning the setting on brings them back.
+- `apply` (and `plan=1`, and the preview) refuses a spanning loadout by name before anything
+  moves, saying how to turn the setting on. The startup loadout and the re-apply after a
+  display change do not run one either; a toast says so.
 
 ## Missing displays
 
@@ -596,7 +603,9 @@ only that (`"layout": ""`, `"slots": []`):
 - **At startup**: `startupLoadout` (layouts.json) names a loadout applied about 2 s after
   launch, as soon as every sibling it names that is already running is listening (at most
   8 s more; apps that are not running are launched by the apply). The Save dialog's "Put
-  it back when MacHUD starts" and each loadout's **Apply at Startup** menu item set it.
+  it back when MacHUD starts" and each loadout's **Apply at Startup** menu item set it. A
+  startup loadout that spans several desktops or displays while multi-desktop loadouts are
+  off is not applied; a toast says so.
 
 ## Settings window
 
