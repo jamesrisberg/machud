@@ -26,9 +26,15 @@ final class LayoutEditorController: NSObject {
     }
 
     /// Open on a loadout's layout with that loadout selected, so its regions and
-    /// occupants are what is being edited ("Edit Layout" on a loadout).
+    /// occupants are what is being edited ("Edit Layout" on a loadout). A loadout hidden while
+    /// multi-desktop loadouts are off is refused with a toast saying why.
     func open(loadout name: String) {
         guard let loadout = store.loadout(named: name) else { open(); return }
+        if let reason = ExperimentalLoadouts.refusal(for: loadout, in: store.config) {
+            NSLog("MacHUD: refused to edit '%@': %@", name, reason)
+            MainActor.assumeIsolated { Toast.show("Could not edit \(name)", detail: reason, seconds: 6) }
+            return
+        }
         let screen = ScreenCoords.screen(containing: NSEvent.mouseLocation) ?? NSScreen.main
         let descriptors = NSScreen.screens.map(\.descriptor)
         let position = screen.flatMap { NSScreen.screens.firstIndex(of: $0) }
@@ -783,9 +789,11 @@ final class EditorView: NSView {
 
     // MARK: Loadouts / occupants
 
+    /// The offered loadouts on the current layout: a loadout hidden while multi-desktop
+    /// loadouts are off is not listed.
     private var currentLayoutLoadouts: [Loadout] {
         guard let name = layout?.name else { return [] }
-        return (config.loadouts ?? []).filter { $0.layout == name }
+        return ExperimentalLoadouts.offered(in: config).filter { $0.layout == name }
     }
 
     private var currentLoadout: Loadout? {

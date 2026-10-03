@@ -24,7 +24,25 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   (`log show --predicate 'subsystem == "com.jrisberg.machud.voice"'`), readable rather than
   redacted.
 
+### Changed
+- A loadout is the screen you are looking at. **Capture This Screen as Loadout…** (the Loadouts
+  menu, the wheel and the Loadouts settings tab alike) captures the display under the pointer,
+  on the desktop showing, even when other displays have windows; the capture sheet no longer
+  offers to walk desktops, and the wheel's capture wedge has one capture ring.
+- Loadouts that span several desktops or displays are experimental, behind **Multi-desktop
+  loadouts** under Experimental in MacHUD's settings (off by default). While it is off they are
+  hidden from the Loadouts menu, the wheel, their hotkeys, the Loadouts settings tab and the
+  layout editor, and the menu and the tab say how many are hidden; nothing is converted or
+  deleted. A capture or HUD save cannot reuse a hidden loadout's name, and applying, previewing
+  or editing one says why it cannot. Turning the setting on brings them back at once, with the
+  every-display capture, the desktop walk and the desktop pictures in the settings tab.
+- The capture sheet's "Include the tool dock and the apps' panels (the HUD)" box starts unticked.
+- The Loadouts settings tab draws a one-screen loadout on one screen, without naming a display,
+  since it goes on whichever screen you apply it to.
+
 ### Fixed
+- With multi-desktop loadouts on, the wheel says how many desktops a captured multi-desktop
+  loadout covers (it said none).
 - The wake word no longer stays off after the microphone stops for it (an audio device change, a
   microphone that would not start): it tries again after 2 seconds, 10 seconds, then every minute,
   and the Voice settings say why it is not listening meanwhile.
