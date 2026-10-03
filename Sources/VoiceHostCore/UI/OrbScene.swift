@@ -200,8 +200,9 @@ struct LevelHistory: Equatable {
         values = Array(repeating: 0, count: capacity)
     }
 
+    /// A non-finite level is skipped (clamping would pass NaN through to the bars).
     mutating func append(_ level: Double) {
-        guard !values.isEmpty else { return }
+        guard !values.isEmpty, level.isFinite else { return }
         values.removeFirst()
         values.append(min(max(level, 0), 1))
     }

@@ -30,6 +30,7 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   and the Voice settings say why it is not listening meanwhile.
 - The voice orb's working arc keeps turning however long MacHUD has been running; after about 40
   minutes of animation it was no longer drawn.
+- A glitched microphone level reading can no longer freeze the voice orb's listening pulse.
 
 ## [0.3.1] - 2026-10-02
 

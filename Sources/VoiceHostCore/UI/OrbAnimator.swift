@@ -60,8 +60,9 @@ struct OrbAnimator: Equatable {
             stretch += (target - stretch) * CGFloat(1 - exp(-dt * Self.stretchRate))
             if abs(target - stretch) < Self.settleEpsilon { stretch = target }
         }
-        // Fast attack, gentler release (SpeakFree's bars use the same shape).
-        let goal = CGFloat(min(max(input, 0), 1))
+        // Fast attack, gentler release (SpeakFree's bars use the same shape). A non-finite level
+        // is ignored: clamping passes NaN through, and the level would stay NaN for good.
+        let goal = input.isFinite ? CGFloat(min(max(input, 0), 1)) : level
         let rate: Double = goal > level ? 50 : 12
         level += (goal - level) * CGFloat(1 - exp(-dt * rate))
         let floatGoal = Self.floatTarget(for: scene, reduceMotion: reduceMotion)
