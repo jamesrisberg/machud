@@ -59,6 +59,18 @@ final class FakeDictation: DictationDriving {
         onUpdate?(takeID, .finished(text: text, destination: currentDestination ?? .cursor, transcript: transcript ?? text))
     }
 
+    /// Completes the take `id` (one being transcribed while another records) at `destination`.
+    func finish(_ text: String, take id: UUID, at destination: DictationDestination) {
+        if id == takeID { isCapturing = false }
+        onUpdate?(id, .finished(text: text, destination: destination, transcript: text))
+    }
+
+    /// The take `id` failed.
+    func fail(_ failure: DictationFailure, take id: UUID) {
+        if id == takeID { isCapturing = false }
+        onUpdate?(id, .failed(failure))
+    }
+
     func level(_ value: Double) { onUpdate?(takeID, .level(value)) }
 
     func partial(_ text: String) { onUpdate?(takeID, .partial(text)) }
@@ -210,9 +222,9 @@ final class FakeModels: VoiceModelProviding {
 
 @MainActor
 final class FakeWake: WakeDriving {
-    var onWake: (() -> Void)?
+    var onWake: ((WakeDetection) -> Void)?
     var onListeningChanged: ((Bool) -> Void)?
-    var onProblem: ((String?) -> Void)?
+    var onProblem: ((String) -> Void)?
     var starts: [VoiceSettings] = []
     var stops = 0
     var listening = false
@@ -221,6 +233,11 @@ final class FakeWake: WakeDriving {
         starts.append(settings)
         listening = true
         onListeningChanged?(true)
+    }
+
+    /// A detection of the wake phrase.
+    func detect(score: Double = 0.973, phrase: String = "Hey Jarvis") {
+        onWake?(WakeDetection(score: score, phrase: phrase))
     }
 
     /// Listening stops by itself, as a failed microphone does.
@@ -235,6 +252,14 @@ final class FakeWake: WakeDriving {
         listening = false
         onListeningChanged?(false)
     }
+}
+
+/// The take journal in memory.
+@MainActor
+final class FakeTakeJournal: TakeJournaling {
+    var records: [VoiceTakeRecord] = []
+    func append(_ record: VoiceTakeRecord) { records.append(record) }
+    func recent(limit: Int) -> [VoiceTakeRecord] { Array(records.suffix(limit)) }
 }
 
 @MainActor

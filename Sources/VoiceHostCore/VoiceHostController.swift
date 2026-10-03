@@ -11,8 +11,13 @@ import VoiceKit
 /// Takes: fn dictates at the cursor (`.begin(.primary)`) and moves the take to the agent on the
 /// alternate gesture, with `gesturePending` set until the gesture is decided; the orb, the wake word and the socket's `ask` start an agent take that
 /// ends on a click, `stop`, or a `SilenceEndpointer` built from `handsFree`; why each such take
-/// ended is kept in `lastTakeEnd` and logged. An agent take's text becomes a brain
+/// ended is kept in `lastTakeEnd`. An agent take's text becomes a brain
 /// turn whose snapshots fill the card and, with `voice.speakReplies`, are spoken as they stream.
+///
+/// Every take carries what started it (`VoiceTakeTrigger`). Its start, its end and what became of
+/// it are logged (`log`), and its record, never its words, goes to `takeJournal` once its outcome
+/// is known; so does a take refused before it recorded, a wake detection that started none
+/// included.
 ///
 /// One turn at a time: the companion refuses a second one, so while the brain works an agent
 /// take is refused, and a take moved to the agent then (or while the brain is off) is typed at
@@ -52,8 +57,8 @@ public final class VoiceHostController: VoiceHostActing {
     }
     /// Every state change, after the presenter (the socket's `state` event).
     public var onStateChange: ((VoiceHostState) -> Void)?
-    /// Where each hands-free take's ending is written, one line per take.
-    var logTakeEnd: (String) -> Void = { NSLog("MacHUDVoice: hands-free take ended: %@", $0) }
+    /// Where the take and wake-listener lines go (`TakeLog`, the unified log).
+    var log: (String) -> Void = TakeLog.notice
 
     /// The latest brain request, approval, cancel or session open in flight (tests await it).
     var pendingWork: Task<Void, Never>?
@@ -68,6 +73,10 @@ public final class VoiceHostController: VoiceHostActing {
     static let agentBusyPasted = "The agent is still working — pasted instead"
     static let voiceOff = "Voice is off"
     static let voiceMuted = "Voice is muted"
+    static let wakeOff = "The wake word is off"
+    static let otherWakePhrase = "Not the wake phrase listened for"
+    static let wakeModelMissing = "The wake phrase's model is not installed"
+    static let hostQuit = "The voice host quit"
     static let modelMissing = "Speech model not installed"
     static let brainStarting = "The brain is starting."
     static let brainConnecting = "Connecting to the brain…"
@@ -105,7 +114,10 @@ public final class VoiceHostController: VoiceHostActing {
     /// The brain's workspace while the settings name none.
     private let homeDirectory: URL
     private let now: () -> TimeInterval
+    private let wallClock: () -> Date
     private let schedule: VoiceScheduler
+    /// Where each take's record goes; nil keeps none (`takes` then says so).
+    let takeJournal: TakeJournaling?
 
     private struct Take {
         /// Nil until the session names the take (its first update or `start`'s outcome).
@@ -116,12 +128,20 @@ public final class VoiceHostController: VoiceHostActing {
         /// Hands-free takes only, until it ends the take.
         var endpointer: SilenceEndpointer?
         var startedAt: TimeInterval = 0
-        /// `lastTakeEnd` has this take's ending.
-        var endReported = false
-        /// Started by the fn key: a change to the key setup ends it.
-        var fromKeys = false
+        /// When it started, for the journal and the conversation.
+        var date: Date
+        /// What started it; an fn gesture that moves the take marks it retargeted.
+        var trigger: VoiceTakeTrigger
+        /// How it ended, once it has; the first reason given is the one kept.
+        var end: VoiceTakeEnd?
         /// The take was kept at the cursor instead of going to the agent; shown when it ends.
         var pastedNotice: String?
+
+        /// Started by the fn key: a change to the key setup ends it.
+        var fromKeys: Bool {
+            if case .key = trigger { return true }
+            return false
+        }
     }
 
     private struct Turn {
@@ -150,12 +170,18 @@ public final class VoiceHostController: VoiceHostActing {
     private var take: Take? {
         didSet { if take == nil { endGesture() } }
     }
+    /// Takes that stopped recording and are being transcribed, by id, until their outcome.
+    private var transcribing: [UUID: Take] = [:]
     private var gesture: Gesture?
     /// The most recent take; only its outcome moves the phase.
     private var latestTakeID: UUID?
     private var turn: Turn?
     /// A turn submitted and not yet accepted.
     private var submitting: String?
+    /// A spoken turn's record, written once the brain answers its submission (`requestId`).
+    private var submission: (requestId: String, record: VoiceTakeRecord)?
+    /// `prepareToQuit` journaled what was in flight; nothing more is written.
+    private var quitting = false
     /// The brain's latest snapshot, whoever's request it is.
     private var lastSnapshot: AgentSessionSnapshot?
     private var runningKeys: KeySetup?
@@ -168,8 +194,6 @@ public final class VoiceHostController: VoiceHostActing {
     private(set) var hostContextLoad: Task<Void, Never>?
     private var appliedVoice: VoiceSettings?
     private var failureToken = UUID()
-    /// The notice of the take being transcribed.
-    private var pendingNotice: String?
     /// What the orb says when the cancelled take's dictation reports its end (`nothingHeard`).
     private var cancelNotice: String?
     private var started = false
@@ -209,7 +233,9 @@ public final class VoiceHostController: VoiceHostActing {
          sessionKeyOf: @escaping (AgentSessionSnapshot) -> String? = { $0.sessionKey },
          homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
          now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
-         schedule: @escaping VoiceScheduler = mainQueueScheduler) {
+         wallClock: @escaping () -> Date = Date.init,
+         schedule: @escaping VoiceScheduler = mainQueueScheduler,
+         takeJournal: TakeJournaling? = nil) {
         self.settings = settings.resolvingWakePhrase(available: wakeModels.map(\.phrase))
         self.dictation = dictation
         self.keys = keys
@@ -230,7 +256,9 @@ public final class VoiceHostController: VoiceHostActing {
         self.sessionKeyOf = sessionKeyOf
         self.homeDirectory = homeDirectory
         self.now = now
+        self.wallClock = wallClock
         self.schedule = schedule
+        self.takeJournal = takeJournal
     }
 
     /// Connects the collaborators and applies the settings.
@@ -256,18 +284,9 @@ public final class VoiceHostController: VoiceHostActing {
             state.phase = .idle
         }
         speaker?.onChunkStarted = { [weak self] chunk in self?.chunkStarted(chunk) }
-        wake?.onWake = { [weak self] in
-            guard let self else { return }
-            startTake(.agent, handsFree: true, fromKeys: false)
-            // The listener stays quiet after a wake; with no take to pause it, listen again now.
-            if take == nil { restartWake() }
-        }
-        wake?.onListeningChanged = { [weak self] in self?.state.wakeListening = $0 }
-        wake?.onProblem = { [weak self] problem in
-            guard let self else { return }
-            wakeListenerProblem = problem
-            refreshWakeProblem()
-        }
+        wake?.onWake = { [weak self] in self?.wakeDetected($0) }
+        wake?.onListeningChanged = { [weak self] in self?.wakeListeningChanged($0) }
+        wake?.onProblem = { [weak self] in self?.wakeListenerFailed($0) }
         apply(settings)
     }
 
@@ -314,17 +333,23 @@ public final class VoiceHostController: VoiceHostActing {
 
     // MARK: - Actions
 
+    /// The orb's (the UI's) actions: a take one of them starts was started by the orb.
     public func perform(_ action: VoiceHostAction) {
+        perform(action, trigger: .orb)
+    }
+
+    /// `trigger` is what started a take the action starts (the socket passes its action).
+    func perform(_ action: VoiceHostAction, trigger: VoiceTakeTrigger) {
         switch action {
         case .orbClicked:
             if isSpeaking { return stopSpeech() }
             if take != nil { return stopTake() }
             switch state.phase {
-            case .idle, .failed: startTake(.agent, handsFree: true, fromKeys: false)
+            case .idle, .failed: startTake(.agent, handsFree: true, trigger: trigger)
             default: break
             }
         case .start(let mode):
-            startTake(mode, handsFree: mode == .agent, fromKeys: false)
+            startTake(mode, handsFree: mode == .agent, trigger: trigger)
         case .stop:
             if take != nil { stopTake() } else if isSpeaking { stopSpeech() }
         case .cancel:
@@ -360,11 +385,31 @@ public final class VoiceHostController: VoiceHostActing {
         }
     }
 
-    /// Why a socket `dictate` or `ask` would not start, or nil.
-    func refusal(for mode: VoiceMode) -> String? {
-        if !settings.enabled { return Self.voiceOff }
-        if state.muted { return Self.voiceMuted }
-        return nil
+    /// Why the socket's `action name=` (`ask` or `dictate`) would not start a take, journaled as
+    /// refused like any other take that never recorded; nil when it may.
+    func socketRefusal(for mode: VoiceMode, action: String) -> String? {
+        let refusal = !settings.enabled ? Self.voiceOff : state.muted ? Self.voiceMuted : nil
+        if let refusal { refused(.socket(action: action), mode: mode, reason: refusal) }
+        return refusal
+    }
+
+    /// The host is quitting: every take still in flight (recording, being transcribed, or sent
+    /// and not yet taken by the brain) is journaled as cancelled because of it, and nothing is
+    /// journaled after.
+    func prepareToQuit() {
+        guard !quitting else { return }
+        reportTakeEnd(.cancelled)
+        if let current = take { journal(current, outcome: .cancelled, reason: Self.hostQuit) }
+        for ended in transcribing.values.sorted(by: { $0.startedAt < $1.startedAt }) {
+            journal(ended, outcome: .cancelled, reason: Self.hostQuit)
+        }
+        if var waiting = submission?.record {
+            waiting.outcome = .cancelled
+            waiting.reason = Self.hostQuit
+            write(waiting)
+        }
+        submission = nil
+        quitting = true
     }
 
     /// Speaks `text` with the reply voice, whether or not replies are spoken (a preview from
@@ -409,9 +454,10 @@ public final class VoiceHostController: VoiceHostActing {
         guard take != nil || dictation.isCapturing else { return }
         reportTakeEnd(.cancelled)
         dictation.cancel()
-        if take != nil {
+        if let current = take {
             // The session reported nothing (no take was capturing after all).
             take = nil
+            journal(current, outcome: Self.thrownAway(current))
             refreshWake()
             settle(.idle)
         }
@@ -445,30 +491,63 @@ public final class VoiceHostController: VoiceHostActing {
         turn != nil || submitting != nil || lastSnapshot?.isWorking == true
     }
 
-    private func startTake(_ mode: VoiceMode, handsFree: Bool, fromKeys: Bool) {
+    /// A refused take is journaled, and shown on the orb unless a take is already recording.
+    private func startTake(_ mode: VoiceMode, handsFree: Bool, trigger: VoiceTakeTrigger) {
         stopSpeech()
         // A reply still streaming is never spoken into the open microphone.
         silenceTurn()
-        if !settings.enabled { return fail(Self.voiceOff) }
-        if mode == .agent, !brainEnabled { return fail(Self.brainOff) }
-        if mode == .agent, let problem = blockingBrainProblem { return fail(problem) }
-        if mode == .agent, agentBusy { return fail(Self.agentBusy) }
-        guard take == nil, !dictation.isCapturing else { return }
+        if let refusal = startRefusal(mode) {
+            refused(trigger, mode: mode, reason: refusal)
+            return fail(refusal)
+        }
+        guard take == nil, !dictation.isCapturing else {
+            return refused(trigger, mode: mode, reason: Self.takeRecording)
+        }
         take = Take(id: nil, mode: mode, handsFree: handsFree,
                     endpointer: handsFree ? SilenceEndpointer(settings: settings.handsFree) : nil,
-                    startedAt: now(), fromKeys: fromKeys)
+                    startedAt: now(), date: wallClock(), trigger: trigger)
         refreshWake()
         switch dictation.start(mode == .agent ? .caller : .cursor) {
         case .started(let id), .resumed(let id):
             if take != nil, take?.id == nil { take?.id = id }
             latestTakeID = id
+            log("take started: \(trigger.summary), \(mode.rawValue), \(handsFree ? "hands-free" : "held")")
         case .refused(let failure), .failed(let failure):
             // `.failed` was reported through `onUpdate` too; only a refusal still holds the take.
-            guard take != nil, take?.id == nil else { return }
+            guard let current = take, current.id == nil else { return }
             take = nil
+            journal(current, outcome: .refused, reason: Self.message(for: failure) ?? failure.message)
             refreshWake()
             if let message = Self.message(for: failure) { fail(message) } else { settle(.idle) }
         }
+    }
+
+    /// Why a take for `mode` cannot start now, or nil.
+    private func startRefusal(_ mode: VoiceMode) -> String? {
+        if !settings.enabled { return Self.voiceOff }
+        guard mode == .agent else { return nil }
+        if !brainEnabled { return Self.brainOff }
+        if let problem = blockingBrainProblem { return problem }
+        if agentBusy { return Self.agentBusy }
+        return nil
+    }
+
+    /// A detection starts an agent take. One that arrives after the listener was told to stop
+    /// (no listener is wanted: voice off, muted, the wake word off, a take recording) or that is
+    /// not of the phrase listened for (a listener replaced since) is refused before anything
+    /// else: it is journaled and logged and touches nothing, not the reply's speech, the orb or
+    /// the listener running now.
+    private func wakeDetected(_ detection: WakeDetection) {
+        let trigger = VoiceTakeTrigger(detection)
+        guard let listening = runningWake else {
+            return refused(trigger, mode: .agent, reason: wakeStopReason)
+        }
+        guard TriggerPhrase.normalize(detection.phrase) == TriggerPhrase.normalize(listening.wakePhrase) else {
+            return refused(trigger, mode: .agent, reason: Self.otherWakePhrase)
+        }
+        startTake(.agent, handsFree: true, trigger: trigger)
+        // The listener stays quiet after a wake; with no take to pause it, listen again now.
+        if take == nil { restartWake() }
     }
 
     private func handle(_ intent: KeyGestureRecognizer.Intent) {
@@ -480,10 +559,11 @@ public final class VoiceHostController: VoiceHostActing {
         case .begin(.primary):
             // Armed before the take reports recording, so the orb never starts toward the waveform.
             beginGesture()
-            startTake(.dictation, handsFree: false, fromKeys: true)
+            startTake(.dictation, handsFree: false, trigger: .key(.primary, retargeted: false))
             if take == nil { endGesture() }
-        case .begin(.alternate): startTake(.agent, handsFree: false, fromKeys: true)
+        case .begin(.alternate): startTake(.agent, handsFree: false, trigger: .key(.alternate, retargeted: false))
         case .retarget(.alternate):
+            markRetargeted()
             // The agent cannot take it: keep the words at the cursor and say why at the end.
             if !brainEnabled {
                 take?.pastedNotice = Self.brainOffPasted
@@ -494,10 +574,18 @@ public final class VoiceHostController: VoiceHostActing {
             } else {
                 dictation.retarget(.caller)
             }
-        case .retarget(.primary): dictation.retarget(.cursor)
+        case .retarget(.primary):
+            markRetargeted()
+            dictation.retarget(.cursor)
         case .end: if take != nil { stopTake() }
         case .discard: dictation.cancel()
         }
+    }
+
+    /// A later fn gesture moved the take (or asked to; the brain may have kept it at the cursor).
+    private func markRetargeted() {
+        guard let trigger = take?.trigger else { return }
+        take?.trigger = trigger.retargeted
     }
 
     // MARK: - Gesture window
@@ -572,33 +660,45 @@ public final class VoiceHostController: VoiceHostActing {
             state.partialTranscript = text
             take?.endpointer?.observe(partial: text, at: now())
         case .transcribing:
-            guard isCurrent, let current = take else { return }
+            guard isCurrent else { return }
             reportTakeEnd(.dictation)
-            let mode = current.mode
-            // Keep the take's notice for its outcome.
-            pendingNotice = current.pastedNotice
+            guard let current = take else { return }
+            // Kept, with its notice, until its outcome.
+            transcribing[id] = current
             take = nil
             var next = state
-            next.phase = .transcribing(mode)
+            next.phase = .transcribing(current.mode)
             next.inputLevel = 0
             state = next
             refreshWake()
         case .finished(let text, let destination, let transcript):
-            let notice = isCurrent ? take?.pastedNotice : pendingNotice
-            pendingNotice = nil
             if isCurrent { reportTakeEnd(.dictation) }
+            let ended = isCurrent ? take : transcribing.removeValue(forKey: id)
+            let notice = ended?.pastedNotice
             endCapture(ifCurrent: isCurrent)
             if settings.feedTranscripts { sendToFeed(transcript, source: Self.dictationSource) }
             if destination == .caller {
-                submit(text, isLatest: isLatest)
-            } else if isLatest {
-                if let notice { fail(notice) } else { settle(.idle) }
+                submit(text, isLatest: isLatest, ended: ended)
+            } else {
+                if let ended {
+                    let typed = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? nil : text.count
+                    journal(ended, mode: .dictation, outcome: typed == nil ? .nothingHeard : .typed,
+                            reason: notice, characters: typed)
+                }
+                if isLatest { if let notice { fail(notice) } else { settle(.idle) } }
             }
         case .failed(let failure):
-            pendingNotice = nil
             let notice = failure == .cancelled ? cancelNotice : nil
             cancelNotice = nil
             if isCurrent { reportTakeEnd(failure == .cancelled ? .cancelled : .failed) }
+            if let ended = isCurrent ? take : transcribing.removeValue(forKey: id) {
+                if failure == .cancelled {
+                    journal(ended, outcome: Self.thrownAway(ended))
+                } else {
+                    journal(ended, outcome: .failed, reason: Self.message(for: failure) ?? failure.message)
+                }
+            }
             endCapture(ifCurrent: isCurrent)
             guard isLatest else { return }
             if let message = Self.message(for: failure) ?? notice { fail(message) } else { settle(.idle) }
@@ -617,13 +717,12 @@ public final class VoiceHostController: VoiceHostActing {
         dictation.stop()
     }
 
-    /// Records why the current hands-free take ended in `lastTakeEnd` and the log; the first
-    /// reason given for a take is the one kept.
+    /// Records why the current take ended, in the take and the log, and for a hands-free take in
+    /// `lastTakeEnd`; the first reason given for a take is the one kept.
     private func reportTakeEnd(_ reason: VoiceTakeEnd.Reason) {
-        guard let current = take, current.handsFree, !current.endReported else { return }
-        take?.endReported = true
+        guard let current = take, current.end == nil else { return }
         let time = now()
-        var end = VoiceTakeEnd(reason: reason, seconds: max(time - current.startedAt, 0))
+        var end = VoiceTakeEnd(reason: reason, seconds: max(time - current.startedAt, 0), trigger: current.trigger)
         if let endpointer = current.endpointer {
             end.quietMs = endpointer.quiet(at: time).map { Int(($0 * 1000).rounded()) }
             if endpointer.heardLevels {
@@ -635,8 +734,41 @@ public final class VoiceHostController: VoiceHostActing {
                 end.grace = endpointer.unfinished(at: time)
             }
         }
-        state.lastTakeEnd = end
-        logTakeEnd(end.summary)
+        take?.end = end
+        log("take ended: \(end.summary)")
+        if current.handsFree { state.lastTakeEnd = end }
+    }
+
+    /// A cancelled take was thrown away by the endpointer (nothing heard) or by the user.
+    private static func thrownAway(_ take: Take) -> VoiceTakeRecord.Outcome {
+        take.end?.reason == .nothingHeard ? .nothingHeard : .cancelled
+    }
+
+    /// The journal's record of `take` with this outcome; `mode` where the words went, if known.
+    private func record(_ take: Take, mode: VoiceMode? = nil, outcome: VoiceTakeRecord.Outcome,
+                        reason: String? = nil, characters: Int? = nil) -> VoiceTakeRecord {
+        VoiceTakeRecord(date: VoiceTakeRecord.timestamp(take.date), trigger: take.trigger, mode: mode ?? take.mode,
+                        seconds: take.end?.seconds, end: take.end?.reason, outcome: outcome, reason: reason,
+                        characters: characters)
+    }
+
+    /// What became of `take`, to the journal and the log.
+    private func journal(_ take: Take, mode: VoiceMode? = nil, outcome: VoiceTakeRecord.Outcome,
+                         reason: String? = nil, characters: Int? = nil) {
+        write(record(take, mode: mode, outcome: outcome, reason: reason, characters: characters))
+    }
+
+    /// A take that never recorded: refused by the host (the socket's own refusals included), or
+    /// a wake detection that started none.
+    func refused(_ trigger: VoiceTakeTrigger, mode: VoiceMode, reason: String) {
+        write(VoiceTakeRecord(date: VoiceTakeRecord.timestamp(wallClock()), trigger: trigger, mode: mode,
+                              outcome: .refused, reason: reason))
+    }
+
+    private func write(_ record: VoiceTakeRecord) {
+        guard !quitting else { return }
+        takeJournal?.append(record)
+        log("take \(record.summary)")
     }
 
     private func endCapture(ifCurrent isCurrent: Bool) {
@@ -679,17 +811,20 @@ public final class VoiceHostController: VoiceHostActing {
 
     // MARK: - Brain turns
 
-    private func submit(_ text: String, isLatest: Bool) {
+    /// An agent take's words: to the brain, or typed at the cursor when it cannot take them now.
+    /// `ended` is the take they came from, for the journal.
+    private func submit(_ text: String, isLatest: Bool, ended: Take?) {
         let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else {
+            if let ended { journal(ended, mode: .agent, outcome: .nothingHeard) }
             if isLatest { settle(.idle) }
             return
         }
         // The brain went off, or another turn started, while this take was recording.
-        guard brainEnabled, let brain else { return paste(prompt, notice: Self.brainOffPasted) }
-        if let problem = blockingBrainProblem { return paste(prompt, notice: Self.pasted(problem)) }
-        guard !agentBusy else { return paste(prompt, notice: Self.agentBusyPasted) }
-        begin(prompt, source: .voice, isLatest: isLatest, brain: brain)
+        guard brainEnabled, let brain else { return paste(prompt, notice: Self.brainOffPasted, ended: ended) }
+        if let problem = blockingBrainProblem { return paste(prompt, notice: Self.pasted(problem), ended: ended) }
+        guard !agentBusy else { return paste(prompt, notice: Self.agentBusyPasted, ended: ended) }
+        begin(prompt, source: .voice, isLatest: isLatest, brain: brain, ended: ended)
     }
 
     /// Sends `text` to the agent as a typed turn, to the same session as voice. Nil once it is
@@ -704,25 +839,32 @@ public final class VoiceHostController: VoiceHostActing {
         if let problem = blockingBrainProblem { return problem }
         if take?.mode == .agent { return Self.takeRecording }
         if agentBusy { return Self.agentBusy }
-        begin(prompt, source: .typed, isLatest: true, brain: brain)
+        begin(prompt, source: .typed, isLatest: true, brain: brain, ended: nil)
         return nil
     }
 
     /// Submits `prompt`; the conversation shows it at once, the card and the turn once the
-    /// brain takes it.
-    private func begin(_ prompt: String, source: ConversationSource, isLatest: Bool, brain: BrainDriving) {
+    /// brain takes it. A spoken one's take (`ended`) is journaled once the brain has answered.
+    private func begin(_ prompt: String, source: ConversationSource, isLatest: Bool, brain: BrainDriving,
+                       ended: Take?) {
         stopSpeech()
         // The voice loads while the brain thinks, so the first words come sooner.
         if repliesSpoken(source) { speaker?.warmUp() }
         let requestId = UUID().uuidString
         submitting = requestId
-        conversation.submitted(prompt, source: source)
+        conversation.submitted(prompt, source: source, date: VoiceTakeRecord.timestamp(ended?.date ?? wallClock()),
+                               trigger: ended?.trigger)
         conversationChanged()
+        if let ended {
+            submission = (requestId, record(ended, mode: .agent, outcome: .sent, characters: prompt.count))
+        }
         pendingWork = Task { [weak self] in
             do {
                 try await brain.submit(prompt, requestId: requestId)
+                self?.submissionAnswered(requestId, refusal: nil)
                 self?.accepted(prompt, requestId: requestId, source: source, isLatest: isLatest)
             } catch {
+                self?.submissionAnswered(requestId, refusal: error)
                 guard let self, submitting == requestId else { return }
                 submitting = nil
                 conversation.refused()
@@ -731,6 +873,29 @@ public final class VoiceHostController: VoiceHostActing {
                 fail(state.brainAvailable ? error.localizedDescription : state.brainProblem ?? error.localizedDescription)
             }
         }
+    }
+
+    /// The brain answered a spoken turn's submission: journaled as sent, or as refused with a
+    /// fixed reason and the companion's status code (its own words stay out of the journal and
+    /// the log; the orb still shows them).
+    private func submissionAnswered(_ requestId: String, refusal error: Error?) {
+        guard var record = submission?.record, submission?.requestId == requestId else { return }
+        submission = nil
+        if let error {
+            record.outcome = .refused
+            record.reason = Self.brainRefused(error)
+        }
+        write(record)
+    }
+
+    static let brainDidNotTake = "The brain did not take the turn"
+
+    /// `The brain did not take the turn (409)`; the code is the companion's status, or the
+    /// error's domain and code.
+    static func brainRefused(_ error: Error) -> String {
+        if case AgentSessionError.server(let code, _) = error { return "\(brainDidNotTake) (\(code))" }
+        let error = error as NSError
+        return "\(brainDidNotTake) (\(error.domain) \(error.code))"
     }
 
     /// A reply to a turn from `source` is spoken: with `voice.speakReplies` for a spoken turn
@@ -762,8 +927,9 @@ public final class VoiceHostController: VoiceHostActing {
         if let lastSnapshot, lastSnapshot.requestId == requestId { handle(lastSnapshot) }
     }
 
-    private func paste(_ text: String, notice: String) {
+    private func paste(_ text: String, notice: String, ended: Take?) {
         dictation.insert(text)
+        if let ended { journal(ended, mode: .agent, outcome: .typed, reason: notice, characters: text.count) }
         fail(notice)
     }
 
@@ -968,10 +1134,38 @@ public final class VoiceHostController: VoiceHostActing {
         guard let wake else { return }
         let wanted = wakeWanted && take == nil && wakeModel?.store.status.installed == true ? settings.voice : nil
         guard wanted != runningWake else { return }
-        if runningWake != nil { wake.stop() }
+        if runningWake != nil {
+            wake.stop()
+            log("wake listener stopped: \(wanted == nil ? wakeStopReason : "its settings changed")")
+        }
         runningWake = wanted
         wakeListenerProblem = nil
-        if let wanted { wake.start(wanted) }
+        guard let wanted else { return }
+        log("wake listener starting: \"\(wanted.wakePhrase)\", threshold \(String(format: "%.2f", wanted.wakeThreshold))")
+        wake.start(wanted)
+    }
+
+    /// Why no wake listener is wanted now: for the log, and for a detection that arrives anyway.
+    private var wakeStopReason: String {
+        if !settings.enabled { return Self.voiceOff }
+        if state.muted { return Self.voiceMuted }
+        if !settings.voice.wakeWordEnabled { return Self.wakeOff }
+        if take != nil { return Self.takeRecording }
+        return Self.wakeModelMissing
+    }
+
+    private func wakeListeningChanged(_ listening: Bool) {
+        let was = state.wakeListening
+        state.wakeListening = listening
+        if listening, !was { log("wake listener listening") }
+    }
+
+    /// The listener could not start or stopped by itself: `wakeProblem` says why until it is
+    /// started again.
+    private func wakeListenerFailed(_ problem: String) {
+        wakeListenerProblem = problem
+        refreshWakeProblem()
+        log("wake listener failed: \(problem)")
     }
 
     /// Why the wake word is on and not listening; nil while it is off, muted or able to listen.
@@ -998,8 +1192,12 @@ public final class VoiceHostController: VoiceHostActing {
         if problem != state.wakeProblem { state.wakeProblem = problem }
     }
 
+    /// Listens again after a wake that started no take.
     private func restartWake() {
-        if runningWake != nil { wake?.stop() }
+        if runningWake != nil {
+            wake?.stop()
+            log("wake listener stopped: re-arming after a wake that started no take")
+        }
         runningWake = nil
         refreshWake()
     }
@@ -1188,5 +1386,12 @@ public final class VoiceHostController: VoiceHostActing {
         } else if state.card != nil {
             state.card?.progress = Array(((state.card?.progress ?? []) + [message]).suffix(Self.progressLimit))
         }
+    }
+}
+
+extension VoiceTakeTrigger {
+    /// A wake detection, its score kept to three decimals (the detector scores in `Float`).
+    init(_ detection: WakeDetection) {
+        self = .wake(score: (detection.score * 1000).rounded() / 1000, phrase: detection.phrase)
     }
 }

@@ -11,6 +11,7 @@ final class VoiceHostCommandsTests: XCTestCase {
     private var controller: VoiceHostController!
     private var commands: VoiceHostCommands!
     private var sessions: FakeSessions!
+    private var journal: FakeTakeJournal!
 
     override func setUp() async throws {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-cmd-\(UUID().uuidString)")
@@ -18,11 +19,12 @@ final class VoiceHostCommandsTests: XCTestCase {
         brain = FakeBrain()
         secrets = InMemoryVoiceSecretStore()
         sessions = FakeSessions()
+        journal = FakeTakeJournal()
         let fakeBrain = brain!
         controller = VoiceHostController(
             settings: VoiceHostSettings(), dictation: dictation, keys: nil, brain: brain, speaker: nil,
             wake: nil, brainStateRoot: directory, sessions: sessions,
-            sessionKeyOf: { _ in fakeBrain.sessionKey }, schedule: { _, _ in })
+            sessionKeyOf: { _ in fakeBrain.sessionKey }, schedule: { _, _ in }, takeJournal: journal)
         controller.start()
         commands = VoiceHostCommands(controller: controller, store: VoiceHostSettingsStore(directory: directory),
                                      secrets: secrets, version: "1.2.3")
@@ -93,6 +95,66 @@ final class VoiceHostCommandsTests: XCTestCase {
         let end = try XCTUnwrap(state["lastTakeEnd"] as? [String: Any])
         XCTAssertEqual(end["reason"] as? String, "stop")
         XCTAssertNotNil(end["seconds"])
+        XCTAssertEqual(end["trigger"] as? [String: String], ["source": "socket", "action": "ask"])
+    }
+
+    func testTheSocketsClickIsNotTheOrbs() {
+        _ = commands.handle("action", ["name": "click"])
+        _ = commands.handle("action", ["name": "click"])
+        XCTAssertEqual(controller.state.lastTakeEnd?.trigger, .socket(action: "click"))
+    }
+
+    // MARK: takes
+
+    func testTakesListsTheNewestTakesOldestFirst() async throws {
+        XCTAssertTrue(VoiceHostCommands.verbs.contains("takes"))
+        _ = commands.handle("action", ["name": "ask"])
+        _ = commands.handle("action", ["name": "stop"])
+        dictation.finish("hello agent")
+        await controller.pendingWork?.value
+        brain.push(status: "idle", output: "Hi")
+        _ = commands.handle("action", ["name": "dictate"])
+        _ = commands.handle("action", ["name": "stop"])
+        dictation.finish("a note")
+
+        let reply = commands.handle("takes", [:])
+        XCTAssertEqual(reply["ok"] as? Bool, true, "\(reply)")
+        XCTAssertTrue(JSONSerialization.isValidJSONObject(reply))
+        let takes = try XCTUnwrap(reply["takes"] as? [[String: Any]])
+        XCTAssertEqual(takes.map { $0["outcome"] as? String }, ["sent", "typed"])
+        XCTAssertEqual(takes.map { ($0["trigger"] as? [String: String])?["action"] }, ["ask", "dictate"])
+        XCTAssertEqual(takes.map { $0["mode"] as? String }, ["agent", "dictation"])
+        XCTAssertEqual(takes.map { $0["characters"] as? Int }, [11, 6])
+        XCTAssertEqual(takes.map { $0["end"] as? String }, ["stop", "stop"])
+        XCTAssertNotNil(takes.first?["date"] as? String)
+        XCTAssertFalse("\(reply)".contains("hello agent"), "never the words")
+
+        let newest = try XCTUnwrap(commands.handle("takes", ["limit": "1"])["takes"] as? [[String: Any]])
+        XCTAssertEqual(newest.map { $0["outcome"] as? String }, ["typed"])
+    }
+
+    func testTakesDefaultsToTwentyAndChecksTheLimit() throws {
+        for _ in 0..<25 {
+            _ = commands.handle("action", ["name": "dictate"])
+            _ = commands.handle("action", ["name": "cancel"])
+        }
+        XCTAssertEqual(journal.records.count, 25)
+        XCTAssertEqual((commands.handle("takes", [:])["takes"] as? [Any])?.count, 20)
+        XCTAssertEqual((commands.handle("takes", ["limit": "100"])["takes"] as? [Any])?.count, 25)
+        for bad in ["0", "-1", "many", "2.5"] {
+            let reply = commands.handle("takes", ["limit": bad])
+            XCTAssertEqual(reply["ok"] as? Bool, false, bad)
+            XCTAssertEqual(reply["error"] as? String, "takes limit= must be a whole number of at least 1")
+        }
+    }
+
+    func testTakesWithoutAJournalSaysSo() {
+        let bare = VoiceHostController(settings: VoiceHostSettings(), dictation: FakeDictation(), keys: nil, brain: nil,
+                                       speaker: nil, wake: nil, brainStateRoot: directory, schedule: { _, _ in })
+        let reply = VoiceHostCommands(controller: bare, store: VoiceHostSettingsStore(directory: directory),
+                                      secrets: secrets, version: "1").handle("takes", [:])
+        XCTAssertEqual(reply["ok"] as? Bool, false)
+        XCTAssertEqual(reply["error"] as? String, "takes are not kept in this voice host")
     }
 
     func testTurningVoiceOnThroughTheSocketTakesEffect() {
@@ -139,6 +201,10 @@ final class VoiceHostCommandsTests: XCTestCase {
         let off = commands.handle("action", ["name": "ask"])
         XCTAssertEqual(off["error"] as? String, VoiceHostController.voiceOff)
         XCTAssertTrue(dictation.starts.isEmpty)
+        XCTAssertEqual(journal.records.map(\.outcome), [.refused, .refused], "each refusal is journaled")
+        XCTAssertEqual(journal.records.map(\.reason), [VoiceHostController.voiceMuted, VoiceHostController.voiceOff])
+        XCTAssertEqual(journal.records.map(\.trigger), [.socket(action: "dictate"), .socket(action: "ask")])
+        XCTAssertEqual(journal.records.map(\.mode), [.dictation, .agent])
     }
 
     func testApproveNeedsAnID() async {

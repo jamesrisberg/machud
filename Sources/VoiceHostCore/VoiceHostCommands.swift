@@ -7,13 +7,15 @@ import VoiceKit
 /// `action name=say text=`, `brain status`, `models status|download id=kokoro|parakeet|<wake id>`,
 /// `history status`, `secret set|clear name=grok [value=]` (values are written, never read
 /// back), `conversation` (the conversation's rows), `send text=` (a typed turn to the agent),
-/// `card peek|pin|expand|close` and `quit`.
+/// `card peek|pin|expand|close`, `takes [limit=]` (the take journal's newest records) and `quit`.
 /// `subscribe` is `HUDSocketServer`'s own; `publish(_:on:)` feeds it `state` events and
 /// `publishModels(_:on:)` its `models` events.
 @MainActor
 final class VoiceHostCommands {
     static let verbs = ["hello", "state", "settings", "action", "brain", "models", "history", "secret",
-                        "conversation", "send", "card", "quit"]
+                        "conversation", "send", "card", "takes", "quit"]
+    /// How many records `takes` returns without `limit=`.
+    static let takesDefaultLimit = 20
     /// `card`'s states and the card mode each sets (`close` also dismisses the card).
     static let cardModes: [String: VoiceCardMode] = ["peek": .peek, "pin": .pinned, "expand": .expanded, "close": .peek]
     /// Model ids `models` reports and `models download` takes, in order.
@@ -114,6 +116,8 @@ final class VoiceHostCommands {
             return ["ok": true, "state": Self.jsonObject(controller.state)]
         case "card":
             return card(args)
+        case "takes":
+            return takes(args)
         case "quit":
             return ["ok": true]
         default:
@@ -155,10 +159,10 @@ final class VoiceHostCommands {
         let action: VoiceHostAction
         switch name {
         case "click": action = .orbClicked
-        case "ask": action = .start(.agent)
-            if let refusal = controller.refusal(for: .agent) { return ["ok": false, "error": refusal] }
-        case "dictate": action = .start(.dictation)
-            if let refusal = controller.refusal(for: .dictation) { return ["ok": false, "error": refusal] }
+        case "ask", "dictate":
+            let mode: VoiceMode = name == "ask" ? .agent : .dictation
+            action = .start(mode)
+            if let refusal = controller.socketRefusal(for: mode, action: name) { return ["ok": false, "error": refusal] }
         case "stop": action = .stop
         case "cancel": action = .cancel
         case "dismiss": action = .dismissCard
@@ -174,8 +178,25 @@ final class VoiceHostCommands {
         default:
             return ["ok": false, "error": "unknown action \(name)"]
         }
-        controller.perform(action)
+        // A take this starts was started by the socket, named by its action.
+        controller.perform(action, trigger: .socket(action: name))
         return ["ok": true, "state": Self.jsonObject(controller.state)]
+    }
+
+    /// `takes [limit=]`: `{ok, takes[]}`, the journal's newest `limit` records (default 20),
+    /// oldest first.
+    private func takes(_ args: [String: String]) -> [String: Any] {
+        guard let journal = controller.takeJournal else {
+            return ["ok": false, "error": "takes are not kept in this voice host"]
+        }
+        var limit = Self.takesDefaultLimit
+        if let given = args["limit"] {
+            guard let number = Int(given), number >= 1 else {
+                return ["ok": false, "error": "takes limit= must be a whole number of at least 1"]
+            }
+            limit = number
+        }
+        return ["ok": true, "takes": Self.jsonObject(journal.recent(limit: limit))]
     }
 
     /// `card peek|pin|expand|close`: sets the card's mode; `close` dismisses the card as its close

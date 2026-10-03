@@ -221,4 +221,44 @@ final class ConversationTests: XCTestCase {
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(row)) as? [String: Any])
         XCTAssertEqual(Set(object.keys), ["id", "kind", "text", "source"])
     }
+
+    func testASpokenRowKeepsWhatStartedItAndWhen() throws {
+        let trigger = VoiceTakeTrigger.wake(score: 0.973, phrase: "Hey Jarvis")
+        var log = ConversationLog(launch: "A")
+        log.submitted("what time is it", source: .voice, date: "2026-10-03T12:04:07-04:00", trigger: trigger)
+        XCTAssertEqual(log.rows.last?.trigger, trigger, "the pending row says so too")
+        log.accepted()
+        log.submitted("and tomorrow", source: .typed, date: "2026-10-03T12:05:00-04:00")
+        log.accepted()
+        let rows = log.rows
+        XCTAssertEqual(rows.map(\.date), ["2026-10-03T12:04:07-04:00", "2026-10-03T12:05:00-04:00"])
+        XCTAssertEqual(rows.map(\.trigger), [trigger, nil])
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(rows[0])) as? [String: Any])
+        XCTAssertEqual(Set(object.keys), ["id", "kind", "text", "source", "date", "trigger"])
+        let restored = ConversationLog(record: try JSONDecoder().decode(ConversationRecord.self,
+                                                                         from: JSONEncoder().encode(log.record)),
+                                       launch: "B")
+        XCTAssertEqual(restored.rows.map(\.date), rows.map(\.date))
+        XCTAssertEqual(restored.rows.map(\.trigger), rows.map(\.trigger))
+    }
+
+    func testARowFromANewerBuildLoadsAndSavesUnchanged() throws {
+        let saved = #"{"threadId":"t","rows":[{"id":"x:1","kind":"user","text":"hi","source":"voice","#
+            + #""date":"2026-10-03T12:04:07-04:00","trigger":{"source":"telepathy","strength":3}}]}"#
+        let record = try JSONDecoder().decode(ConversationRecord.self, from: Data(saved.utf8))
+        XCTAssertEqual(record.rows.first?.trigger?.source, "telepathy")
+        let log = ConversationLog(record: record, launch: "B")
+        let row = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(log.record)) as? [String: Any])
+        let trigger = ((row["rows"] as? [[String: Any]])?.first?["trigger"]) as? NSDictionary
+        XCTAssertEqual(trigger, ["source": "telepathy", "strength": 3])
+    }
+
+    func testRowsKeptBeforeDatesAndTriggersStillLoad() throws {
+        let saved = #"{"threadId":"t","rows":[{"id":"x:1","kind":"user","text":"hi","source":"voice"},"#
+            + #"{"id":"x:2","turnId":"t1","kind":"reply","text":"Hello","streaming":false}]}"#
+        let record = try JSONDecoder().decode(ConversationRecord.self, from: Data(saved.utf8))
+        XCTAssertEqual(record.rows.map(\.text), ["hi", "Hello"])
+        XCTAssertNil(record.rows[0].date)
+        XCTAssertNil(record.rows[0].trigger)
+    }
 }

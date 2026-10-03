@@ -43,6 +43,11 @@ public struct ConversationRow: Codable, Equatable, Sendable, Identifiable {
     public var text: String
     /// User rows.
     public var source: ConversationSource?
+    /// User rows: when it was said (the take's start) or typed (sent), ISO 8601 in local time;
+    /// nil in a row saved without one.
+    public var date: String?
+    /// Spoken user rows: what started the take.
+    public var trigger: VoiceTakeTrigger?
     /// Replies: true while the turn is live.
     public var streaming: Bool?
     /// Progress rows.
@@ -74,8 +79,12 @@ public struct ConversationRow: Codable, Equatable, Sendable, Identifiable {
         self.isError = isError
     }
 
-    public static func user(id: String, text: String, source: ConversationSource, turnId: String? = nil) -> ConversationRow {
-        ConversationRow(id: id, turnId: turnId, kind: .user, text: text, source: source)
+    public static func user(id: String, text: String, source: ConversationSource, turnId: String? = nil,
+                            date: String? = nil, trigger: VoiceTakeTrigger? = nil) -> ConversationRow {
+        var row = ConversationRow(id: id, turnId: turnId, kind: .user, text: text, source: source)
+        row.date = date
+        row.trigger = trigger
+        return row
     }
 
     /// An approval the user can still answer.
@@ -122,10 +131,8 @@ final class ConversationFile: ConversationStoring {
 
     func save(_ record: ConversationRecord) {
         do {
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try JSONEncoder().encode(record).write(to: url, options: .atomic)
             // What the user said to the agent is theirs alone.
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+            try PrivateFile.write(JSONEncoder().encode(record), to: url)
         } catch {
             NSLog("MacHUDVoice: could not save the conversation: %@", error.localizedDescription)
         }
@@ -148,17 +155,21 @@ struct ConversationLog: Equatable {
     private(set) var threadID: String?
     private var restored: [ConversationRow]
     private var model = TranscriptModel()
-    /// How each of this launch's user rows reached the agent, by `TranscriptModel` row id.
-    private var sources: [String: ConversationSource] = [:]
-    private var pending: Pending?
+    /// How, when and by what each of this launch's user rows reached the agent, by
+    /// `TranscriptModel` row id.
+    private var submissions: [String: Submission] = [:]
+    /// What was submitted and is not taken yet.
+    private var pending: Submission?
     /// The latest snapshot while a submission waits for the brain.
     private var held: AgentSessionSnapshot?
     /// Prefixes this launch's row ids, which `TranscriptModel` numbers from 1 each launch.
     private let launch: String
 
-    private struct Pending: Equatable {
+    private struct Submission: Equatable {
         var text: String
         var source: ConversationSource
+        var date: String?
+        var trigger: VoiceTakeTrigger?
     }
 
     init(record: ConversationRecord? = nil, launch: String = String(UUID().uuidString.prefix(8))) {
@@ -173,7 +184,8 @@ struct ConversationLog: Equatable {
     var rows: [ConversationRow] {
         var live = model.rows.map(row)
         if let pending {
-            var row = ConversationRow.user(id: "\(launch):pending", text: pending.text, source: pending.source)
+            var row = ConversationRow.user(id: "\(launch):pending", text: pending.text, source: pending.source,
+                                           date: pending.date, trigger: pending.trigger)
             row.pending = true
             live.append(row)
         }
@@ -227,9 +239,11 @@ struct ConversationLog: Equatable {
 
     // MARK: Changes
 
-    /// The user's words are on their way to the brain.
-    mutating func submitted(_ text: String, source: ConversationSource) {
-        pending = Pending(text: text, source: source)
+    /// The user's words are on their way to the brain: said (with what started the take) or typed,
+    /// at `date` (`VoiceTakeRecord.timestamp`).
+    mutating func submitted(_ text: String, source: ConversationSource, date: String? = nil,
+                            trigger: VoiceTakeTrigger? = nil) {
+        pending = Submission(text: text, source: source, date: date, trigger: trigger)
     }
 
     /// The brain took the submission: the user row is part of the conversation.
@@ -237,7 +251,7 @@ struct ConversationLog: Equatable {
         guard let pending else { return }
         self.pending = nil
         model.userSaid(pending.text)
-        if let last = model.rows.last, case .user = last.kind { sources[last.id] = pending.source }
+        if let last = model.rows.last, case .user = last.kind { submissions[last.id] = pending }
         releaseHeld()
     }
 
@@ -273,7 +287,7 @@ struct ConversationLog: Equatable {
         restored = []
         model.reset()
         model.maxRows = Self.maxRows
-        sources = [:]
+        submissions = [:]
     }
 
     private mutating func releaseHeld() {
@@ -288,7 +302,9 @@ struct ConversationLog: Equatable {
         let id = "\(launch):\(row.id)"
         switch row.kind {
         case .user(let text):
-            return .user(id: id, text: text, source: sources[row.id] ?? .voice, turnId: row.turnId)
+            let submission = submissions[row.id]
+            return .user(id: id, text: text, source: submission?.source ?? .voice, turnId: row.turnId,
+                         date: submission?.date, trigger: submission?.trigger)
         case .reply(let text, let streaming):
             return ConversationRow(id: id, turnId: row.turnId, kind: .reply, text: text, streaming: streaming)
         case .progress(let text, let state):

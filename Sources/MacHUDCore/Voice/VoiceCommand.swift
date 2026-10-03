@@ -15,7 +15,7 @@ enum VoiceCommand: Equatable {
     static let actions = ["click", "ask", "dictate", "stop", "cancel", "approve", "deny", "dismiss", "mute", "unmute",
                           "open-session", "say"]
     static let subVerbs = ["state", "status", "hello", "action", "settings", "brain", "models", "history", "secret",
-                           "conversation", "send", "card"]
+                           "conversation", "send", "card", "takes"]
     /// The states `card` takes.
     static let cardStates = ["peek", "pin", "expand", "close"]
 
@@ -60,9 +60,15 @@ enum VoiceCommand: Equatable {
                 throw Invalid("voice card takes \(cardStates.joined(separator: ", "))")
             }
             return .forward("card", ["action": state])
+        case "takes":
+            guard let limit = args["limit"] else { return .forward("takes", [:]) }
+            guard let number = Int(limit), number >= 1 else {
+                throw Invalid("voice takes limit= must be a whole number of at least 1")
+            }
+            return .forward("takes", ["limit": limit])
         default:
-            throw Invalid("voice takes state, status, action, settings, brain, models, history, secret, conversation, "
-                + "send or card, not \(sub)")
+            throw Invalid("voice needs one of state, status, action, settings, brain, models, history, secret, "
+                + "conversation, send, card or takes, not \(sub)")
         }
     }
 
