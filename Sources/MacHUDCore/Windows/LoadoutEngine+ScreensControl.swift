@@ -70,101 +70,106 @@ extension LoadoutEngine {
 
         control.register("capture") { [weak self] args, done in
             guard let self else { done(["ok": false, "error": "engine gone"]); return }
-            guard let name = args["name"], !name.isEmpty else {
-                done(["ok": false, "error": "name required"]); return
-            }
-            // `hud=only`: just the tool dock and the siblings' panels; `hud=1`: the windows
-            // as below, then the HUD added to the same loadout.
-            let hudMode = args["hud"]?.lowercased()
-            if hudMode == "only" {
-                self.captureHUD(into: name) { loadout in
-                    guard let loadout else { done(["ok": false, "error": "HUD capture is not available"]); return }
-                    done(["ok": true, "slots": loadout.allSlots.count, "loadout": Self.json(loadout)])
-                }
-                return
-            }
-            if let refusal = MultiDesktopVerbs.refusal(capture: args, in: self.store.config) {
-                done(["ok": false, "error": refusal]); return
-            }
-            let withHUD = ["1", "true", "yes", "on"].contains(hudMode ?? "")
-            let done: ([String: Any]) -> Void = { [weak self] reply in
-                guard withHUD, reply["ok"] as? Bool == true, let self else { done(reply); return }
-                self.captureHUD(into: name) { loadout in
-                    var reply = reply
-                    if let loadout {
-                        reply["loadout"] = Self.json(loadout)
-                        reply["hud"] = Self.json(loadout)["hud"]
-                    }
-                    done(reply)
-                }
-            }
-            let screensArg = args["screens"]
-            let allScreens = screensArg.map { ["all", "*"].contains($0.lowercased()) } ?? false
+            self.handleCapture(args, done: done)
+        }
+    }
 
-            // Derive the layouts from the windows themselves, across displays
-            // and (with `desktops=`) desktops.
-            if allScreens || (screensArg == nil && args["desktops"] != nil) {
-                var walk: DesktopWalk?
-                if let text = args["desktops"] {
-                    switch DesktopWalk.parse(text) {
-                    case .error(let message): done(["ok": false, "error": message]); return
-                    case .walk(let parsed): walk = parsed
-                    }
-                }
-                var targets = NSScreen.screens
-                if !allScreens {
-                    let ref = args["screen"].flatMap { ScreenRef.parse($0) }
-                    if let ref, ref.resolve() == nil {
-                        done(["ok": false, "error": "no screen matching \(ref.label)"]); return
-                    }
-                    guard let one = ref?.resolve() ?? self.screen(nil) else {
-                        done(["ok": false, "error": "no screen"]); return
-                    }
-                    targets = [one]
-                }
-                self.captureArrangement(name: name, screens: targets, walk: walk) { capture in
-                    guard let capture else {
-                        done(["ok": false, "error": "no windows on those screens"]); return
-                    }
-                    self.commit(capture)
-                    done(capture.json.merging(["ok": true]) { a, _ in a })
-                }
-                return
+    /// The `capture` verb (see docs/API.md).
+    func handleCapture(_ args: [String: String], done: @escaping ([String: Any]) -> Void) {
+        guard let name = args["name"], !name.isEmpty else {
+            done(["ok": false, "error": "name required"]); return
+        }
+        // `hud=only`: just the tool dock and the siblings' panels; `hud=1`: the windows
+        // as below, then the HUD added to the same loadout.
+        let hudMode = args["hud"]?.lowercased()
+        if hudMode == "only" {
+            self.captureHUD(into: name) { loadout in
+                guard let loadout else { done(["ok": false, "error": "HUD capture is not available"]); return }
+                done(["ok": true, "slots": loadout.allSlots.count, "loadout": Self.json(loadout)])
             }
+            return
+        }
+        if let refusal = MultiDesktopVerbs.refusal(capture: args, in: self.store.config) {
+            done(["ok": false, "error": refusal]); return
+        }
+        let withHUD = ["1", "true", "yes", "on"].contains(hudMode ?? "")
+        let done: ([String: Any]) -> Void = { [weak self] reply in
+            guard withHUD, reply["ok"] as? Bool == true, let self else { done(reply); return }
+            self.captureHUD(into: name) { loadout in
+                var reply = reply
+                if let loadout {
+                    reply["loadout"] = Self.json(loadout)
+                    reply["hud"] = Self.json(loadout)["hud"]
+                }
+                done(reply)
+            }
+        }
+        let screensArg = args["screens"]
+        let allScreens = screensArg.map { ["all", "*"].contains($0.lowercased()) } ?? false
 
-            let loadout: Loadout
-            if let screens = screensArg {
-                switch self.parseCaptureScreens(screens) {
+        // Derive the layouts from the windows themselves, across displays
+        // and (with `desktops=`) desktops.
+        if allScreens || (screensArg == nil && args["desktops"] != nil) {
+            var walk: DesktopWalk?
+            if let text = args["desktops"] {
+                switch DesktopWalk.parse(text) {
                 case .error(let message): done(["ok": false, "error": message]); return
-                case .assignments(let assignments): loadout = self.capture(name: name, assignments: assignments)
+                case .walk(let parsed): walk = parsed
                 }
-            } else if let layoutName = args["layout"] {
-                guard let layout = self.store.layout(named: layoutName) else {
-                    done(["ok": false, "error": "no such layout"]); return
-                }
+            }
+            var targets = NSScreen.screens
+            if !allScreens {
                 let ref = args["screen"].flatMap { ScreenRef.parse($0) }
                 if let ref, ref.resolve() == nil {
                     done(["ok": false, "error": "no screen matching \(ref.label)"]); return
                 }
-                loadout = self.capture(name: name, layout: layout, screen: ref?.resolve())
-            } else {
-                // Default: derive the layout from the windows themselves.
-                let ref = args["screen"].flatMap { ScreenRef.parse($0) }
-                if let ref, ref.resolve() == nil {
-                    done(["ok": false, "error": "no screen matching \(ref.label)"]); return
+                guard let one = ref?.resolve() ?? self.screen(nil) else {
+                    done(["ok": false, "error": "no screen"]); return
                 }
-                guard let capture = self.captureArrangement(name: name, screen: ref?.resolve()) else {
-                    done(["ok": false, "error": "no windows on that screen"]); return
+                targets = [one]
+            }
+            self.captureArrangement(name: name, screens: targets, walk: walk) { capture in
+                guard let capture else {
+                    done(["ok": false, "error": "no windows on those screens"]); return
                 }
                 self.commit(capture)
                 done(capture.json.merging(["ok": true]) { a, _ in a })
-                return
             }
-            var captured = loadout
-            captured.hud = self.store.loadout(named: name)?.hud
-            self.store.upsert(captured)
-            done(["ok": true, "slots": captured.allSlots.count, "loadout": Self.json(captured)])
+            return
         }
+
+        let loadout: Loadout
+        if let screens = screensArg {
+            switch self.parseCaptureScreens(screens) {
+            case .error(let message): done(["ok": false, "error": message]); return
+            case .assignments(let assignments): loadout = self.capture(name: name, assignments: assignments)
+            }
+        } else if let layoutName = args["layout"] {
+            guard let layout = self.store.layout(named: layoutName) else {
+                done(["ok": false, "error": "no such layout"]); return
+            }
+            let ref = args["screen"].flatMap { ScreenRef.parse($0) }
+            if let ref, ref.resolve() == nil {
+                done(["ok": false, "error": "no screen matching \(ref.label)"]); return
+            }
+            loadout = self.capture(name: name, layout: layout, screen: ref?.resolve())
+        } else {
+            // Default: derive the layout from the windows themselves.
+            let ref = args["screen"].flatMap { ScreenRef.parse($0) }
+            if let ref, ref.resolve() == nil {
+                done(["ok": false, "error": "no screen matching \(ref.label)"]); return
+            }
+            guard let capture = self.captureArrangement(name: name, screen: ref?.resolve()) else {
+                done(["ok": false, "error": "no windows on that screen"]); return
+            }
+            self.commit(capture)
+            done(capture.json.merging(["ok": true]) { a, _ in a })
+            return
+        }
+        var captured = loadout
+        captured.hud = self.store.loadout(named: name)?.hud
+        self.store.upsert(captured)
+        done(["ok": true, "slots": captured.allSlots.count, "loadout": Self.json(captured)])
     }
 
     static func json(_ loadout: Loadout) -> [String: Any] {
