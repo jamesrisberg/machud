@@ -42,6 +42,22 @@ final class OrbViewTests: XCTestCase {
         XCTAssertEqual(view.shapeRect().rect.width, resting.width)
     }
 
+    func testTheWorkingArcIsDrawnHoweverLongTheOrbHasRun() {
+        // 2,400 s of motion (40 minutes) turns the arc past 1e4 radians, an angle CoreGraphics
+        // refuses to draw.
+        for phase in [0, 1, 1_000, 2_400, 10_000, 1e6, 1e9] {
+            let start = OrbView.spinStartAngle(phase: phase, reduceMotion: false)
+            XCTAssertGreaterThanOrEqual(start, 0, "phase \(phase)")
+            XCTAssertLessThan(start, 2 * .pi, "phase \(phase)")
+            let arc = CGMutablePath()
+            arc.addArc(center: .zero, radius: 10, startAngle: start, endAngle: start + .pi * 0.55, clockwise: false)
+            XCTAssertFalse(arc.isEmpty, "phase \(phase)")
+        }
+        XCTAssertEqual(OrbView.spinStartAngle(phase: 1, reduceMotion: false), 4.2, accuracy: 1e-9, "it still turns")
+        XCTAssertEqual(OrbView.spinStartAngle(phase: 2, reduceMotion: false), 8.4 - 2 * .pi, accuracy: 1e-9)
+        XCTAssertEqual(OrbView.spinStartAngle(phase: 1e9, reduceMotion: true), -.pi / 2, "still at the top")
+    }
+
     func testOnlyTheShapeTakesTheMouse() {
         let view = orb()
         let container = NSView(frame: view.frame)

@@ -28,6 +28,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - The wake word no longer stays off after the microphone stops for it (an audio device change, a
   microphone that would not start): it tries again after 2 seconds, 10 seconds, then every minute,
   and the Voice settings say why it is not listening meanwhile.
+- The voice orb's working arc keeps turning however long MacHUD has been running; after about 40
+  minutes of animation it was no longer drawn.
 
 ## [0.3.1] - 2026-10-02
 
