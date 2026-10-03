@@ -489,6 +489,12 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(model.status(of: .loadout), .done)
         XCTAssertEqual(services.store.load()?.loadout, "Deep Work")
         XCTAssertEqual(model.practiceTarget, "Deep Work")
+        // It names the menu items that really exist.
+        XCTAssertEqual(model.firstLoadout?.savedNote,
+                       "Captured on Built-in Retina Display. Edit it any time from the menu bar: Loadouts › Deep Work › Edit Layout…")
+        var unnamed = FakeOnboardingLoadouts.summary("Deep Work")
+        unnamed.screen = ""
+        XCTAssertEqual(unnamed.savedNote, "Saved. Edit it any time from the menu bar: Loadouts › Deep Work › Edit Layout…")
 
         // Restored at the next launch; a loadout deleted since is not made.
         XCTAssertEqual(makeServices().model.status(of: .loadout), .todo, "nothing restored before show")

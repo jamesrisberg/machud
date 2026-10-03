@@ -26,14 +26,15 @@ struct LoadoutsTabView: View {
                 Text("Loadouts").font(.headline)
                 Spacer()
                 Menu {
-                    Button("Capture Current Windows…") { model.capture() }
+                    Button(model.captureTitle) { model.capture() }
                     Button("Draw a New Layout…") { model.drawNew() }
                 } label: {
                     Label("New", systemImage: "plus")
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .help("Capture the windows on screen as a loadout, or draw a layout from scratch")
+                .help(model.multiDesktop ? "Capture the windows on screen as a loadout, or draw a layout from scratch"
+                      : "Capture the windows on this screen as a loadout, or draw a layout from scratch")
             }
             ScrollView {
                 VStack(spacing: 6) {
@@ -45,6 +46,12 @@ struct LoadoutsTabView: View {
                 }
                 .padding(.vertical, 2)
             }
+            if let note = model.heldBackNote {
+                Label(note, systemImage: "eye.slash")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -52,11 +59,11 @@ struct LoadoutsTabView: View {
         VStack(spacing: 10) {
             Spacer()
             Image(systemName: "rectangle.3.group").font(.system(size: 34)).foregroundStyle(.secondary)
-            Text("No loadouts yet").font(.title3.weight(.semibold))
+            Text(model.heldBack > 0 ? "No loadouts to show" : "No loadouts yet").font(.title3.weight(.semibold))
             Text("Arrange your windows, then capture them; or draw a layout and assign apps to its regions.")
                 .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 320)
             HStack {
-                Button("Capture Current Windows…") { model.capture() }.buttonStyle(.borderedProminent)
+                Button(model.captureTitle) { model.capture() }.buttonStyle(.borderedProminent)
                 Button("Draw a New Layout…") { model.drawNew() }
             }
             Spacer()
@@ -99,7 +106,8 @@ struct LoadoutCardView: View {
     }
 }
 
-/// The selected loadout: header, actions, the large preview, its desktops and HUD part.
+/// The selected loadout: header, actions, the large preview, its desktops (multi-desktop
+/// loadouts only) and HUD part.
 struct LoadoutDetailView: View {
     @ObservedObject var model: LoadoutsTabModel
     let item: LoadoutsTabModel.Item
@@ -176,7 +184,8 @@ struct LoadoutDetailView: View {
     }
 
     private var preview: some View {
-        LoadoutSketchView(sketch: item.sketch, desktop: model.desktop, style: .large)
+        LoadoutSketchView(sketch: item.sketch, desktop: model.desktop, style: .large,
+                          showsDisplayNames: model.showsDisplayNames)
             .padding(12)
             .frame(maxWidth: .infinity, minHeight: 180, maxHeight: .infinity)
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.black.opacity(0.28)))
@@ -331,17 +340,19 @@ struct LoadoutSketchView: View {
     let sketch: LoadoutSketch
     let desktop: Int?
     let style: Style
+    /// Whether the large style writes each display's name under it.
+    var showsDisplayNames = true
 
     var body: some View {
         GeometryReader { geo in
-            // The large style writes each display's name under it.
-            let caption: CGFloat = style == .large ? 18 : 0
+            let captions = style == .large && showsDisplayNames
+            let caption: CGFloat = captions ? 18 : 0
             let map = Mapping(bounds: sketch.bounds,
                               size: CGSize(width: geo.size.width, height: max(geo.size.height - caption, 1)))
             ZStack(alignment: .topLeading) {
                 ForEach(Array(sketch.displays.enumerated()), id: \.offset) { index, display in
                     displayView(index: index, display: display, map: map)
-                    if style == .large { displayCaption(index: index, display: display, map: map) }
+                    if captions { displayCaption(index: index, display: display, map: map) }
                 }
             }
         }

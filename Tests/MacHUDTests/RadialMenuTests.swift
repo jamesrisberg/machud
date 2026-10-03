@@ -146,11 +146,46 @@ final class RadialGeometryTests: XCTestCase {
         XCTAssertEqual(RadialMenu.ringLabel(.inner, for: .loadout("Work")), "Preview")
         XCTAssertEqual(RadialMenu.ringLabel(.middle, for: .loadout("Work")), "Apply")
         XCTAssertEqual(RadialMenu.ringLabel(.outer, for: .loadout("Work")), "Clear this screen + Apply")
-        XCTAssertEqual(RadialMenu.ringLabel(.inner, for: .capture), "Capture this screen as a loadout")
-        XCTAssertEqual(RadialMenu.ringLabel(.middle, for: .capture), "Capture all screens as a loadout")
-        XCTAssertEqual(RadialMenu.ringLabel(.outer, for: .capture), "Draw a new layout")
+        let everyScreen = RadialMenu.Wedge.Kind.capture(offersAllScreens: true)
+        XCTAssertEqual(RadialMenu.ringLabel(.inner, for: everyScreen), "Capture this screen as a loadout")
+        XCTAssertEqual(RadialMenu.ringLabel(.middle, for: everyScreen), "Capture all screens as a loadout")
+        XCTAssertEqual(RadialMenu.ringLabel(.outer, for: everyScreen), "Draw a new layout")
         XCTAssertEqual(RadialMenu.ringCount(for: .loadout("Work")), 3)
-        XCTAssertEqual(RadialMenu.ringCount(for: .capture), 3)
+        XCTAssertEqual(RadialMenu.ringCount(for: everyScreen), 3)
+    }
+
+    @MainActor
+    func testEachRingCommitsItsOwnOutcome() {
+        XCTAssertEqual(RadialMenu.outcome(of: .loadout("Work"), ring: .inner), .preview(loadout: "Work"))
+        XCTAssertEqual(RadialMenu.outcome(of: .loadout("Work"), ring: .middle), .apply(loadout: "Work", clear: false))
+        XCTAssertEqual(RadialMenu.outcome(of: .loadout("Work"), ring: .outer), .apply(loadout: "Work", clear: true))
+        let everyScreen = RadialMenu.Wedge.Kind.capture(offersAllScreens: true)
+        XCTAssertEqual(RadialMenu.outcome(of: everyScreen, ring: .inner), .capture(allScreens: false))
+        XCTAssertEqual(RadialMenu.outcome(of: everyScreen, ring: .middle), .capture(allScreens: true))
+        XCTAssertEqual(RadialMenu.outcome(of: everyScreen, ring: .outer), .drawLayout)
+        XCTAssertEqual(RadialMenu.outcome(of: .park, ring: .inner), .park(restore: false))
+        XCTAssertEqual(RadialMenu.outcome(of: .park, ring: .middle), .park(restore: true))
+        XCTAssertEqual(RadialMenu.outcome(of: .widgets, ring: .inner), .widgets(edit: false))
+        XCTAssertEqual(RadialMenu.outcome(of: .widgets, ring: .outer), .widgets(edit: true))
+    }
+
+    /// Without multi-desktop loadouts (experimental) the capture wedge captures the screen under
+    /// the pointer only: two rings, this screen and a new layout, and no all-screens ring.
+    @MainActor
+    func testWithoutMultiDesktopLoadoutsTheCaptureWedgeCapturesThisScreenOnly() {
+        let thisScreen = RadialMenu.Wedge.Kind.capture(offersAllScreens: false)
+        XCTAssertEqual(RadialMenu.ringCount(for: thisScreen), 2)
+        XCTAssertEqual(RadialMenu.ringLabel(.inner, for: thisScreen), "Capture this screen as a loadout")
+        XCTAssertEqual(RadialMenu.ringLabel(.middle, for: thisScreen), "Draw a new layout")
+        XCTAssertEqual(RadialMenu.outcome(of: thisScreen, ring: .inner), .capture(allScreens: false))
+        XCTAssertEqual(RadialMenu.outcome(of: thisScreen, ring: .middle), .drawLayout)
+        XCTAssertEqual(RadialMenu.outcome(of: thisScreen, ring: .outer), .drawLayout)
+
+        let wedges = [RadialMenu.Wedge(title: "Capture…", kind: thisScreen)]
+        let json = RadialMenu.json(wedges: wedges, geometry: RadialGeometry(count: 1, ringCounts: [RadialMenu.ringCount(for: thisScreen)]))
+        let wedge = (json["wedges"] as? [[String: Any]])?.first
+        XCTAssertEqual(wedge?["kind"] as? String, "capture")
+        XCTAssertEqual(wedge?["rings"] as? [String], ["Capture this screen as a loadout", "Draw a new layout"])
     }
 }
 

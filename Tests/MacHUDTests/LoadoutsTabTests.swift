@@ -5,10 +5,11 @@ import HUDKit
 
 /// A sample desk: a DELL beside the built-in display, a loadout captured across both and two
 /// desktops (its layouts hidden, as capture keeps them), one on a shared snap layout, and a
-/// HUD-only one.
+/// HUD-only one. Multi-desktop loadouts (experimental) are on, so all four are offered;
+/// `config(multiDesktop: false)` and `json(multiDesktop: false)` turn them off.
 enum LoadoutsFixture {
     static let json = #"""
-    {"gap": 0, "startupLoadout": "Desk",
+    {"gap": 0, "startupLoadout": "Desk", "experimental": {"multiDesktopLoadouts": true},
      "layouts": [
        {"name": "Thirds", "regions": [
          {"id": "t1", "name": "Left", "x": 0, "y": 0, "w": 0.3333, "h": 1},
@@ -53,8 +54,13 @@ enum LoadoutsFixture {
                          "xyz.machud.scratch": {"panels": {"pad": {"visible": true}}}}}}]}
     """#
 
-    static func config() throws -> Config {
-        try JSONDecoder().decode(Config.self, from: Data(json.utf8))
+    static func json(multiDesktop: Bool) -> String {
+        multiDesktop ? json : json.replacingOccurrences(of: #""multiDesktopLoadouts": true"#,
+                                                        with: #""multiDesktopLoadouts": false"#)
+    }
+
+    static func config(multiDesktop: Bool = true) throws -> Config {
+        try JSONDecoder().decode(Config.self, from: Data(json(multiDesktop: multiDesktop).utf8))
     }
 
     /// The DELL (main) on the left, the built-in display to its right and lower, two
@@ -287,7 +293,7 @@ final class LoadoutsTabTests: XCTestCase {
         var calls: [String] = []
         var active: String?
 
-        init() throws { config = try LoadoutsFixture.config() }
+        init(multiDesktop: Bool = true) throws { config = try LoadoutsFixture.config(multiDesktop: multiDesktop) }
 
         @MainActor func model() -> LoadoutsTabModel {
             LoadoutsTabModel(services: .init(
@@ -374,6 +380,90 @@ final class LoadoutsTabTests: XCTestCase {
         XCTAssertEqual(model.selection, "Reading")
     }
 
+    // MARK: - Multi-desktop loadouts off
+
+    func testWithMultiDesktopLoadoutsOffTheTabListsOneScreenLoadoutsAndSaysHowManyAreHidden() throws {
+        let harness = try Harness(multiDesktop: false)
+        harness.active = "Desk"
+        let model = harness.model()
+        model.reload()
+        XCTAssertFalse(model.multiDesktop)
+        XCTAssertEqual(model.items.map(\.name), ["Code", "Reading", "My HUD"])
+        XCTAssertEqual(model.items.map(\.summary), ["3 windows", "1 window", "HUD · 2 apps"])
+        XCTAssertEqual(model.items.map(\.isActive), [false, false, false])
+        XCTAssertEqual(model.selection, "Code")
+        XCTAssertNil(model.desktop)
+        XCTAssertEqual(model.heldBack, 1)
+        XCTAssertEqual(model.heldBackNote,
+                       "1 multi-desktop loadout hidden. It is experimental: turn on Multi-desktop loadouts under Experimental on the MacHUD tab to see it.")
+        XCTAssertEqual(model.captureTitle, "Capture This Screen as Loadout…")
+        // Each is one screen: drawn on the main display alone, with no desktops and no display name.
+        for item in model.items {
+            XCTAssertEqual(item.sketch.displays.map(\.name), ["DELL U2723QE"], item.name)
+            XCTAssertTrue(item.sketch.desktops.allSatisfy { $0 == nil }, item.name)
+        }
+        XCTAssertFalse(model.showsDisplayNames)
+        let json = model.json
+        XCTAssertEqual((json["loadouts"] as? [[String: Any]])?.compactMap { $0["name"] as? String }, ["Code", "Reading", "My HUD"])
+        XCTAssertEqual(json["heldBack"] as? Int, 1)
+        XCTAssertEqual(json["multiDesktop"] as? Bool, false)
+
+        var second = try XCTUnwrap(harness.config.loadouts?.first)
+        second.name = "Desk 2"
+        harness.config.loadouts?.append(second)
+        model.reload()
+        XCTAssertEqual(model.heldBackNote,
+                       "2 multi-desktop loadouts hidden. They are experimental: turn on Multi-desktop loadouts under Experimental on the MacHUD tab to see them.")
+    }
+
+    func testWithMultiDesktopLoadoutsOnTheTabShowsEverythingAsBefore() throws {
+        let harness = try Harness()
+        let model = harness.model()
+        model.reload()
+        XCTAssertTrue(model.multiDesktop)
+        XCTAssertEqual(model.heldBack, 0)
+        XCTAssertNil(model.heldBackNote)
+        XCTAssertEqual(model.captureTitle, "Capture Current Windows…")
+        XCTAssertTrue(model.showsDisplayNames)
+        XCTAssertEqual(model.items.first?.sketch.displays.count, 2)
+        XCTAssertNil(model.json["heldBack"])
+    }
+
+    func testTheTabFollowsTheSettingWithoutARelaunch() throws {
+        let harness = try Harness(multiDesktop: false)
+        let model = harness.model()
+        model.reload()
+        XCTAssertEqual(model.selection, "Code")
+
+        // The store's change notification reloads the tab, as for any other edit.
+        harness.config.experimental?.multiDesktopLoadouts = true
+        model.reload()
+        XCTAssertEqual(model.items.map(\.name), ["Desk", "Code", "Reading", "My HUD"])
+        XCTAssertEqual(model.items.first?.summary, "2 screens · 2 desktops · 6 windows · HUD")
+        XCTAssertEqual(model.captureTitle, "Capture Current Windows…")
+        XCTAssertEqual(model.selection, "Code", "the selection stays")
+        model.select("Desk")
+        XCTAssertEqual(model.desktop, 1)
+
+        harness.config.experimental?.multiDesktopLoadouts = false
+        model.reload()
+        XCTAssertEqual(model.items.map(\.name), ["Code", "Reading", "My HUD"])
+        XCTAssertEqual(model.selection, "Code", "a hidden loadout does not stay selected")
+        XCTAssertNil(model.desktop)
+        XCTAssertEqual(model.heldBack, 1)
+    }
+
+    func testWhenEveryLoadoutIsHiddenTheTabIsEmptyButSaysSo() throws {
+        let harness = try Harness(multiDesktop: false)
+        harness.config.loadouts = harness.config.loadouts.map { Array($0.prefix(1)) }
+        let model = harness.model()
+        model.reload()
+        XCTAssertEqual(model.items.map(\.name), [])
+        XCTAssertNil(model.selection)
+        XCTAssertEqual(model.heldBack, 1)
+        XCTAssertNotNil(model.heldBackNote)
+    }
+
     // MARK: - Socket verb
 
     func testLoadoutsVerbEditsThroughTheStore() throws {
@@ -418,14 +508,66 @@ final class LoadoutsTabTests: XCTestCase {
     // MARK: - Snapshots
 
     /// Renders the settings window on the Loadouts tab offscreen (never on screen) into
-    /// `MACHUD_LOADOUTS_SNAPSHOT_DIR`, else a temporary folder: the two-display, two-desktop
-    /// loadout on each desktop, a one-screen one, the HUD-only one, the delete question, the
-    /// rename field and the empty tab.
+    /// `MACHUD_LOADOUTS_SNAPSHOT_DIR`, else a temporary folder. With multi-desktop loadouts on:
+    /// the two-display, two-desktop loadout on each desktop, a one-screen one, the HUD-only one,
+    /// the delete question, the rename field and the empty tab.
     func testSnapshots() throws {
-        let out = ProcessInfo.processInfo.environment["MACHUD_LOADOUTS_SNAPSHOT_DIR"].map { URL(fileURLWithPath: $0) }
-            ?? FileManager.default.temporaryDirectory.appendingPathComponent("machud-loadouts-snapshots-\(getpid())")
         let harness = try Harness()
         harness.active = "Desk"
+        let (window, tab) = snapshotWindow(harness)
+        var files: [URL] = []
+        let shot = { (name: String, size: CGSize) in files.append(try self.snapshot(window, name, size: size)) }
+        try shot("desk-desktop1", LoadoutsSnapshot.size)
+        tab.desktop = 2
+        try shot("desk-desktop2", LoadoutsSnapshot.size)
+        tab.desktop = 1
+        try shot("desk-small-window", CGSize(width: 620, height: 460))
+        tab.select("Code")
+        try shot("code", LoadoutsSnapshot.size)
+        tab.select("My HUD")
+        try shot("hud-only", LoadoutsSnapshot.size)
+        tab.select("Desk")
+        tab.requestDelete()
+        try shot("delete-confirm", LoadoutsSnapshot.size)
+        tab.cancelDelete()
+        tab.beginRename()
+        tab.renameDraft = "Studio"
+        try shot("rename", LoadoutsSnapshot.size)
+        tab.cancelRename()
+        harness.config.loadouts = []
+        tab.reload()
+        try shot("empty", LoadoutsSnapshot.size)
+        try assertNotBlank(files)
+    }
+
+    /// The same with multi-desktop loadouts off: the one-screen loadouts drawn on one screen with
+    /// the dimmed line counting the hidden one, at full and small size, the HUD-only one, a tab
+    /// whose every loadout is hidden, and the empty tab.
+    func testSnapshotsWithMultiDesktopLoadoutsOff() throws {
+        let harness = try Harness(multiDesktop: false)
+        harness.active = "Code"
+        let (window, tab) = snapshotWindow(harness)
+        var files: [URL] = []
+        let shot = { (name: String, size: CGSize) in files.append(try self.snapshot(window, name, size: size)) }
+        try shot("off-code", LoadoutsSnapshot.size)
+        try shot("off-small-window", CGSize(width: 620, height: 460))
+        tab.select("My HUD")
+        try shot("off-hud-only", LoadoutsSnapshot.size)
+        harness.config.loadouts = harness.config.loadouts.map { Array($0.prefix(1)) }
+        tab.reload()
+        try shot("off-all-hidden", LoadoutsSnapshot.size)
+        harness.config.loadouts = []
+        tab.reload()
+        try shot("off-empty", LoadoutsSnapshot.size)
+        try assertNotBlank(files)
+    }
+
+    private var snapshotDirectory: URL {
+        ProcessInfo.processInfo.environment["MACHUD_LOADOUTS_SNAPSHOT_DIR"].map { URL(fileURLWithPath: $0) }
+            ?? FileManager.default.temporaryDirectory.appendingPathComponent("machud-loadouts-snapshots-\(getpid())")
+    }
+
+    private func snapshotWindow(_ harness: Harness) -> (SettingsWindowModel, LoadoutsTabModel) {
         let tab = harness.model()
         let window = SettingsWindowModel()
         window.tabs = [SettingsTabModel(source: SettingsSource(id: "machud", title: "MacHUD", symbol: "rectangle.3.group",
@@ -434,36 +576,18 @@ final class LoadoutsTabTests: XCTestCase {
         window.loadouts = tab
         window.selection = LoadoutsTabModel.tabID
         tab.reload()
+        return (window, tab)
+    }
 
-        var files: [URL] = []
-        func shot(_ name: String, size: CGSize = LoadoutsSnapshot.size) throws {
-            files.append(try LoadoutsSnapshot.write(window, to: out.appendingPathComponent("loadouts-\(name).png"), size: size))
-        }
-        try shot("desk-desktop1")
-        tab.desktop = 2
-        try shot("desk-desktop2")
-        tab.desktop = 1
-        try shot("desk-small-window", size: CGSize(width: 620, height: 460))
-        tab.select("Code")
-        try shot("code")
-        tab.select("My HUD")
-        try shot("hud-only")
-        tab.select("Desk")
-        tab.requestDelete()
-        try shot("delete-confirm")
-        tab.cancelDelete()
-        tab.beginRename()
-        tab.renameDraft = "Studio"
-        try shot("rename")
-        tab.cancelRename()
-        harness.config.loadouts = []
-        tab.reload()
-        try shot("empty")
+    private func snapshot(_ window: SettingsWindowModel, _ name: String, size: CGSize) throws -> URL {
+        try LoadoutsSnapshot.write(window, to: snapshotDirectory.appendingPathComponent("loadouts-\(name).png"), size: size)
+    }
 
+    /// Each picture is not blank: the list/preview area differs from the backdrop corner.
+    private func assertNotBlank(_ files: [URL]) throws {
         for url in files {
             let rep = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: url)), url.lastPathComponent)
             XCTAssertGreaterThan(rep.pixelsWide, 0)
-            // The picture is not blank: the list/preview area differs from the backdrop corner.
             let corner = try XCTUnwrap(rep.colorAt(x: 2, y: 2))
             var differs = false
             for x in stride(from: 40, to: rep.pixelsWide - 40, by: 37) where !differs {
@@ -474,6 +598,6 @@ final class LoadoutsTabTests: XCTestCase {
             }
             XCTAssertTrue(differs, "\(url.lastPathComponent) is blank")
         }
-        print("Loadouts snapshots: \(out.path)")
+        print("Loadouts snapshots: \(snapshotDirectory.path)")
     }
 }

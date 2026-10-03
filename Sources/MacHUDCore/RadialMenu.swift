@@ -5,8 +5,9 @@ import HUDKit
 /// Pure maths, no AppKit state, so it can be unit tested.
 struct RadialGeometry: Equatable {
     /// The rings, inside out. What each one does depends on the wedge (`RadialMenu.ringLabel`):
-    /// a loadout previews / applies / clears then applies; capture captures this screen / all
-    /// screens / opens the editor on a new layout; park parks / restores.
+    /// a loadout previews / applies / clears then applies; capture captures this screen / (with
+    /// multi-desktop loadouts on) all screens / opens the editor on a new layout; park parks /
+    /// restores.
     enum Ring: String, Equatable, CaseIterable {
         case inner, middle, outer
         var position: Int { Self.allCases.firstIndex(of: self)! }
@@ -103,7 +104,9 @@ struct RadialGeometry: Equatable {
 @MainActor
 final class RadialMenu {
     struct Wedge {
-        enum Kind: Equatable { case loadout(String), capture, park, widgets }
+        /// `capture`'s `offersAllScreens`: whether it has the ring that captures every display,
+        /// which exists only while multi-desktop loadouts (experimental) are on.
+        enum Kind: Equatable { case loadout(String), capture(offersAllScreens: Bool), park, widgets }
         var title: String
         var subtitle: String = ""
         var icons: [NSImage] = []
@@ -111,16 +114,17 @@ final class RadialMenu {
         var hotkey: HotKey?
     }
 
-    enum Outcome {
+    enum Outcome: Equatable {
         case cancelled
         /// A loadout wedge's middle ring (`clear` false) or outer ring (`clear` true).
         case apply(loadout: String, clear: Bool)
         /// Show what applying a loadout would do (nil: the active one). A loadout wedge's
         /// inner ring, or P over any wedge.
         case preview(loadout: String?)
-        /// The capture wedge's inner ring: this screen; middle ring: every display.
+        /// The capture wedge's inner ring: this screen; its middle ring, when it offers every
+        /// display: every display.
         case capture(allScreens: Bool)
-        /// The capture wedge's outer ring: open the editor on a fresh layout to draw.
+        /// The capture wedge's last ring: open the editor on a fresh layout to draw.
         case drawLayout
         /// The park wedge's inner ring: park the focused window. Its outer ring: bring
         /// every parked window back.
@@ -129,11 +133,12 @@ final class RadialMenu {
         case widgets(edit: Bool)
     }
 
-    /// How many rings a wedge has: park and widgets have two, the others three.
+    /// How many rings a wedge has: park, widgets and a capture wedge that captures one screen
+    /// have two, the others three.
     static func ringCount(for kind: Wedge.Kind) -> Int {
         switch kind {
-        case .park, .widgets: return 2
-        case .loadout, .capture: return 3
+        case .park, .widgets, .capture(offersAllScreens: false): return 2
+        case .loadout, .capture(offersAllScreens: true): return 3
         }
     }
 
@@ -144,12 +149,28 @@ final class RadialMenu {
         case (.loadout, .middle): return "Apply"
         case (.loadout, .outer): return "Clear this screen + Apply"
         case (.capture, .inner): return "Capture this screen as a loadout"
-        case (.capture, .middle): return "Capture all screens as a loadout"
-        case (.capture, .outer): return "Draw a new layout"
+        case (.capture(offersAllScreens: true), .middle): return "Capture all screens as a loadout"
+        case (.capture, .middle), (.capture, .outer): return "Draw a new layout"
         case (.park, .inner): return "Park front window"
         case (.park, .middle), (.park, .outer): return "Restore parked"
         case (.widgets, .inner): return "Reveal widgets"
         case (.widgets, .middle), (.widgets, .outer): return "Edit widgets"
+        }
+    }
+
+    /// What committing `ring` of a wedge of `kind` does.
+    static func outcome(of kind: Wedge.Kind, ring: RadialGeometry.Ring) -> Outcome {
+        switch (kind, ring) {
+        case (.capture, .inner): return .capture(allScreens: false)
+        case (.capture(offersAllScreens: true), .middle): return .capture(allScreens: true)
+        case (.capture, _): return .drawLayout
+        case (.park, .inner): return .park(restore: false)
+        case (.park, _): return .park(restore: true)
+        case (.widgets, .inner): return .widgets(edit: false)
+        case (.widgets, _): return .widgets(edit: true)
+        case (.loadout(let name), .inner): return .preview(loadout: name)
+        case (.loadout(let name), .middle): return .apply(loadout: name, clear: false)
+        case (.loadout(let name), .outer): return .apply(loadout: name, clear: true)
         }
     }
 
@@ -236,18 +257,7 @@ final class RadialMenu {
             onCommit?(.cancelled)
         case .wedge(let i, let ring):
             guard wedges.indices.contains(i) else { onCommit?(.cancelled); return }
-            switch (wedges[i].kind, ring) {
-            case (.capture, .inner): onCommit?(.capture(allScreens: false))
-            case (.capture, .middle): onCommit?(.capture(allScreens: true))
-            case (.capture, .outer): onCommit?(.drawLayout)
-            case (.park, .inner): onCommit?(.park(restore: false))
-            case (.park, _): onCommit?(.park(restore: true))
-            case (.widgets, .inner): onCommit?(.widgets(edit: false))
-            case (.widgets, _): onCommit?(.widgets(edit: true))
-            case (.loadout(let name), .inner): onCommit?(.preview(loadout: name))
-            case (.loadout(let name), .middle): onCommit?(.apply(loadout: name, clear: false))
-            case (.loadout(let name), .outer): onCommit?(.apply(loadout: name, clear: true))
-            }
+            onCommit?(Self.outcome(of: wedges[i].kind, ring: ring))
         }
     }
 

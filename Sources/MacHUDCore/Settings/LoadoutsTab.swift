@@ -1,11 +1,12 @@
 import AppKit
 import HUDKit
 
-/// The settings window's "Loadouts" tab: every saved loadout with a thumbnail, and the one
-/// selected drawn large per display and desktop, with Apply, Preview, Edit Layout, Rename,
-/// Duplicate, Apply at Startup and Delete. Edits go through `LoadoutLibrary` (as the
-/// `loadouts` verb's do); apply, preview, capture and the editor through the loadout menu's
-/// own entry points.
+/// The settings window's "Loadouts" tab: every offered loadout with a thumbnail, and the one
+/// selected drawn large, with Apply, Preview, Edit Layout, Rename, Duplicate, Apply at Startup
+/// and Delete. With multi-desktop loadouts (experimental) off it lists the one-screen loadouts,
+/// each drawn on one screen, and a line counting the hidden ones; on, every loadout, drawn per
+/// display and desktop. Edits go through `LoadoutLibrary` (as the `loadouts` verb's do);
+/// apply, preview, capture and the editor through the loadout menu's own entry points.
 @MainActor
 final class LoadoutsTabModel: ObservableObject {
     static let tabID = "loadouts"
@@ -53,6 +54,10 @@ final class LoadoutsTabModel: ObservableObject {
     }
 
     @Published private(set) var items: [Item] = []
+    /// Whether multi-desktop loadouts (experimental) are on, as of the last reload.
+    @Published private(set) var multiDesktop = false
+    /// How many loadouts are hidden because they span desktops or displays and the setting is off.
+    @Published private(set) var heldBack = 0
     @Published var selection: String?
     /// The desktop the large preview shows (nil: whichever is showing).
     @Published var desktop: Int?
@@ -71,13 +76,31 @@ final class LoadoutsTabModel: ObservableObject {
 
     var selected: Item? { items.first { $0.id == selection } }
 
+    /// The capture button's title: the menu bar's, unless multi-desktop loadouts are on.
+    var captureTitle: String { multiDesktop ? "Capture Current Windows…" : LoadoutMenu.captureThisScreenTitle }
+
+    /// Display names under the large preview: a one-screen loadout goes on whichever screen it
+    /// is applied to, so it names none.
+    var showsDisplayNames: Bool { multiDesktop }
+
+    /// The dimmed line under the list while loadouts are hidden, saying where the setting is.
+    var heldBackNote: String? {
+        guard heldBack > 0 else { return nil }
+        let one = heldBack == 1
+        return "\(heldBack) multi-desktop loadout\(one ? "" : "s") hidden. \(one ? "It is" : "They are") experimental: "
+            + "turn on \(ExperimentalLoadouts.settingTitle) under Experimental on the MacHUD tab to see \(one ? "it" : "them")."
+    }
+
     /// Re-read the loadouts and displays, keeping the selection (by name) when it still exists.
+    /// The app calls it whenever the config changes, so it follows the multi-desktop setting.
     func reload() {
         let config = services.config()
-        displays = services.displays()
+        multiDesktop = config.multiDesktopLoadouts
+        heldBack = ExperimentalLoadouts.heldBack(in: config)
+        displays = multiDesktop ? services.displays() : Self.oneScreen(services.displays())
         let active = services.activeLoadout()
         let gap = CGFloat(config.gap ?? 0)
-        items = (config.loadouts ?? []).map { loadout in
+        items = ExperimentalLoadouts.offered(in: config).map { loadout in
             Item(loadout: loadout,
                  sketch: LoadoutSketch.build(loadout, layouts: config.layouts, displays: displays, gap: gap),
                  isStartup: config.startupLoadout == loadout.name, isActive: active == loadout.name,
@@ -86,6 +109,14 @@ final class LoadoutsTabModel: ObservableObject {
         if selection == nil || !items.contains(where: { $0.id == selection }) { select(items.first?.id) }
         else if let item = selected, !item.sketch.desktops.contains(desktop) { desktop = item.sketch.desktops.first ?? nil }
         if let pending = confirmingDelete, !items.contains(where: { $0.id == pending }) { confirmingDelete = nil }
+    }
+
+    /// The screen a one-screen loadout is drawn on: the main display alone (apply uses the one
+    /// under the pointer, which the drawing cannot know).
+    static func oneScreen(_ displays: [LoadoutSketch.Display]) -> [LoadoutSketch.Display] {
+        guard var main = displays.first(where: \.descriptor.isMain) ?? displays.first else { return [] }
+        main.descriptor.isMain = true
+        return [main]
     }
 
     func select(_ name: String?) {
@@ -166,13 +197,14 @@ final class LoadoutsTabModel: ObservableObject {
     }
 
     var json: [String: Any] {
-        var d: [String: Any] = ["selected": selection ?? "", "desktop": desktop ?? 0,
+        var d: [String: Any] = ["selected": selection ?? "", "desktop": desktop ?? 0, "multiDesktop": multiDesktop,
                                 "loadouts": items.map { item -> [String: Any] in
                                     ["name": item.name, "summary": item.summary, "startup": item.isStartup,
                                      "active": item.isActive, "screens": item.loadout.screenCount,
                                      "desktops": item.loadout.desktopCount, "regions": item.sketch.regions.count,
                                      "ownedLayouts": item.ownedLayouts, "problems": item.sketch.problems]
                                 }]
+        if heldBack > 0 { d["heldBack"] = heldBack }
         if let lastError { d["lastError"] = lastError }
         if let confirmingDelete { d["confirmingDelete"] = confirmingDelete }
         return d

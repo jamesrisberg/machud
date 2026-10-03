@@ -1,7 +1,10 @@
 import AppKit
 
 /// Wires loadouts into the UI: the hold-to-show radial wheel, the status-bar
-/// section, per-loadout hotkeys and the `radial` / `menu` control commands.
+/// section, per-loadout hotkeys and the `radial` / `menu` / `preview` control commands.
+/// Every list offers `ExperimentalLoadouts.offered` and a capture takes the display under the
+/// pointer, unless multi-desktop loadouts (experimental) are on; each reads the config when
+/// it is built, so turning the setting on or off needs no relaunch.
 @MainActor
 final class LoadoutMenu {
     private let store: LayoutStore
@@ -22,6 +25,12 @@ final class LoadoutMenu {
 
     /// Retained for the lifetime of the app so `main.swift` needs no new property.
     private(set) static var shared: LoadoutMenu?
+
+    /// Says why a loadout or action was refused (multi-desktop loadouts are off): a toast, or
+    /// a recorder in tests.
+    var showRefusal: (_ title: String, _ detail: String) -> Void = { title, detail in
+        Toast.show(title, detail: detail, seconds: 6)
+    }
 
     @discardableResult
     static func install(store: LayoutStore, engine: LoadoutEngine, statusMenu: StatusMenu,
@@ -44,7 +53,7 @@ final class LoadoutMenu {
         return menu
     }
 
-    private init(store: LayoutStore, engine: LoadoutEngine) {
+    init(store: LayoutStore, engine: LoadoutEngine) {
         self.store = store
         self.engine = engine
         radial.onCommit = { [weak self] outcome in self?.handle(outcome) }
@@ -64,11 +73,11 @@ final class LoadoutMenu {
     var onWidgets: ((Bool) -> Void)?
 
     func wedges() -> [RadialMenu.Wedge] {
-        let loadouts = store.loadouts
+        let loadouts = offered
         let capture = RadialMenu.Wedge(
             title: "Capture…",
             icons: [NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: nil)].compactMap { $0 },
-            kind: .capture)
+            kind: .capture(offersAllScreens: store.config.multiDesktopLoadouts))
         let parked = engine.parking.parked.count
         var parkSubtitle = engine.focusedWindowLabel() ?? "nothing in front to park"
         if parked > 0 { parkSubtitle += " · \(parked) parked" }
@@ -87,8 +96,7 @@ final class LoadoutMenu {
         return loadouts.map {
             let n = $0.allSlots.count
             var subtitle = "\(n) window\(n == 1 ? "" : "s")"
-            let desktops = Set($0.allSlots.compactMap(\.space)).count
-            if desktops > 1 { subtitle += " · \(desktops) desktops" }
+            if $0.desktopCount > 1 { subtitle += " · \($0.desktopCount) desktops" }
             if $0.hud != nil { subtitle += " · HUD" }
             return RadialMenu.Wedge(title: $0.name, subtitle: subtitle,
                                     icons: RadialMenu.icons(for: $0, panels: engine.panels),
@@ -126,17 +134,40 @@ final class LoadoutMenu {
             guard let loadout = store.loadout(named: name) else { return }
             apply(loadout, clear: clear)
         case .preview(let name):
-            guard let name = name ?? engine.activeLoadout ?? store.loadouts.first?.name,
-                  let loadout = store.loadout(named: name) else { return }
+            guard let name = name ?? defaultLoadoutName, let loadout = store.loadout(named: name) else { return }
             // Out of the hotkey callback first, like capture.
             DispatchQueue.main.async { self.preview(loadout) }
         }
+    }
+
+    // MARK: Offered loadouts
+
+    /// The loadouts the menu, the wheel and the hotkeys offer: all of them while multi-desktop
+    /// loadouts are on, else the one-screen ones.
+    private var offered: [Loadout] { ExperimentalLoadouts.offered(in: store.config) }
+
+    /// The loadout a preview without a name shows: the one applied last if it is offered, else
+    /// the first offered.
+    var defaultLoadoutName: String? {
+        let names = offered.map(\.name)
+        if let active = engine.activeLoadout, names.contains(active) { return active }
+        return names.first
+    }
+
+    /// Says why `loadout` cannot be used now and returns the reason; nil when it can.
+    @discardableResult
+    private func refuse(_ loadout: Loadout, _ verb: String) -> String? {
+        guard let reason = ExperimentalLoadouts.refusal(for: loadout, in: store.config) else { return nil }
+        NSLog("MacHUD: refused to %@ '%@': %@", verb, loadout.name, reason)
+        showRefusal("Could not \(verb) \(loadout.name)", reason)
+        return reason
     }
 
     // MARK: Actions
 
     /// Draw what applying `loadout` would do on every display; Apply runs it.
     func preview(_ loadout: Loadout) {
+        guard refuse(loadout, "preview") == nil else { return }
         if !loadout.allSlots.isEmpty { requireAccessibility(for: "see where windows are") }
         let (steps, report) = engine.plan(loadout)
         var problems = report.redirected.map(\.summary)
@@ -189,6 +220,12 @@ final class LoadoutMenu {
     func apply(_ loadout: Loadout, clear: Bool) {
         NSLog("MacHUD: applying loadout '%@' (%@)", loadout.name, clear ? "clear + load" : "load")
         lastApply = ["loadout": loadout.name, "clear": clear, "at": Date().timeIntervalSince1970]
+        // A hidden loadout can still arrive here: a hotkey pressed as the setting changed, or a
+        // loadout opened from somewhere else.
+        if let reason = refuse(loadout, "apply") {
+            lastApply?["report"] = ["ok": false, "error": reason]
+            return
+        }
         guard loadout.allSlots.isEmpty || requireAccessibility(for: "see or move windows") else {
             lastApply?["report"] = ["ok": false, "error": "accessibility access is off"]
             return
@@ -226,19 +263,30 @@ final class LoadoutMenu {
         return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 
+    /// Captures the windows on the display under the pointer, on the desktop showing, as a
+    /// loadout. With multi-desktop loadouts on, `allScreens` true captures every display and nil
+    /// decides from how many displays have windows (the menu bar), and the sheet offers to walk
+    /// the desktops; with them off, `allScreens` true is refused.
     /// The prompt runs a modal, so never start it from inside the Carbon hotkey
     /// callback that dismissed the wheel: give the run loop a turn first.
-    /// `allScreens` nil = decide from how many displays have windows (menu bar);
-    /// the wheel passes the ring choice explicitly.
     func captureCurrent(allScreens: Bool? = nil) {
+        if allScreens == true, let reason = ExperimentalLoadouts.refusal(forAction: "Capturing every screen", in: store.config) {
+            NSLog("MacHUD: refused to capture every screen: %@", reason)
+            showRefusal("Could not capture every screen", reason)
+            return
+        }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            let multiDesktop = self.store.config.multiDesktopLoadouts
             let screen = ScreenCoords.screen(containing: NSEvent.mouseLocation)
-            let busy = self.engine.screensWithWindows()
-            let everywhere = allScreens ?? (busy.count > 1)
+            let everywhere = Self.capturesEveryScreen(
+                allScreens: allScreens, screensWithWindows: multiDesktop ? self.engine.screensWithWindows().count : 1,
+                multiDesktop: multiDesktop)
             let targets = everywhere ? NSScreen.screens : [screen ?? NSScreen.main].compactMap { $0 }
-            let counts = NSScreen.screens.map { Spaces.monitor(for: $0)?.count ?? 1 }
-            let desktops = targets.compactMap { NSScreen.screens.firstIndex(of: $0) }.map { counts[$0] }.max() ?? 1
+            // Desktops are counted, and offered for a walk, only with multi-desktop loadouts on.
+            let counts = multiDesktop ? NSScreen.screens.map { Spaces.monitor(for: $0)?.count ?? 1 } : []
+            let desktops = targets.compactMap { NSScreen.screens.firstIndex(of: $0) }
+                .compactMap { counts.indices.contains($0) ? counts[$0] : nil }.max() ?? 1
             let place = everywhere ? "all \(targets.count) displays" : (screen?.localizedName ?? "this screen")
             guard let answer = self.prompt(title: "Capture the windows on \(place) as a loadout",
                                            value: self.suggestedName(),
@@ -248,6 +296,11 @@ final class LoadoutMenu {
                 return
             }
             let name = answer.name
+            if let reason = ExperimentalLoadouts.refusal(forName: name, in: self.store.config) {
+                NSLog("MacHUD: refused to capture over hidden loadout '%@'", name)
+                self.showRefusal("Could not capture \(name): a hidden loadout has that name", reason)
+                return
+            }
             let walk = answer.walkDesktops ? DesktopWalk.all(counts: counts) : nil
             self.engine.captureArrangement(name: name, layoutName: answer.layoutName ?? name,
                                            screens: targets, walk: walk) { capture in
@@ -279,6 +332,13 @@ final class LoadoutMenu {
         }
     }
 
+    /// Whether a capture covers every display rather than the one under the pointer: only with
+    /// multi-desktop loadouts on, when asked (the wheel's ring) or, when not asked (the menu
+    /// bar), when more than one display has windows.
+    nonisolated static func capturesEveryScreen(allScreens: Bool?, screensWithWindows: Int, multiDesktop: Bool) -> Bool {
+        multiDesktop && (allScreens ?? (screensWithWindows > 1))
+    }
+
     static func captureDetail(of capture: LoadoutEngine.ArrangementCapture) -> String {
         if capture.screens.count == 1 {
             return capture.screens[0].slots.map { $0.occupant.label }.joined(separator: " · ")
@@ -297,9 +357,8 @@ final class LoadoutMenu {
         return "Loadout \(n)"
     }
 
-    /// Name field, plus a "walk the desktops" checkbox when the displays being
-    /// captured have more than one desktop between them.
-    struct CaptureAnswer {
+    /// What the capture sheet asked for.
+    struct CaptureAnswer: Equatable {
         var name: String
         /// nil: the layout is kept for the loadout only, not offered for ⇧-drag or other loadouts.
         var layoutName: String?
@@ -308,54 +367,71 @@ final class LoadoutMenu {
         var includeHUD: Bool
     }
 
-    /// The capture sheet: the loadout's name; whether its layout is also kept as one to snap
-    /// into and to build other loadouts on, and under what name; whether the HUD (tool dock
-    /// and panels) is saved with it; and, when the displays have more than one desktop,
-    /// whether to walk them.
+    /// The capture sheet's controls: the loadout's name; whether its layout is also kept as one
+    /// to snap into and to build other loadouts on, and under what name; whether the HUD (tool
+    /// dock and panels) is saved with it, off until ticked; and, when `desktops` is given
+    /// (multi-desktop loadouts on, more than one desktop), whether to walk them.
+    @MainActor
+    struct CaptureSheet {
+        static let width: CGFloat = 340
+        let name: NSTextField
+        let keepLayout: NSButton
+        let layoutName: NSTextField
+        let hud: NSButton
+        let walk: NSButton?
+        let view: NSStackView
+        /// Keeps the layout name following the loadout name; lives as long as the sheet.
+        private let sync: FieldSync
+
+        var boxes: [NSButton] { [keepLayout, hud] + (walk.map { [$0] } ?? []) }
+
+        init(name value: String, desktops: Int?) {
+            name = NSTextField(frame: CGRect(x: 0, y: 0, width: Self.width, height: 24))
+            name.stringValue = value
+            name.placeholderString = "Loadout name"
+            keepLayout = NSButton(checkboxWithTitle: "Also keep the layout on its own, for ⇧-drag and other loadouts",
+                                  target: nil, action: nil)
+            keepLayout.state = .on
+            layoutName = NSTextField(frame: CGRect(x: 0, y: 0, width: Self.width, height: 24))
+            layoutName.stringValue = value
+            layoutName.placeholderString = "Layout name"
+            sync = FieldSync(from: name, to: layoutName)
+            keepLayout.target = sync
+            keepLayout.action = #selector(FieldSync.toggled(_:))
+            hud = NSButton(checkboxWithTitle: "Include the tool dock and the apps' panels (the HUD)", target: nil, action: nil)
+            hud.state = .off
+            walk = desktops.map { NSButton(checkboxWithTitle: "Also walk desktops 1…\($0)", target: nil, action: nil) }
+            walk?.state = .off
+            let views: [NSView] = [name, keepLayout, layoutName, hud] + (walk.map { [$0] } ?? [])
+            view = NSStackView(views: views)
+            view.orientation = .vertical
+            view.alignment = .leading
+            view.spacing = 8
+            view.frame = CGRect(x: 0, y: 0, width: Self.width, height: CGFloat(views.count) * 30)
+            for v in views { v.widthAnchor.constraint(equalToConstant: Self.width).isActive = true }
+        }
+
+        var answer: CaptureAnswer {
+            let name = name.stringValue.trimmingCharacters(in: .whitespaces)
+            let layout = layoutName.stringValue.trimmingCharacters(in: .whitespaces)
+            return CaptureAnswer(name: name, layoutName: keepLayout.state == .on ? (layout.isEmpty ? name : layout) : nil,
+                                 walkDesktops: walk?.state == .on, includeHUD: hud.state == .on)
+        }
+    }
+
+    /// Runs the capture sheet; nil when cancelled.
     private func prompt(title: String, value: String, desktops: Int?) -> CaptureAnswer? {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = "The windows become a layout (one region each) and a loadout that fills it."
         alert.addButton(withTitle: "Capture")
         alert.addButton(withTitle: "Cancel")
-        let width: CGFloat = 340
-        let field = NSTextField(frame: CGRect(x: 0, y: 0, width: width, height: 24))
-        field.stringValue = value
-        field.placeholderString = "Loadout name"
-        let keepLayout = NSButton(checkboxWithTitle: "Also keep the layout on its own, for ⇧-drag and other loadouts", target: nil, action: nil)
-        keepLayout.state = .on
-        let layoutField = NSTextField(frame: CGRect(x: 0, y: 0, width: width, height: 24))
-        layoutField.stringValue = value
-        layoutField.placeholderString = "Layout name"
-        let sync = FieldSync(from: field, to: layoutField)
-        keepLayout.target = sync
-        keepLayout.action = #selector(FieldSync.toggled(_:))
-        let hud = NSButton(checkboxWithTitle: "Include the tool dock and the apps' panels (the HUD)", target: nil, action: nil)
-        hud.state = .on
-        var views: [NSView] = [field, keepLayout, layoutField, hud]
-        var walk: NSButton?
-        if let desktops {
-            let box = NSButton(checkboxWithTitle: "Also walk desktops 1…\(desktops)", target: nil, action: nil)
-            box.state = .off
-            walk = box
-            views.append(box)
-        }
-        let stack = NSStackView(views: views)
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 8
-        stack.frame = CGRect(x: 0, y: 0, width: width, height: CGFloat(views.count) * 30)
-        for v in views { v.widthAnchor.constraint(equalToConstant: width).isActive = true }
-        alert.accessoryView = stack
-        alert.window.initialFirstResponder = field
+        let sheet = CaptureSheet(name: value, desktops: desktops)
+        alert.accessoryView = sheet.view
+        alert.window.initialFirstResponder = sheet.name
         NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertFirstButtonReturn else { return nil }
-        withExtendedLifetime(sync) {}
-        let name = field.stringValue.trimmingCharacters(in: .whitespaces)
-        let layoutName = layoutField.stringValue.trimmingCharacters(in: .whitespaces)
-        return CaptureAnswer(name: name,
-                             layoutName: keepLayout.state == .on ? (layoutName.isEmpty ? name : layoutName) : nil,
-                             walkDesktops: walk?.state == .on, includeHUD: hud.state == .on)
+        return sheet.answer
     }
 
     // MARK: Hotkeys
@@ -365,8 +441,7 @@ final class LoadoutMenu {
     /// is being held open.
     func registerHotkeys() {
         let menuKey = Env.noHotkeys ? nil : store.hotkeys.loadoutMenu
-        let perLoadout: [String: HotKey] = Env.noHotkeys ? [:]
-            : store.loadouts.reduce(into: [:]) { out, l in if let hk = l.hotkey { out[l.name] = hk } }
+        let perLoadout = Env.noHotkeys ? [:] : Self.loadoutHotkeys(in: store.config)
         if let registered, registered.menu == menuKey, registered.loadouts == perLoadout { return }
         if radial.isVisible {
             registrationDeferred = true
@@ -395,11 +470,18 @@ final class LoadoutMenu {
         }
     }
 
+    /// The hotkeys of the loadouts offered (`ExperimentalLoadouts.offered`), by loadout name: a
+    /// hidden loadout's hotkey is free until multi-desktop loadouts are turned on.
+    nonisolated static func loadoutHotkeys(in config: Config) -> [String: HotKey] {
+        ExperimentalLoadouts.offered(in: config).reduce(into: [:]) { out, l in if let hk = l.hotkey { out[l.name] = hk } }
+    }
+
     // MARK: Status menu
 
     /// The status menu's **Loadouts** submenu. A loadout owns its layout, so everything
     /// starts from a loadout: apply it, preview it, edit its layout; then capture a new one,
-    /// save the HUD, draw a layout from scratch, pick the snap layout, undo a clear.
+    /// save the HUD, draw a layout from scratch, pick the snap layout, undo a clear. Built each
+    /// time the menu opens, so it follows the multi-desktop setting.
     func menuItems() -> [NSMenuItem] {
         let parent = NSMenuItem(title: "Loadouts", action: nil, keyEquivalent: "")
         parent.image = NSImage(systemSymbolName: "rectangle.3.group", accessibilityDescription: nil)
@@ -410,14 +492,28 @@ final class LoadoutMenu {
         return [parent]
     }
 
+    /// The capture item's title while multi-desktop loadouts are off; the settings tab's
+    /// capture button reads the same.
+    static let captureThisScreenTitle = "Capture This Screen as Loadout…"
+
+    /// The dimmed line saying how many loadouts are hidden because multi-desktop loadouts are
+    /// off; nil when none are.
+    nonisolated static func heldBackLine(_ count: Int) -> String? {
+        count > 0 ? "\(count) multi-desktop loadout\(count == 1 ? "" : "s") hidden (experimental)" : nil
+    }
+
     private func loadoutItems() -> [NSMenuItem] {
         var items: [NSMenuItem] = []
-        if store.loadouts.isEmpty {
-            let empty = NSMenuItem(title: "No loadouts yet: arrange windows, then Capture Windows…", action: nil, keyEquivalent: "")
+        let config = store.config
+        let loadouts = offered
+        let heldBack = ExperimentalLoadouts.heldBack(in: config)
+        if loadouts.isEmpty && heldBack == 0 {
+            let then = config.multiDesktopLoadouts ? "Capture Windows…" : "Capture This Screen…"
+            let empty = NSMenuItem(title: "No loadouts yet: arrange windows, then \(then)", action: nil, keyEquivalent: "")
             empty.isEnabled = false
             items.append(empty)
         }
-        for loadout in store.loadouts {
+        for loadout in loadouts {
             let title = loadout.hotkey.map { "\(loadout.name)  \($0.display)" } ?? loadout.name
             let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
             item.state = engine.activeLoadout == loadout.name ? .on : .off
@@ -444,9 +540,16 @@ final class LoadoutMenu {
             item.submenu = sub
             items.append(item)
         }
+        if let line = Self.heldBackLine(heldBack) {
+            let hidden = NSMenuItem(title: line, action: nil, keyEquivalent: "")
+            hidden.isEnabled = false
+            hidden.toolTip = ExperimentalLoadouts.howToTurnOn
+            items.append(hidden)
+        }
 
         items.append(.separator())
-        items.append(action("Capture Windows as Loadout…", "", #selector(captureItem)))
+        items.append(action(config.multiDesktopLoadouts ? "Capture Windows as Loadout…" : Self.captureThisScreenTitle,
+                            "", #selector(captureItem)))
         items.append(action("Save Dock and Panels as HUD Loadout…", "", #selector(saveHUDItem)))
         items.append(action("Draw a New Layout…", "", #selector(newLayoutItem)))
         items.append(.separator())
@@ -555,7 +658,8 @@ final class LoadoutMenu {
     }
 
     /// Asks for a name (and whether to put it back at startup), then saves the tool dock
-    /// and every running sibling's panels into that loadout.
+    /// and every running sibling's panels into that loadout. A loadout hidden while
+    /// multi-desktop loadouts are off is neither suggested nor written.
     func saveCurrentHUD() {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -565,7 +669,8 @@ final class LoadoutMenu {
             alert.addButton(withTitle: "Save")
             alert.addButton(withTitle: "Cancel")
             let field = NSTextField(frame: CGRect(x: 0, y: 0, width: 300, height: 24))
-            field.stringValue = self.store.config.startupLoadout ?? "My HUD"
+            let config = self.store.config
+            field.stringValue = config.startupLoadout.flatMap { ExperimentalLoadouts.refusal(forName: $0, in: config) == nil ? $0 : nil } ?? "My HUD"
             let box = NSButton(checkboxWithTitle: "Put it back when MacHUD starts", target: nil, action: nil)
             box.state = .on
             let stack = NSStackView(views: [field, box])
@@ -579,6 +684,11 @@ final class LoadoutMenu {
             guard alert.runModal() == .alertFirstButtonReturn else { return }
             let name = field.stringValue.trimmingCharacters(in: .whitespaces)
             guard !name.isEmpty else { return }
+            if let reason = ExperimentalLoadouts.refusal(forName: name, in: self.store.config) {
+                NSLog("MacHUD: refused to save the HUD into hidden loadout '%@'", name)
+                self.showRefusal("Could not save the HUD as \(name): a hidden loadout has that name", reason)
+                return
+            }
             let atStartup = box.state == .on
             self.engine.captureHUD(into: name) { [weak self] loadout in
                 guard let self, let loadout else {
@@ -617,9 +727,11 @@ final class LoadoutMenu {
             guard let self else { done(["ok": false, "error": "gone"]); return }
             switch args["action"] ?? "show" {
             case "show":
-                guard let name = args["loadout"] ?? self.engine.activeLoadout ?? self.store.loadouts.first?.name,
-                      let loadout = self.store.loadout(named: name) else {
+                guard let name = args["loadout"] ?? self.defaultLoadoutName, let loadout = self.store.loadout(named: name) else {
                     done(["ok": false, "error": "no such loadout"]); return
+                }
+                if let reason = ExperimentalLoadouts.refusal(for: loadout, in: self.store.config) {
+                    done(["ok": false, "error": reason]); return
                 }
                 self.preview(loadout)
             case "hide", "cancel":
