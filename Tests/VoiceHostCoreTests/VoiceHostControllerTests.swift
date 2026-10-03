@@ -16,8 +16,13 @@ final class VoiceHostControllerTests: XCTestCase {
     private var presenter: RecordingPresenter!
     private var clock: ManualClock!
     private var sessions: FakeSessions!
+    private var journal: FakeTakeJournal!
+    /// The take and wake-listener lines the controller logged.
+    private var logged: [String] = []
     private var missingRuntimes: Set<String> = []
     private let brainRoot = URL(fileURLWithPath: "/tmp/voice-tests/Brain")
+    /// The wall clock at uptime 0; it moves with `clock`.
+    private let launchDate = Date(timeIntervalSince1970: 1_791_000_000)
 
     override func setUp() async throws {
         dictation = FakeDictation()
@@ -29,6 +34,8 @@ final class VoiceHostControllerTests: XCTestCase {
         presenter = RecordingPresenter()
         clock = ManualClock()
         sessions = FakeSessions()
+        journal = FakeTakeJournal()
+        logged = []
         missingRuntimes = []
     }
 
@@ -42,11 +49,20 @@ final class VoiceHostControllerTests: XCTestCase {
             wakeModels: [WakePhraseModel(model: WakeModels.heyJarvis, store: wakeStore)], brainStateRoot: brainRoot,
             sessions: sessions, detectRuntimes: FakeRuntimes.detect(missing: missingRuntimes),
             sessionKeyOf: { _ in fakeBrain.sessionKey },
-            now: { clock.now }, schedule: { clock.schedule($0, $1) })
+            now: { clock.now }, wallClock: { [launchDate] in launchDate.addingTimeInterval(clock.now) },
+            schedule: { clock.schedule($0, $1) }, takeJournal: journal)
+        controller.log = { [weak self] in self?.logged.append($0) }
         controller.presenter = presenter
         controller.start()
         return controller
     }
+
+    /// The journal's date for uptime `time`.
+    private func date(at time: TimeInterval) -> String {
+        VoiceTakeRecord.timestamp(launchDate.addingTimeInterval(time))
+    }
+
+    private func lines(_ prefix: String) -> [String] { logged.filter { $0.hasPrefix(prefix) } }
 
     private func settled(_ controller: VoiceHostController) async {
         await controller.pendingWork?.value
@@ -232,10 +248,8 @@ final class VoiceHostControllerTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(controller.state.lastTakeEnd).reason, .stop)
     }
 
-    func testAHandsFreeTakeSaysWhyItEnded() throws {
-        var logged: [String] = []
+    func testAHandsFreeTakeSaysWhyItEndedAndWhatStartedIt() throws {
         let controller = makeController()
-        controller.logTakeEnd = { logged.append($0) }
         controller.perform(.orbClicked)
         levels(0.01, from: 0, to: 0.5)
         speak(from: 0.5, to: 1.5)
@@ -249,11 +263,14 @@ final class VoiceHostControllerTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(end.threshold), 0.03, accuracy: 0.001)
         XCTAssertEqual(end.pause, 2)
         XCTAssertEqual(end.grace, false)
-        XCTAssertEqual(logged.count, 1)
-        XCTAssertTrue(logged[0].contains("pause"), logged[0])
-        XCTAssertTrue(logged[0].contains("2000 ms"), logged[0])
+        XCTAssertEqual(end.trigger, .orb)
+        XCTAssertEqual(lines("take ended").count, 1)
+        let ended = try XCTUnwrap(lines("take ended").first)
+        XCTAssertTrue(ended.contains("pause"), ended)
+        XCTAssertTrue(ended.contains("2000 ms"), ended)
+        XCTAssertTrue(ended.hasSuffix("started by orb"), ended)
         dictation.finish("Mute the music.")
-        XCTAssertEqual(logged.count, 1, "one line per take")
+        XCTAssertEqual(lines("take ended").count, 1, "one line per take")
     }
 
     func testTakeEndsAreReportedForEveryWayATakeEnds() throws {
@@ -429,7 +446,7 @@ final class VoiceHostControllerTests: XCTestCase {
         controller.perform(.orbClicked)
         XCTAssertTrue(dictation.starts.isEmpty)
         XCTAssertEqual(controller.state.phase, .failed(Self.noWorkspace))
-        XCTAssertNil(controller.refusal(for: .dictation))
+        XCTAssertNil(controller.socketRefusal(for: .dictation, action: "dictate"))
     }
 
     func testAStartingBrainStillTakesTheTake() {
@@ -707,9 +724,14 @@ final class VoiceHostControllerTests: XCTestCase {
         let controller = makeController(settings)
         await startTurn(controller)
         let starts = dictation.starts.count
-        wake.onWake?()
+        wake.detect(score: 0.61)
         XCTAssertEqual(dictation.starts.count, starts)
         XCTAssertEqual(controller.state.phase, .failed(VoiceHostController.agentBusy))
+        let refused = try? XCTUnwrap(journal.records.last)
+        XCTAssertEqual(refused?.outcome, .refused)
+        XCTAssertEqual(refused?.reason, VoiceHostController.agentBusy)
+        XCTAssertEqual(refused?.trigger, .wake(score: 0.61, phrase: "Hey Jarvis"))
+        XCTAssertNil(refused?.seconds, "it never recorded")
     }
 
     func testFnAlternateWhileATurnRunsPastesInstead() async {
@@ -864,12 +886,15 @@ final class VoiceHostControllerTests: XCTestCase {
         var settings = VoiceHostSettings()
         settings.enabled = false
         let controller = makeController(settings)
-        XCTAssertEqual(controller.refusal(for: .dictation), VoiceHostController.voiceOff)
+        XCTAssertEqual(controller.socketRefusal(for: .dictation, action: "dictate"), VoiceHostController.voiceOff)
         settings.enabled = true
         controller.apply(settings)
-        XCTAssertNil(controller.refusal(for: .agent))
+        XCTAssertNil(controller.socketRefusal(for: .agent, action: "ask"))
         controller.perform(.setMuted(true))
-        XCTAssertEqual(controller.refusal(for: .agent), VoiceHostController.voiceMuted)
+        XCTAssertEqual(controller.socketRefusal(for: .agent, action: "ask"), VoiceHostController.voiceMuted)
+        XCTAssertEqual(journal.records.map(\.reason), [VoiceHostController.voiceOff, VoiceHostController.voiceMuted],
+                       "each refusal is journaled, with the other refusals")
+        XCTAssertEqual(journal.records.map(\.trigger), [.socket(action: "dictate"), .socket(action: "ask")])
     }
 
     // MARK: Speech
@@ -944,10 +969,11 @@ final class VoiceHostControllerTests: XCTestCase {
         settings.voice.wakeWordEnabled = true
         let controller = makeController(settings)
         XCTAssertTrue(controller.state.wakeListening)
-        wake.onWake?()
+        wake.detect()
         XCTAssertEqual(dictation.starts, [.caller])
         XCTAssertFalse(wake.listening)
         controller.perform(.stop)
+        XCTAssertEqual(controller.state.lastTakeEnd?.trigger, .wake(score: 0.973, phrase: "Hey Jarvis"))
         dictation.finish("hello")
         await settled(controller)
         XCTAssertTrue(wake.listening)
@@ -959,10 +985,12 @@ final class VoiceHostControllerTests: XCTestCase {
         settings.brainEnabled = false
         let controller = makeController(settings)
         let starts = wake.starts.count
-        wake.onWake?()
+        wake.detect()
         XCTAssertEqual(controller.state.phase, .failed("The brain is off"))
         XCTAssertEqual(wake.starts.count, starts + 1)
         XCTAssertTrue(wake.listening)
+        XCTAssertEqual(journal.records.map(\.outcome), [.refused])
+        XCTAssertEqual(journal.records.last?.reason, VoiceHostController.brainOff)
     }
 
     func testSnapshotsDoNotTakeOverARecordingTake() async {
@@ -977,6 +1005,310 @@ final class VoiceHostControllerTests: XCTestCase {
     func testWakeOffByDefault() {
         _ = makeController()
         XCTAssertTrue(wake.starts.isEmpty)
+    }
+
+    // MARK: What started a take, and what became of it
+
+    func testEveryTakeRecordsWhatStartedIt() async {
+        var settings = VoiceHostSettings()
+        settings.voice.wakeWordEnabled = true
+        let controller = makeController(settings)
+
+        controller.perform(.orbClicked)
+        controller.perform(.stop)
+        XCTAssertEqual(controller.state.lastTakeEnd?.trigger, .orb)
+        dictation.finish("")
+
+        controller.perform(.start(.agent), trigger: .socket(action: "ask"))
+        controller.perform(.stop)
+        XCTAssertEqual(controller.state.lastTakeEnd?.trigger, .socket(action: "ask"))
+        dictation.finish("")
+
+        wake.detect(score: 0.912)
+        controller.perform(.stop)
+        XCTAssertEqual(controller.state.lastTakeEnd?.trigger, .wake(score: 0.912, phrase: "Hey Jarvis"))
+        dictation.finish("")
+
+        keys.send(.begin(.primary))
+        keys.send(.end)
+        dictation.finish("at the cursor")
+
+        keys.send(.begin(.primary))
+        keys.send(.retarget(.alternate))
+        keys.send(.end)
+        dictation.finish("to the agent")
+        await settled(controller)
+
+        XCTAssertEqual(journal.records.map(\.trigger), [
+            .orb, .socket(action: "ask"), .wake(score: 0.912, phrase: "Hey Jarvis"),
+            .key(.primary, retargeted: false), .key(.primary, retargeted: true),
+        ])
+        XCTAssertEqual(journal.records.map(\.mode), [.agent, .agent, .agent, .dictation, .agent])
+        XCTAssertEqual(controller.state.lastTakeEnd?.trigger, .wake(score: 0.912, phrase: "Hey Jarvis"),
+                       "an fn take leaves the last hands-free take's ending")
+    }
+
+    func testATakeSentToTheBrainIsJournaledWithItsLengthAndCount() async throws {
+        let controller = makeController()
+        clock.now = 5
+        controller.perform(.orbClicked)
+        speak(from: 5, to: 6)
+        dictation.partial("What time is it?")
+        levels(0.01, from: 6, to: 8.5)
+        XCTAssertEqual(dictation.stops, 1)
+        dictation.finish("What time is it?")
+        XCTAssertTrue(journal.records.isEmpty, "written once the brain has taken it")
+        await settled(controller)
+        let record = try XCTUnwrap(journal.records.last)
+        XCTAssertEqual(record, VoiceTakeRecord(date: date(at: 5), trigger: .orb, mode: .agent, seconds: 3,
+                                               end: .pause, outcome: .sent, characters: 16))
+    }
+
+    func testATakeTypedAtTheCursorIsJournaled() {
+        let controller = makeController()
+        clock.now = 1
+        keys.send(.begin(.primary))
+        clock.now = 2.5
+        keys.send(.end)
+        dictation.finish("hello there")
+        XCTAssertEqual(journal.records, [VoiceTakeRecord(date: date(at: 1), trigger: .key(.primary, retargeted: false),
+                                                         mode: .dictation, seconds: 1.5, end: .stop, outcome: .typed,
+                                                         characters: 11)])
+        withExtendedLifetime(controller) {}
+    }
+
+    /// An agent take that finishes while the agent works is typed at the cursor; the journal says so and why.
+    func testAWakeTakeThatFinishesWhileTheAgentWorksIsJournaledAsTyped() async throws {
+        var settings = VoiceHostSettings()
+        settings.voice.wakeWordEnabled = true
+        let controller = makeController(settings)
+        wake.detect()
+        controller.perform(.stop)
+        brain.push(status: "running", requestId: "other")
+        dictation.finish("seventy seconds of an audiobook")
+        await settled(controller)
+        XCTAssertEqual(dictation.inserted, ["seventy seconds of an audiobook"])
+        let record = try XCTUnwrap(journal.records.last)
+        XCTAssertEqual(record.outcome, .typed)
+        XCTAssertEqual(record.reason, VoiceHostController.agentBusyPasted)
+        XCTAssertEqual(record.mode, .agent)
+        XCTAssertEqual(record.characters, 31)
+        XCTAssertEqual(record.trigger, .wake(score: 0.973, phrase: "Hey Jarvis"))
+    }
+
+    func testTakesThrownAwayAreJournaledWithWhy() async {
+        let controller = makeController()
+        // Nothing heard by the endpointer.
+        controller.perform(.orbClicked)
+        levels(0.01, from: 0, to: 10.1)
+        // Words that came out empty.
+        controller.perform(.start(.agent), trigger: .socket(action: "ask"))
+        controller.perform(.stop)
+        dictation.finish("  ")
+        await settled(controller)
+        // Cancelled.
+        controller.perform(.start(.dictation), trigger: .socket(action: "dictate"))
+        controller.perform(.cancel)
+        // A discarded fn tap.
+        keys.send(.begin(.primary))
+        keys.send(.discard)
+        // Failed.
+        controller.perform(.orbClicked)
+        dictation.onUpdate?(dictation.takeID, .failed(.tooShort))
+        XCTAssertEqual(journal.records.map(\.outcome), [.nothingHeard, .nothingHeard, .cancelled, .cancelled, .failed])
+        XCTAssertEqual(journal.records.map(\.end), [.nothingHeard, .stop, .cancelled, .cancelled, .failed])
+        XCTAssertEqual(journal.records.last?.reason, "Recording too short")
+        XCTAssertEqual(journal.records.compactMap(\.characters), [], "nothing was sent or typed")
+    }
+
+    func testTakesThatNeverStartAreJournaledAsRefused() {
+        var settings = VoiceHostSettings()
+        settings.brainEnabled = false
+        let controller = makeController(settings)
+        controller.perform(.orbClicked)
+        XCTAssertEqual(controller.state.phase, .failed(VoiceHostController.brainOff))
+        settings.brainEnabled = true
+        controller.apply(settings)
+        dictation.unavailable = .modelMissing(recordingKept: false)
+        controller.perform(.start(.dictation), trigger: .socket(action: "dictate"))
+        XCTAssertEqual(journal.records.map(\.outcome), [.refused, .refused])
+        XCTAssertEqual(journal.records.map(\.reason), [VoiceHostController.brainOff, VoiceHostController.modelMissing])
+        XCTAssertEqual(journal.records.map(\.trigger), [.orb, .socket(action: "dictate")])
+        XCTAssertEqual(journal.records.compactMap(\.seconds), [])
+    }
+
+    func testATurnTheBrainRefusesIsJournaledAsRefused() async {
+        let controller = makeController()
+        brain.submitError = AgentSessionError.server(409, "turn already active")
+        controller.perform(.start(.agent), trigger: .socket(action: "ask"))
+        controller.perform(.stop)
+        dictation.finish("hello")
+        await settled(controller)
+        XCTAssertEqual(journal.records.map(\.outcome), [.refused])
+        XCTAssertEqual(journal.records.last?.characters, 5)
+        XCTAssertEqual(journal.records.last?.reason, "The brain did not take the turn (409)")
+        XCTAssertEqual(journal.records.last?.end, .stop)
+        XCTAssertFalse(logged.contains { $0.contains("turn already active") }, "never the brain's own words: \(logged)")
+    }
+
+    func testAWakeThatStartsNoTakeIsJournaledWithItsScore() {
+        var settings = VoiceHostSettings()
+        settings.voice.wakeWordEnabled = true
+        let controller = makeController(settings)
+        // Detections the listener delivers after it was told to stop start nothing.
+        controller.perform(.setMuted(true))
+        wake.detect(score: 0.611)
+        XCTAssertTrue(dictation.starts.isEmpty)
+        XCTAssertEqual(controller.state.phase, .idle, "nothing shows on the orb")
+        settings.voice.wakeWordEnabled = false
+        controller.perform(.setMuted(false))
+        controller.apply(settings)
+        wake.detect(score: 0.702)
+        XCTAssertTrue(dictation.starts.isEmpty)
+        settings.voice.wakeWordEnabled = true
+        controller.apply(settings)
+        // A take already recording keeps going.
+        controller.perform(.orbClicked)
+        wake.detect(score: 0.85)
+        XCTAssertEqual(dictation.starts, [.caller])
+        XCTAssertEqual(controller.state.phase, .listening(.agent))
+        controller.perform(.cancel)
+        // A detection of another phrase (a listener replaced since) starts nothing and leaves the
+        // running listener alone.
+        let starts = wake.starts.count
+        wake.detect(score: 0.9, phrase: "Hey Computer")
+        XCTAssertEqual(dictation.starts, [.caller])
+        XCTAssertEqual(wake.starts.count, starts)
+        XCTAssertEqual(journal.records.filter { $0.outcome == .refused }.map(\.reason),
+                       [VoiceHostController.voiceMuted, VoiceHostController.wakeOff, VoiceHostController.takeRecording,
+                        VoiceHostController.otherWakePhrase])
+        XCTAssertEqual(journal.records.filter { $0.outcome == .refused }.map(\.trigger),
+                       [.wake(score: 0.611, phrase: "Hey Jarvis"), .wake(score: 0.702, phrase: "Hey Jarvis"),
+                        .wake(score: 0.85, phrase: "Hey Jarvis"), .wake(score: 0.9, phrase: "Hey Computer")])
+        XCTAssertEqual(lines("take refused").count, 4, "\(logged)")
+        XCTAssertTrue(lines("take refused").first?.contains("score 0.611") == true, "\(logged)")
+    }
+
+    func testALateDetectionTouchesNothingButTheJournal() async {
+        var settings = VoiceHostSettings()
+        settings.voice.wakeWordEnabled = true
+        settings.voice.speakReplies = true
+        let controller = makeController(settings)
+        await startTurn(controller, "first")
+        brain.push(status: "running", output: "Working on it.")
+        controller.perform(.start(.dictation), trigger: .socket(action: "dictate"))
+        XCTAssertEqual(controller.state.phase, .listening(.dictation))
+        let before = controller.state
+        let stops = speaker.stops
+        let records = journal.records.count
+        let starts = wake.starts.count
+        wake.detect()
+        XCTAssertEqual(controller.state, before, "the phase, the card and the orb are as they were")
+        XCTAssertEqual(speaker.stops, stops, "the reply's speech is untouched")
+        XCTAssertEqual(wake.starts.count, starts)
+        XCTAssertEqual(journal.records.count, records + 1)
+        XCTAssertEqual(journal.records.last?.outcome, .refused)
+        XCTAssertEqual(journal.records.last?.reason, VoiceHostController.takeRecording)
+        XCTAssertEqual(lines("take refused").count, 1)
+    }
+
+    func testTakesBeingTranscribedKeepTheirOwnOutcome() {
+        let controller = makeController()
+        brain.push(status: "running", requestId: "other")
+        keys.send(.begin(.primary))
+        let first = dictation.takeID
+        keys.send(.retarget(.alternate))
+        keys.send(.end)
+        XCTAssertEqual(controller.state.phase, .transcribing(.dictation))
+        keys.send(.begin(.primary))
+        let second = dictation.takeID
+        keys.send(.end)
+        XCTAssertNotEqual(first, second)
+        dictation.finish("first", take: first, at: .cursor)
+        XCTAssertEqual(controller.state.phase, .transcribing(.dictation), "the orb follows the newer take")
+        dictation.finish("second", take: second, at: .cursor)
+        XCTAssertEqual(controller.state.phase, .idle)
+        XCTAssertEqual(journal.records.map(\.outcome), [.typed, .typed])
+        XCTAssertEqual(journal.records.map(\.reason), [VoiceHostController.agentBusyPasted, nil])
+        XCTAssertEqual(journal.records.map(\.characters), [5, 6])
+        XCTAssertEqual(journal.records.map(\.trigger), [.key(.primary, retargeted: true), .key(.primary, retargeted: false)])
+    }
+
+    func testTakesInFlightWhenTheHostQuitsAreJournaledAsCancelled() async {
+        let controller = makeController()
+        controller.perform(.start(.dictation), trigger: .socket(action: "dictate"))
+        controller.perform(.stop)
+        controller.perform(.start(.agent), trigger: .socket(action: "ask"))
+        controller.perform(.stop)
+        dictation.finish("hello")
+        controller.perform(.start(.dictation), trigger: .orb)
+        XCTAssertTrue(journal.records.isEmpty)
+        controller.prepareToQuit()
+        // The brain takes the turn after the host began to quit; the cancelled line stands.
+        await settled(controller)
+        dictation.cancel()
+        XCTAssertEqual(journal.records.map(\.outcome), [.cancelled, .cancelled, .cancelled])
+        XCTAssertEqual(Set(journal.records.compactMap(\.reason)), [VoiceHostController.hostQuit])
+        XCTAssertEqual(Set(journal.records.map(\.trigger.summary)),
+                       ["socket action dictate", "socket action ask", "orb"])
+        XCTAssertEqual(journal.records.first { $0.trigger == .socket(action: "ask") }?.characters, 5)
+    }
+
+    func testATurnTheBrainTookBeforeTheQuitStaysSent() async {
+        let controller = makeController()
+        controller.perform(.start(.agent), trigger: .socket(action: "ask"))
+        controller.perform(.stop)
+        dictation.finish("hello")
+        await settled(controller)
+        controller.prepareToQuit()
+        XCTAssertEqual(journal.records.map(\.outcome), [.sent])
+    }
+
+    func testTheLogTellsEachTakeWithoutItsWords() async throws {
+        var settings = VoiceHostSettings()
+        settings.voice.wakeWordEnabled = true
+        let controller = makeController(settings)
+        wake.detect()
+        speak(from: 0, to: 1)
+        dictation.partial("the secret plan")
+        clock.now = 1
+        controller.perform(.stop)
+        dictation.finish("the secret plan")
+        await settled(controller)
+        XCTAssertEqual(lines("take started"), [#"take started: wake word "Hey Jarvis" (score 0.973), agent, hands-free"#])
+        let ended = try XCTUnwrap(lines("take ended").first)
+        XCTAssertTrue(ended.hasPrefix("take ended: stop"), ended)
+        XCTAssertTrue(ended.contains("floor"), ended)
+        XCTAssertTrue(ended.contains("threshold"), ended)
+        XCTAssertEqual(lines("take sent"),
+                       [#"take sent, 15 characters: wake word "Hey Jarvis" (score 0.973), agent, take 1.0 s ended by stop"#])
+        XCTAssertFalse(logged.contains { $0.contains("secret") }, "\(logged)")
+    }
+
+    func testASpokenTurnKeepsWhatStartedItAndWhen() async throws {
+        var settings = VoiceHostSettings()
+        settings.voice.wakeWordEnabled = true
+        let controller = makeController(settings)
+        clock.now = 7
+        wake.detect()
+        clock.now = 9
+        controller.perform(.stop)
+        dictation.finish("what is on today")
+        await settled(controller)
+        brain.push(status: "idle", output: "Nothing.")
+        let row = try XCTUnwrap(controller.conversation.rows.first)
+        XCTAssertEqual(row.kind, .user)
+        XCTAssertEqual(row.trigger, .wake(score: 0.973, phrase: "Hey Jarvis"))
+        XCTAssertEqual(row.date, date(at: 7), "when the take started")
+
+        clock.now = 30
+        XCTAssertNil(controller.send(typed: "and tomorrow?"))
+        await settled(controller)
+        let typed = try XCTUnwrap(controller.conversation.rows.last { $0.kind == .user })
+        XCTAssertEqual(typed.source, .typed)
+        XCTAssertEqual(typed.date, date(at: 30))
+        XCTAssertNil(typed.trigger)
+        XCTAssertEqual(journal.records.count, 1, "a typed turn is not a take")
     }
 
     // MARK: Presentation

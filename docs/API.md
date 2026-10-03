@@ -682,6 +682,7 @@ see Running several instances).
 | `voice settings get` | | `settings`: the voice host's settings object |
 | `voice settings set` | `settings=<JSON object>`, or dotted `key=value` pairs | `settings=` replaces the whole object. `key=value` pairs (`enabled=false`, `voice.speakReplies=true`, `brain.runtime=claude`) are applied to the current settings, each converted to the type already stored, and the whole object is sent back; an unknown key is an error. A `history.` key while no `history` is saved starts from what `history status` resolves to. Turning `enabled` off stops the voice host; on starts it |
 | `voice conversation` | | the voice host's `conversation` (below): the conversation with the agent as rows |
+| `voice takes` | `limit=` (default 20) | the voice host's `takes` (below): the newest takes, what started each and what became of it |
 | `voice send` | `text=` | the voice host's `send` (below): sends `text` to the agent as a typed message, to the same session as voice (the agent may use its tools); `voice action say` speaks text aloud instead |
 | `voice card` | `peek`, `pin`, `expand` or `close` | the voice host's `card` (below): shows the reply card as a peek, pins it, expands it, or closes it |
 | `voice secret` | `set name=grok [value=…]` / `clear name=grok` | stores or removes the Grok API key in the Keychain; the key is never returned. Without `value=`, `machud voice secret set name=grok` reads the key from stdin (without echo at a terminal): prefer that, so the key stays out of the shell history and the process list |
@@ -725,6 +726,7 @@ HUDKit's JSON-lines socket, one request per connection, served by `MacHUDVoice` 
 | `conversation` | | `{ok, threadId, rows[]}`: the conversation with the agent (below), oldest first; `threadId` is the brain's conversation it belongs to, null until the brain has named one |
 | `send` | `text=<text>` | sends `text` to the agent as a typed turn, to the same session as voice: `{ok, state}` once it is on its way, else `{ok: false, error}` without `text`, while the brain is off or cannot take a turn, while an agent take is recording, or while the agent is still working (`The agent is still working`). A refusal by the brain itself then shows under the orb, as for a spoken turn. Its reply is spoken only with `speakTypedReplies` |
 | `card` | `action=peek\|pin\|expand\|close` | sets `cardMode` (`peek`, `pinned`, `expanded`); `close` closes the card as its close button does (`dismiss`). Returns `{ok, state}` |
+| `takes` | `limit=` (optional, a whole number of at least 1; default 20) | `{ok, takes[]}`: the take journal's newest `limit` records (below), oldest first |
 | `secret` | `action=set name=grok value=…` / `action=clear name=grok` | writes the Keychain; never returns a value |
 | `quit` | | exits after replying |
 
@@ -786,7 +788,10 @@ progress (`progress`, `step` `running`, `done`, `failed` or `denied`), approvals
 with `approvalId`, `detail` and `decision` `pending`, `delivering`, `allowed`, `denied`,
 `resolved` or `failed`) and interruptions or failures (`notice`, `isError`). Each row has an
 `id` and the `turnId` it belongs to; a message the brain has not taken yet is `pending: true`
-(it goes if the brain refuses it). The newest 200 rows are kept, readable by the user only, in
+(it goes if the brain refuses it). A user row has `date`, when it was said (the take's start) or
+typed, in ISO 8601 local time with its offset (`2026-10-03T12:04:07-04:00`), and a spoken one has
+`trigger`, what started its take (below); rows saved without them have neither. The newest 200
+rows are kept, readable by the user only, in
 `$MACHUD_VOICE_CONVERSATION_FILE`, else `~/Library/Application Support/MacHUD/Voice/conversation.json`
 (not while the brain cannot run, `MACHUD_VOICE_NO_BRAIN`), saved a second after a change and at once when a turn ends, so the
 conversation and the last exchange's peek come back after a restart; a row's text is kept up to
@@ -823,13 +828,55 @@ or levels at or above the sensitivity's minimum for 0.3 s in all. Then the take 
 and ends by a pause from there. With `manual` silence never ends the take: a tap on the orb
 or the fn key, or `action stop`, sends it. Either way a take stops after 120 s.
 
-`lastTakeEnd` says how the latest hands-free take ended: `{reason, seconds, quietMs?, floor?,
-threshold?, pause?, grace}`. `reason` is `pause`, `maximum`, `nothingHeard`, `stop` (a tap or
-`action stop`), `cancelled`, `failed` (the dictation failed) or `dictation` (it ended by itself);
-`seconds` is the take's length; `quietMs` the quiet since the last speech; `floor` and `threshold`
-the levels at the end; `pause` the quiet the take needed (absent with `manual`) and `grace`
-whether it included the 1.5 s. The voice host also logs one line per take
-(`MacHUDVoice: hands-free take ended: …`).
+`lastTakeEnd` says how the latest hands-free take ended and what started it: `{reason, seconds,
+quietMs?, floor?, threshold?, pause?, grace, trigger}`. `reason` is `pause`, `maximum`,
+`nothingHeard`, `stop` (a tap or `action stop`), `cancelled`, `failed` (the dictation failed) or
+`dictation` (it ended by itself); `seconds` is the take's length; `quietMs` the quiet since the
+last speech; `floor` and `threshold` the levels at the end; `pause` the quiet the take needed
+(absent with `manual`) and `grace` whether it included the 1.5 s.
+
+`trigger` is what started a take: `{"source": "wake", "score": 0.973, "phrase": "Hey Jarvis"}`
+(the wake word, with the detection's score, 0 to 1, and the phrase), `{"source": "orb"}` (a click
+on the orb, or the orb pressed through accessibility), `{"source": "socket", "action": "ask"}`
+(`action name=ask`, `click` or `dictate`) or `{"source": "key", "gesture": "primary"|"alternate",
+"retargeted": false}` (the fn key: the gesture that began the take, and whether a later gesture
+moved it to the other target).
+
+Every take is journaled once it is known what became of it, one JSON object per line, in
+`takes.jsonl` beside the conversation file (`~/Library/Application Support/MacHUD/Voice/takes.jsonl`,
+or `<name>-takes.jsonl` beside a `$MACHUD_VOICE_CONVERSATION_FILE` named `<name>-conversation.json`),
+whether or not the brain can run. The newest 1,000 lines are kept, readable by the user only; a
+file there that is not a journal (not text, or no line in it is a take) is never written over:
+the next take moves it aside as `takes.jsonl.unreadable-<yyyyMMddTHHmmss>` and starts a new one.
+A line is `{date, trigger, mode, seconds?, end?, outcome, reason?, characters?}`: `date` when the
+take started (ISO 8601, as above), `mode` where its words were meant to go (`agent` or
+`dictation`), `seconds` and `end` how long it recorded and why it stopped (`reason` above), and
+`outcome` what became of it: `sent` (the brain took it as a turn), `typed` (typed at the cursor: a
+dictation, or an agent take the brain could not take then, with the notice as `reason`, such as
+`The agent is still working — pasted instead`), `nothingHeard` (no speech, or the words came out
+empty), `refused` (it never recorded, or the brain refused the turn: `The brain did not take the
+turn (409)`, the companion's status code, never its own words), `cancelled` (thrown away, or still
+in flight when the voice host quit: `The voice host quit`; a turn the brain had not taken by then
+counts as in flight) or `failed` (the dictation failed; `reason`). `characters` counts what was
+sent or typed; the words themselves are never kept.
+
+A take the host refuses before it records is a line too, with no `seconds` or `end`: voice off,
+muted (the socket's `ask` and `dictate`), the brain off or unable to take a turn, the agent still
+working, a take already recording, or the dictation refusing to start. So is each wake detection
+that starts no take, with its score. A detection that arrives when no listener is wanted (voice
+off, muted, the wake word off, a take recording) or that is not of the phrase listened for (`Not
+the wake phrase listened for`, from a listener replaced since) is refused before anything else:
+it writes its line and its log line and changes nothing, not the reply being spoken, the orb or
+the listener. A detection the listener running now makes is refused as any other take start is:
+the brain off or unable to take a turn, or the agent still working (`The agent is still
+working`), which stops a reply being spoken and shows on the orb.
+
+The voice host logs each take's start, end and outcome (counts, never words), and the wake
+listener's start, stop and failures, to the unified log at notice level with every value public:
+subsystem `com.jrisberg.machud.voice`, category `take`
+(`log show --predicate 'subsystem == "com.jrisberg.machud.voice" AND category == "take"'`). A run
+of listener failures with the same reason is logged once, when it begins (again if the reason
+changes), and its end once the listener listens again, with how many restarts it took.
 
 `state` is `{phase, inputLevel, partialTranscript, card?, hiddenForFullScreen, brainAvailable,
 brainProblem?, sessionKey?, sessionProvider?, activeRuntime?, wakeListening, wakeProblem?, muted,
@@ -839,7 +886,16 @@ again after. While the wake word is on (and voice is on and not muted) but not l
 `wakeProblem` says why: its phrase's model is not downloaded (`Download the Hey Jarvis model to
 use the wake word.`), is downloading or failed to, the microphone is not allowed, or listening
 stopped (an audio device change it could not recover from); turning the wake word on shows it
-briefly under the orb too. `brainAvailable` is true
+briefly under the orb too. A listener that could not start or stopped by itself because of its
+audio (the input device changed, the microphone was refused or stopped, detection fell behind) is
+started again 2 s later, then 10 s after that, then every 60 s, while the wake word is still
+wanted and no take is recording; the step starts over at 2 s only after the listener has listened
+for 60 s before failing again. A phrase without a model or a model that will not load is not
+retried on a timer: it waits until the model changes (is downloaded or installed) or the voice
+settings change. `wakeProblem` gives the reason it stopped until it listens again, also through a
+take (during it and after, while the listener starts again) and after a mute (absent while muted,
+back from the unmute); new voice settings start the listener afresh and clear it.
+`brainAvailable` is true
 when the brain can take a turn; otherwise `brainProblem` says why, in words for the user: voice
 or the brain is off, the brain companion's own reason (`Choose a workspace folder for the
 agent.`, a missing Node.js), the chosen runtime's tool is not installed (`Codex is not
@@ -867,7 +923,7 @@ microphone is never opened), `MACHUD_VOICE_NO_BRAIN=1` (the brain never starts),
 `MACHUD_VOICE_HEADLESS=1` (no orb on screen), `MACHUD_VOICE_NO_SPEECH=1` (replies and `say` make
 no sound), `MACHUD_VOICE_MODELS_DIR` (where downloaded models are kept),
 `MACHUD_VOICE_HISTORY_DIR` (MacHUD's own history folder), `MACHUD_VOICE_CONVERSATION_FILE` (where
-the conversation with the agent is kept), `SPEAKFREE_CONFIG_DIR` (SpeakFree's
+the conversation with the agent is kept, and the take journal beside it), `SPEAKFREE_CONFIG_DIR` (SpeakFree's
 config folder, for its `saveRecordings` and a shared history),
 `MACHUD_VOICE_KEYCHAIN_SERVICE` (the Keychain service for secrets) and `MACHUD_SOCKET` (MacHUD's
 control socket, for `open-session` and `feed add`).
@@ -989,7 +1045,7 @@ sound), `MACHUD_VOICE_MODELS_DIR=<voice socket without its extension>-models` (n
 models folder) and `MACHUD_VOICE_HISTORY_DIR=<voice socket without its extension>-history`
 unless `MACHUD_VOICE_LIVE=1`, with
 `MACHUD_VOICE_CONVERSATION_FILE=<voice socket without its extension>-conversation.json` (live or
-not, unless set), and
+not, unless set; its take journal is `<voice socket without its extension>-takes.jsonl`), and
 with `MACHUD_VOICE_KEYCHAIN_SERVICE=com.jrisberg.machud.voice.isolated` unless that variable is
 already set, so a test instance never touches the real Grok key.
 

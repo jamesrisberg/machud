@@ -14,6 +14,20 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   what the agent answered), and says what looks wrong. The menu item shows a toast and selects the file in
   Finder; the command prints the file's path and the list. Take it before you relaunch anything, since a
   relaunch clears what it records. Files go to `~/Library/Logs/MacHUD`; the newest 20 are kept.
+- Every voice take now says what started it: the wake word (with how sure it was), the orb, a
+  script's `action`, or the fn key. `machud voice takes` lists your recent takes, what started
+  each, how long it recorded and what became of it (sent to the agent, typed at the cursor,
+  thrown away, refused, cancelled or failed), counting characters and never keeping your words.
+  A wake word heard while it could not start a take is listed too, with its score.
+- Spoken messages in the conversation carry the time you said them and what started the take.
+- The voice host's account of each take and of the wake word's listening is in the system log
+  (`log show --predicate 'subsystem == "com.jrisberg.machud.voice"'`), readable rather than
+  redacted.
+
+### Fixed
+- The wake word no longer stays off after the microphone stops for it (an audio device change, a
+  microphone that would not start): it tries again after 2 seconds, 10 seconds, then every minute,
+  and the Voice settings say why it is not listening meanwhile.
 
 ## [0.3.1] - 2026-10-02
 

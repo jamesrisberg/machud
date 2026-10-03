@@ -4,15 +4,15 @@ import VoiceKit
 
 /// The wake word: VoiceKit's `WakeListener` on openWakeWord, fed by the microphone. Listens
 /// only for a phrase that has a downloaded model (`WakeModels`); otherwise, or when listening
-/// stops by itself, it says why through `onProblem`.
+/// stops by itself, it says why through `onProblem`. The controller logs and restarts it.
 @MainActor
 final class WakeWordListener: WakeDriving {
     typealias DetectorFactory = @MainActor (WakeModel, URL) throws -> WakeDetector
     typealias SourceFactory = @MainActor () -> WakeAudioSource
 
-    var onWake: (() -> Void)?
+    var onWake: ((WakeDetection) -> Void)?
     var onListeningChanged: ((Bool) -> Void)?
-    var onProblem: ((String?) -> Void)?
+    var onProblem: ((WakeFailure) -> Void)?
 
     private let modelsRoot: URL
     private let makeDetector: DetectorFactory
@@ -55,23 +55,19 @@ final class WakeWordListener: WakeDriving {
         } catch {
             return unavailable("The \(model.phrase) model could not load: \(error.localizedDescription)")
         }
-        onProblem?(nil)
         let source = makeSource()
         let listener = WakeListener(detector: detector, source: source, threshold: settings.wakeThreshold)
         (source as? WakeSourceFailing)?.onFailure = { [weak self, weak listener] reason in
             guard let self, let listener, self.listener === listener else { return }
-            NSLog("MacHUDVoice: wake word stopped: %@", reason)
             stop()
-            onProblem?(reason)
+            onProblem?(WakeFailure(reason: reason, retryable: true))
         }
-        listener.onWake = { [weak self] _ in self?.onWake?() }
+        listener.onWake = { [weak self] detection in self?.onWake?(detection) }
         listener.onStateChanged = { [weak self, weak listener] state in
             // A listener already replaced says nothing about the one running now.
             guard let self, let listener, self.listener === listener else { return }
-            if case .failed(let reason) = state {
-                NSLog("MacHUDVoice: wake word stopped: %@", reason)
-                onProblem?(reason)
-            }
+            // The audio, the microphone's permission or the detector falling behind.
+            if case .failed(let reason) = state { onProblem?(WakeFailure(reason: reason, retryable: true)) }
             onListeningChanged?(state == .listening)
         }
         self.listener = listener
@@ -85,10 +81,11 @@ final class WakeWordListener: WakeDriving {
         Task { await listener.stop() }
     }
 
+    /// No model for the phrase, or one that is missing or will not load: starting again as it is
+    /// would fail the same way.
     private func unavailable(_ reason: String) {
-        NSLog("MacHUDVoice: wake word off: %@", reason)
         onListeningChanged?(false)
-        onProblem?(reason)
+        onProblem?(WakeFailure(reason: reason, retryable: false))
     }
 }
 
@@ -181,6 +178,7 @@ final class MicrophoneWakeSource: WakeSourceFailing {
         stop()
         do {
             try startEngine()
+            TakeLog.notice("wake audio restarted after an audio device change")
         } catch {
             onFailure?("The microphone stopped for the wake word after an audio device change.")
         }

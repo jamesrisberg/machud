@@ -14,6 +14,8 @@ final class WakeWordTests: XCTestCase {
     private var wake: FakeWake!
     private var jarvis: FakeModels!
     private var clock: ManualClock!
+    /// The take and wake-listener lines the controller logged.
+    private var logged: [String] = []
 
     override func setUp() async throws {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-wake-\(UUID().uuidString)")
@@ -22,6 +24,7 @@ final class WakeWordTests: XCTestCase {
         wake = FakeWake()
         jarvis = FakeModels.wake(installed: false)
         clock = ManualClock()
+        logged = []
     }
 
     override func tearDown() async throws {
@@ -37,9 +40,12 @@ final class WakeWordTests: XCTestCase {
             settings: settings, dictation: dictation, keys: nil, brain: brain, speaker: nil,
             wake: wake ?? self.wake, wakeModels: wakeModels, brainStateRoot: directory,
             detectRuntimes: FakeRuntimes.detect(), now: { clock.now }, schedule: { clock.schedule($0, $1) })
+        controller.log = { [weak self] in self?.logged.append($0) }
         controller.start()
         return controller
     }
+
+    private func lines(_ prefix: String) -> [String] { logged.filter { $0.hasPrefix(prefix) } }
 
     private func wakeOn(_ phrase: String = VoiceSettings.defaultWakePhrase) -> VoiceHostSettings {
         var settings = VoiceHostSettings()
@@ -110,18 +116,180 @@ final class WakeWordTests: XCTestCase {
         XCTAssertNil(controller.state.wakeProblem)
     }
 
-    func testAListenerThatStopsSaysWhyUntilItStartsAgain() {
+    func testAListenerThatStopsRestartsByItselfAndSaysWhyMeanwhile() {
         jarvis = FakeModels.wake(installed: true)
         let controller = makeController(wakeOn())
         XCTAssertTrue(controller.state.wakeListening)
-        wake.fail("MacHUD cannot use the microphone.")
+        XCTAssertEqual(wake.starts.count, 1)
+        wake.fail("The microphone stopped for the wake word after an audio device change.")
         XCTAssertFalse(controller.state.wakeListening)
-        XCTAssertEqual(controller.state.wakeProblem, "MacHUD cannot use the microphone.")
+        XCTAssertEqual(controller.state.wakeProblem, "The microphone stopped for the wake word after an audio device change.")
+        clock.advance(to: 1.9)
+        XCTAssertEqual(wake.starts.count, 1)
+        clock.advance(to: 2)
+        XCTAssertEqual(wake.starts.count, 2, "restarted 2 s later")
+        XCTAssertTrue(controller.state.wakeListening)
+        XCTAssertNil(controller.state.wakeProblem, "listening again clears the problem")
+        XCTAssertEqual(lines("wake listener failed"),
+                       ["wake listener failed: The microphone stopped for the wake word after an audio device change.; restarting in 2 s"])
+        XCTAssertEqual(lines("wake listener listening again"), ["wake listener listening again after 1 attempt"])
+    }
+
+    func testRestartsBackOffWhileTheListenerKeepsFailingAndARunIsLoggedOnce() {
+        jarvis = FakeModels.wake(installed: true)
+        let controller = makeController(wakeOn())
+        let denied = "MacHUD cannot use the microphone."
+        wake.startFailure = WakeFailure(reason: denied, retryable: true)
+        wake.fail(denied)
+        // 2 s, then 10 s, then every 60 s.
+        for (time, starts) in [(1.9, 1), (2, 2), (11.9, 2), (12, 3), (71.9, 3), (72, 4), (131.9, 4), (132, 5)] {
+            clock.advance(to: time)
+            XCTAssertEqual(wake.starts.count, starts, "at \(time) s")
+            XCTAssertEqual(controller.state.wakeProblem, denied, "the problem stays while it fails, at \(time) s")
+            XCTAssertFalse(controller.state.wakeListening)
+        }
+        XCTAssertEqual(lines("wake listener"), ["wake listener starting: \"Hey Jarvis\", threshold 0.50",
+                                                "wake listener listening",
+                                                "wake listener failed: \(denied); restarting in 2 s"],
+                       "the same failure again and again is logged once")
+        // Another reason is a new run.
+        wake.startFailure = WakeFailure(reason: "The microphone stopped.", retryable: true)
+        clock.advance(to: 192)
+        XCTAssertEqual(lines("wake listener failed").last, "wake listener failed: The microphone stopped.; restarting in 60 s")
+        wake.startFailure = nil
+        clock.advance(to: 252)
+        XCTAssertTrue(controller.state.wakeListening)
+        XCTAssertNil(controller.state.wakeProblem)
+        XCTAssertEqual(lines("wake listener listening again"), ["wake listener listening again after 6 attempts"])
+    }
+
+    func testABriefRecoveryKeepsTheBackoffStep() {
+        jarvis = FakeModels.wake(installed: true)
+        let controller = makeController(wakeOn())
+        wake.fail("The microphone stopped.")
+        clock.advance(to: 2)
+        XCTAssertTrue(controller.state.wakeListening)
+        XCTAssertNil(controller.state.wakeProblem, "listening clears the problem shown")
+        clock.advance(to: 2.5)
+        wake.fail("The microphone stopped.")
+        clock.advance(to: 12.4)
+        XCTAssertEqual(wake.starts.count, 2, "not 2 s again after half a second of listening")
+        clock.advance(to: 12.5)
+        XCTAssertEqual(wake.starts.count, 3, "10 s later")
+        XCTAssertEqual(lines("wake listener failed").last, "wake listener failed: The microphone stopped.; restarting in 10 s")
+    }
+
+    func testAFailureAfterAMinuteOfListeningStartsTheBackoffOver() {
+        jarvis = FakeModels.wake(installed: true)
+        let controller = makeController(wakeOn())
+        wake.fail("The microphone stopped.")
+        clock.advance(to: 2)
+        wake.fail("The microphone stopped.")
+        clock.advance(to: 12)
+        XCTAssertTrue(controller.state.wakeListening)
+        clock.advance(to: 72)
+        wake.fail("The microphone stopped.")
+        clock.advance(to: 73.9)
+        XCTAssertEqual(wake.starts.count, 3)
+        clock.advance(to: 74)
+        XCTAssertEqual(wake.starts.count, 4, "2 s again after a minute of listening")
+    }
+
+    func testAModelThatWillNotLoadIsNotRetriedUntilTheModelChanges() {
+        jarvis = FakeModels.wake(installed: true)
+        let controller = makeController(wakeOn())
+        let broken = "The Hey Jarvis model could not load: bad file"
+        wake.fail(broken, retryable: false)
+        clock.advance(to: 1000)
+        XCTAssertEqual(wake.starts.count, 1, "no timer for a model that will not load")
+        XCTAssertEqual(controller.state.wakeProblem, broken)
+        XCTAssertEqual(lines("wake listener failed"),
+                       ["wake listener failed: \(broken); not restarting until its model or the voice settings change"])
+        jarvis.update { $0.progress = 1 }
+        controller.wakeModelsChanged()
+        XCTAssertEqual(wake.starts.count, 2, "a change to its model starts it again")
+        XCTAssertTrue(controller.state.wakeListening)
+        XCTAssertNil(controller.state.wakeProblem)
+    }
+
+    func testTheReasonStaysUntilTheListenerListensAgain() {
+        jarvis = FakeModels.wake(installed: true)
+        let controller = makeController(wakeOn())
+        let stopped = "The microphone stopped."
+        wake.listensOnStart = false
+        wake.fail(stopped)
         controller.perform(.setMuted(true))
         XCTAssertNil(controller.state.wakeProblem, "muted is not a problem")
         controller.perform(.setMuted(false))
+        XCTAssertEqual(wake.starts.count, 2)
+        XCTAssertEqual(controller.state.wakeProblem, stopped, "started again by the unmute, not listening yet")
+        wake.listen()
         XCTAssertNil(controller.state.wakeProblem)
+
+        wake.fail(stopped)
+        controller.perform(.orbClicked)
+        XCTAssertEqual(controller.state.wakeProblem, stopped, "while a take records")
+        controller.perform(.stop)
+        dictation.finish("")
+        XCTAssertEqual(wake.starts.count, 3)
+        XCTAssertEqual(controller.state.wakeProblem, stopped, "started again by the take's end, not listening yet")
+        wake.listen()
+        XCTAssertNil(controller.state.wakeProblem)
+
+        wake.fail(stopped)
+        var settings = wakeOn()
+        settings.voice.wakeThreshold = 0.6
+        controller.apply(settings)
+        XCTAssertEqual(wake.starts.count, 4)
+        XCTAssertNil(controller.state.wakeProblem, "new voice settings start it afresh")
+
+        wake.listen()
+        wake.fail(stopped)
+        var off = settings
+        off.voice.wakeWordEnabled = false
+        controller.apply(off)
+        controller.apply(settings)
+        XCTAssertEqual(wake.starts.count, 5)
+        XCTAssertNil(controller.state.wakeProblem, "turned off and on again: the settings changed in between")
+    }
+
+    func testNoRestartWhileATakeRecordsOrOnceTheWakeWordIsOff() async {
+        jarvis = FakeModels.wake(installed: true)
+        let controller = makeController(wakeOn())
+        wake.fail("The microphone stopped.")
+        controller.perform(.orbClicked)
+        XCTAssertEqual(controller.state.phase, .listening(.agent))
+        clock.advance(to: 5)
+        XCTAssertEqual(wake.starts.count, 1, "not while a take records")
+        controller.perform(.stop)
+        dictation.finish("")
+        XCTAssertEqual(wake.starts.count, 2, "the take's end starts it, as after any take")
         XCTAssertTrue(controller.state.wakeListening)
+        XCTAssertNil(controller.state.wakeProblem)
+
+        wake.fail("The microphone stopped.")
+        var settings = wakeOn()
+        settings.voice.wakeWordEnabled = false
+        controller.apply(settings)
+        clock.advance(to: 100)
+        XCTAssertEqual(wake.starts.count, 2, "not once the wake word is off")
+        XCTAssertNil(controller.state.wakeProblem)
+        XCTAssertEqual(lines("wake listener stopped").last, "wake listener stopped: The wake word is off")
+    }
+
+    func testTheWakeListenersLifeIsLogged() {
+        jarvis = FakeModels.wake(installed: true)
+        let controller = makeController(wakeOn())
+        controller.perform(.orbClicked)
+        controller.perform(.setMuted(true))
+        XCTAssertEqual(logged.filter { $0.hasPrefix("wake listener") }, [
+            #"wake listener starting: "Hey Jarvis", threshold 0.50"#,
+            "wake listener listening",
+            "wake listener stopped: A take is recording",
+        ])
+        controller.perform(.setMuted(false))
+        XCTAssertEqual(lines("wake listener").suffix(2), [#"wake listener starting: "Hey Jarvis", threshold 0.50"#,
+                                                          "wake listener listening"])
     }
 
     func testAHostWithoutAMicrophoneSaysSo() {
@@ -230,12 +398,56 @@ final class WakeWordTests: XCTestCase {
         XCTAssertFalse(controller.state.wakeListening, "paused while the take records")
 
         controller.perform(.stop)
+        XCTAssertEqual(controller.state.lastTakeEnd?.trigger, .wake(score: 0.95, phrase: "Hey Jarvis"),
+                       "the detection's score and phrase reach the take")
         dictation.finish("what time is it")
         await controller.pendingWork?.value
         await waitUntil { controller.state.wakeListening }
         XCTAssertEqual(sources.count, 2)
         XCTAssertTrue(sources[1].running, "listening again after the take")
         XCTAssertEqual(brain.submitted.map(\.text), ["what time is it"])
+    }
+
+    func testTheLiveListenerRecoversFromASourceThatFailedToStart() async {
+        jarvis = FakeModels.wake(installed: true)
+        var sources: [FakeWakeSource] = []
+        let listener = WakeWordListener(
+            modelsRoot: directory,
+            makeDetector: { model, _ in InProcessWakeDetector(engine: FakeWakeEngine(), phrase: model.phrase, model: model.id) },
+            makeSource: {
+                let source = FakeWakeSource()
+                if sources.isEmpty { source.startError = MicrophoneWakeSource.StartFailed() }
+                sources.append(source)
+                return source
+            },
+            isInstalled: { _, _ in true })
+        let controller = makeController(wakeOn(), wake: listener)
+        await waitUntil { controller.state.wakeProblem != nil }
+        XCTAssertEqual(controller.state.wakeProblem, MicrophoneWakeSource.StartFailed().errorDescription)
+        clock.advance(to: 2)
+        await waitUntil { controller.state.wakeListening }
+        XCTAssertEqual(sources.count, 2)
+        XCTAssertTrue(sources[1].running)
+        XCTAssertNil(controller.state.wakeProblem)
+    }
+
+    func testTheLiveListenerDoesNotRetryAModelThatWillNotLoad() {
+        jarvis = FakeModels.wake(installed: true)
+        var loads = 0
+        let listener = WakeWordListener(
+            modelsRoot: directory,
+            makeDetector: { _, _ in
+                loads += 1
+                throw CocoaError(.fileReadCorruptFile)
+            },
+            makeSource: { FakeWakeSource() },
+            isInstalled: { _, _ in true })
+        let controller = makeController(wakeOn(), wake: listener)
+        XCTAssertEqual(loads, 1)
+        XCTAssertTrue(controller.state.wakeProblem?.hasPrefix("The Hey Jarvis model could not load") == true,
+                      "\(String(describing: controller.state.wakeProblem))")
+        clock.advance(to: 1000)
+        XCTAssertEqual(loads, 1, "a model that will not load is not loaded again on a timer")
     }
 
     func testTheLiveListenerReportsASourceThatCannotStart() async {
@@ -252,16 +464,18 @@ final class WakeWordTests: XCTestCase {
     }
 
     func testTheLiveListenerChecksTheModelFolder() {
-        var problems: [String?] = []
+        var problems: [WakeFailure] = []
         let listener = WakeWordListener(modelsRoot: directory, makeSource: { FakeWakeSource() })
         listener.onProblem = { problems.append($0) }
         var settings = VoiceSettings()
         settings.wakePhrase = "Hey Jarvis"
         listener.start(settings)
-        XCTAssertEqual(problems, ["Download the Hey Jarvis model to use the wake word."])
+        XCTAssertEqual(problems, [WakeFailure(reason: "Download the Hey Jarvis model to use the wake word.", retryable: false)])
         settings.wakePhrase = "Hey Computer"
         listener.start(settings)
-        XCTAssertEqual(problems.last, "There is no wake model for “Hey Computer” yet.")
+        XCTAssertEqual(problems.last,
+                       WakeFailure(reason: "There is no wake model for “Hey Computer” yet.", retryable: false),
+                       "neither is fixed by trying again")
     }
 
     private func settle() async {

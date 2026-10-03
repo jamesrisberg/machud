@@ -38,7 +38,8 @@ public struct VoiceHostState: Codable, Equatable, Sendable {
     public var gesturePending: Bool
     /// How much of the conversation the card under the orb shows.
     public var cardMode: VoiceCardMode
-    /// How the latest hands-free take ended, and what the endpointer measured; nil until one has.
+    /// How the latest hands-free take ended, what started it and what the endpointer measured;
+    /// nil until one has.
     public var lastTakeEnd: VoiceTakeEnd?
 
     public init(phase: VoicePhase = .idle, inputLevel: Double = 0, partialTranscript: String = "",
@@ -67,8 +68,9 @@ public struct VoiceHostState: Codable, Equatable, Sendable {
     }
 }
 
-/// Why a hands-free take ended, for diagnosing takes that end too soon or too late. Also
-/// logged, one line per take.
+/// Why a take ended and what started it, for diagnosing takes that end too soon or too late
+/// and takes nobody meant to start. Logged for every take; `lastTakeEnd` keeps the latest
+/// hands-free one.
 public struct VoiceTakeEnd: Codable, Equatable, Sendable {
     public enum Reason: String, Codable, Equatable, Sendable {
         /// The pause after speech (automatic end of turn).
@@ -79,7 +81,7 @@ public struct VoiceTakeEnd: Codable, Equatable, Sendable {
         case nothingHeard
         /// A tap: the orb, the fn key or `action stop`.
         case stop
-        /// Thrown away: `action cancel`, mute, or a change to the fn key setup.
+        /// Thrown away: `action cancel`, mute, a discarded fn tap or a change to the fn key setup.
         case cancelled
         /// The dictation failed (no speech model, too short to transcribe, an audio error).
         case failed
@@ -101,9 +103,12 @@ public struct VoiceTakeEnd: Codable, Equatable, Sendable {
     public var pause: TimeInterval?
     /// The latest words read as an unfinished sentence, so the pause carried the grace.
     public var grace: Bool
+    /// What started the take; nil from a voice host that does not report it.
+    public var trigger: VoiceTakeTrigger?
 
     public init(reason: Reason, seconds: TimeInterval, quietMs: Int? = nil, floor: Double? = nil,
-                threshold: Double? = nil, pause: TimeInterval? = nil, grace: Bool = false) {
+                threshold: Double? = nil, pause: TimeInterval? = nil, grace: Bool = false,
+                trigger: VoiceTakeTrigger? = nil) {
         self.reason = reason
         self.seconds = seconds
         self.quietMs = quietMs
@@ -111,9 +116,12 @@ public struct VoiceTakeEnd: Codable, Equatable, Sendable {
         self.threshold = threshold
         self.pause = pause
         self.grace = grace
+        self.trigger = trigger
     }
 
-    /// The log line: `pause after 2050 ms quiet (floor 0.021, threshold 0.050, pause 3.5 s with grace), take 6.4 s`.
+    /// The log line: `pause after 2050 ms quiet (floor 0.021, threshold 0.050, pause 3.5 s with
+    /// grace), take 6.4 s, started by wake word "Hey Jarvis" (score 0.973)`. A take with no
+    /// endpointer (one held on the fn key) has neither levels nor a pause.
     public var summary: String {
         var details: [String] = []
         if let floor, let threshold {
@@ -125,8 +133,152 @@ public struct VoiceTakeEnd: Codable, Equatable, Sendable {
             details.append("ends on a tap")
         }
         let quiet = quietMs.map { " after \($0) ms quiet" } ?? ""
+        let started = trigger.map { ", started by \($0.summary)" } ?? ""
         return "\(reason.rawValue)\(quiet) (\(details.joined(separator: ", "))), take "
-            + String(format: "%.1f s", seconds)
+            + String(format: "%.1f s", seconds) + started
+    }
+}
+
+/// What started a take. On the wire it is `{"source": …}` plus the fields of its source:
+/// `{"source": "wake", "score": 0.973, "phrase": "Hey Jarvis"}`, `{"source": "orb"}`,
+/// `{"source": "socket", "action": "ask"}`, `{"source": "key", "gesture": "primary",
+/// "retargeted": false}`.
+public enum VoiceTakeTrigger: Equatable, Sendable {
+    /// The wake word: the detection's score (0...1, at or above the threshold) and the phrase its
+    /// model listens for.
+    case wake(score: Double, phrase: String)
+    /// A click on the orb, or the orb pressed through accessibility (they reach the host as the
+    /// same action).
+    case orb
+    /// The socket's `action name=` that started it: `ask`, `click` or `dictate`.
+    case socket(action: String)
+    /// The fn key: the gesture that began the take, and whether a later gesture moved it to the
+    /// other target (to the agent, or back to the cursor).
+    case key(KeyGesture, retargeted: Bool)
+    /// A source this voice host does not know (a newer one wrote it): every field, `source`
+    /// included, as it was, so a conversation saved again keeps it unchanged.
+    case unrecognized([String: Field])
+
+    /// A JSON value, for the fields of an unrecognized trigger.
+    public indirect enum Field: Codable, Equatable, Sendable {
+        case null
+        case bool(Bool)
+        case number(Double)
+        case string(String)
+        case array([Field])
+        case object([String: Field])
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.singleValueContainer()
+            if c.decodeNil() {
+                self = .null
+            } else if let value = try? c.decode(Bool.self) {
+                self = .bool(value)
+            } else if let value = try? c.decode(Double.self) {
+                self = .number(value)
+            } else if let value = try? c.decode(String.self) {
+                self = .string(value)
+            } else if let value = try? c.decode([Field].self) {
+                self = .array(value)
+            } else {
+                self = .object(try c.decode([String: Field].self))
+            }
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var c = encoder.singleValueContainer()
+            switch self {
+            case .null: try c.encodeNil()
+            case .bool(let value): try c.encode(value)
+            case .number(let value): try c.encode(value)
+            case .string(let value): try c.encode(value)
+            case .array(let value): try c.encode(value)
+            case .object(let value): try c.encode(value)
+            }
+        }
+    }
+
+    public enum KeyGesture: String, Codable, Equatable, Sendable {
+        /// A press: dictation at the cursor.
+        case primary
+        /// The agent gesture.
+        case alternate
+    }
+
+    /// `wake`, `orb`, `socket` or `key`, or an unrecognized trigger's own.
+    public var source: String {
+        switch self {
+        case .wake: "wake"
+        case .orb: "orb"
+        case .socket: "socket"
+        case .key: "key"
+        case .unrecognized(let fields):
+            if case .string(let source)? = fields["source"] { source } else { "" }
+        }
+    }
+
+    /// For the log: `wake word "Hey Jarvis" (score 0.973)`, `orb`, `socket action ask`,
+    /// `key primary, retargeted`.
+    public var summary: String {
+        switch self {
+        case .wake(let score, let phrase): "wake word \"\(phrase)\" (score \(String(format: "%.3f", score)))"
+        case .orb: "orb"
+        case .socket(let action): "socket action \(action)"
+        case .key(let gesture, let retargeted): "key \(gesture.rawValue)" + (retargeted ? ", retargeted" : "")
+        case .unrecognized: source
+        }
+    }
+
+    /// The same trigger, marked as moved by a later fn gesture; other triggers are unchanged.
+    var retargeted: VoiceTakeTrigger {
+        guard case .key(let gesture, _) = self else { return self }
+        return .key(gesture, retargeted: true)
+    }
+}
+
+extension VoiceTakeTrigger: Codable {
+    private enum CodingKeys: String, CodingKey { case source, score, phrase, action, gesture, retargeted }
+
+    public func encode(to encoder: Encoder) throws {
+        if case .unrecognized(let fields) = self {
+            var c = encoder.singleValueContainer()
+            return try c.encode(fields)
+        }
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(source, forKey: .source)
+        switch self {
+        case .wake(let score, let phrase):
+            try c.encode(score, forKey: .score)
+            try c.encode(phrase, forKey: .phrase)
+        case .orb:
+            break
+        case .socket(let action):
+            try c.encode(action, forKey: .action)
+        case .key(let gesture, let retargeted):
+            try c.encode(gesture, forKey: .gesture)
+            try c.encode(retargeted, forKey: .retargeted)
+        case .unrecognized:
+            break
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let source = try c.decode(String.self, forKey: .source)
+        switch source {
+        case "wake":
+            self = .wake(score: try c.decode(Double.self, forKey: .score),
+                         phrase: (try? c.decode(String.self, forKey: .phrase)) ?? "")
+        case "orb":
+            self = .orb
+        case "socket":
+            self = .socket(action: (try? c.decode(String.self, forKey: .action)) ?? "")
+        case "key":
+            self = .key(try c.decode(KeyGesture.self, forKey: .gesture),
+                        retargeted: (try? c.decode(Bool.self, forKey: .retargeted)) ?? false)
+        default:
+            self = .unrecognized(try decoder.singleValueContainer().decode([String: Field].self))
+        }
     }
 }
 

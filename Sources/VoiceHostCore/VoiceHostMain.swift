@@ -78,6 +78,7 @@ final class VoiceHost {
                 NSLog("MacHUDVoice: could not save the wake phrase: %@", error.localizedDescription)
             }
         }
+        let conversationFile = environment.conversationFile ?? voiceRoot.appendingPathComponent("conversation.json")
         controller = VoiceHostController(
             settings: settings, dictation: dictation,
             keys: environment.noHotkeys ? nil : FnKeySource(), brain: brain,
@@ -87,15 +88,16 @@ final class VoiceHost {
             wakeModels: wakeModels,
             brainStateRoot: support.appendingPathComponent("Brain"),
             // The conversation is the brain's: kept only where a brain can run.
-            conversationStore: environment.noBrain
-                ? nil : ConversationFile(url: environment.conversationFile
-                    ?? voiceRoot.appendingPathComponent("conversation.json")),
+            conversationStore: environment.noBrain ? nil : ConversationFile(url: conversationFile),
             sessions: MacHUDSessions(socketPath: environment.machudSocketPath),
             feed: MacHUDFeed(socketPath: environment.machudSocketPath),
             machudTools: MacHUDToolServer.locate(
                 beside: Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0]),
                 machudSocket: environment.machudSocketPath),
-            machudStatus: MacHUDStatus(socketPath: environment.machudSocketPath))
+            machudStatus: MacHUDStatus(socketPath: environment.machudSocketPath),
+            // Every take is journaled, brain or not, beside the conversation (an isolated host's
+            // beside its own socket).
+            takeJournal: TakeJournalFile(url: TakeJournalFile.url(besideConversation: conversationFile)))
         server = HUDSocketServer(path: environment.socketPath, label: "machud-voice")
         commands = VoiceHostCommands(controller: controller, store: store, secrets: secrets,
                                      version: Self.version(), models: models, history: history)
@@ -135,9 +137,10 @@ final class VoiceHost {
         handleTermination()
     }
 
-    /// Throws away a take being recorded, saves the conversation, stops the socket and the
-    /// brain, then exits.
+    /// Journals the takes still in flight as cancelled, throws away a take being recorded, saves
+    /// the conversation, stops the socket and the brain, then exits.
     func shutDown() -> Never {
+        controller.prepareToQuit()
         dictation.cancel()
         controller.flushConversation()
         server.stop()

@@ -59,6 +59,18 @@ final class FakeDictation: DictationDriving {
         onUpdate?(takeID, .finished(text: text, destination: currentDestination ?? .cursor, transcript: transcript ?? text))
     }
 
+    /// Completes the take `id` (one being transcribed while another records) at `destination`.
+    func finish(_ text: String, take id: UUID, at destination: DictationDestination) {
+        if id == takeID { isCapturing = false }
+        onUpdate?(id, .finished(text: text, destination: destination, transcript: text))
+    }
+
+    /// The take `id` failed.
+    func fail(_ failure: DictationFailure, take id: UUID) {
+        if id == takeID { isCapturing = false }
+        onUpdate?(id, .failed(failure))
+    }
+
     func level(_ value: Double) { onUpdate?(takeID, .level(value)) }
 
     func partial(_ text: String) { onUpdate?(takeID, .partial(text)) }
@@ -210,24 +222,42 @@ final class FakeModels: VoiceModelProviding {
 
 @MainActor
 final class FakeWake: WakeDriving {
-    var onWake: (() -> Void)?
+    var onWake: ((WakeDetection) -> Void)?
     var onListeningChanged: ((Bool) -> Void)?
-    var onProblem: ((String?) -> Void)?
+    var onProblem: ((WakeFailure) -> Void)?
     var starts: [VoiceSettings] = []
     var stops = 0
     var listening = false
+    /// Each start fails with this (the microphone still refuses) while it is set.
+    var startFailure: WakeFailure?
+    /// A start listens at once; false leaves it starting until `listen()`.
+    var listensOnStart = true
 
     func start(_ settings: VoiceSettings) {
         starts.append(settings)
+        if let startFailure {
+            onProblem?(startFailure)
+            return
+        }
+        if listensOnStart { listen() }
+    }
+
+    /// The start under way reaches listening.
+    func listen() {
         listening = true
         onListeningChanged?(true)
     }
 
-    /// Listening stops by itself, as a failed microphone does.
-    func fail(_ reason: String) {
+    /// A detection of the wake phrase.
+    func detect(score: Double = 0.973, phrase: String = "Hey Jarvis") {
+        onWake?(WakeDetection(score: score, phrase: phrase))
+    }
+
+    /// Listening stops by itself: the microphone (retryable) or the model (not).
+    func fail(_ reason: String, retryable: Bool = true) {
         listening = false
         onListeningChanged?(false)
-        onProblem?(reason)
+        onProblem?(WakeFailure(reason: reason, retryable: retryable))
     }
 
     func stop() {
@@ -235,6 +265,14 @@ final class FakeWake: WakeDriving {
         listening = false
         onListeningChanged?(false)
     }
+}
+
+/// The take journal in memory.
+@MainActor
+final class FakeTakeJournal: TakeJournaling {
+    var records: [VoiceTakeRecord] = []
+    func append(_ record: VoiceTakeRecord) { records.append(record) }
+    func recent(limit: Int) -> [VoiceTakeRecord] { Array(records.suffix(limit)) }
 }
 
 @MainActor

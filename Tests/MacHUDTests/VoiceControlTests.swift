@@ -38,6 +38,7 @@ final class FakeVoiceHost {
     /// What `history status` resolves to while no `history` setting is saved.
     var historyDefault: [String: Any] = ["mode": "textAndAudio", "shareWithSpeakFree": true]
     var speakFreeInstalled = true
+    var takesRequests: [[String: String]] = []
     var workspace = "/Users/someone"
     var workspaceDefault = true
 
@@ -104,6 +105,13 @@ final class FakeVoiceHost {
                   "speakFreeInstalled": self.speakFreeInstalled, "default": saved == nil,
                   "folder": share ? "/Users/someone/.config/speakfree/recordings"
                       : "/Users/someone/Library/Application Support/MacHUD/Voice/History"])
+        }
+        server.register("takes") { [unowned self] args, done in
+            self.takesRequests.append(args)
+            done(["ok": true, "takes": [["date": "2026-10-03T12:04:07-04:00", "trigger": ["source": "wake", "score": 0.973,
+                                                                                         "phrase": "Hey Jarvis"],
+                                         "mode": "agent", "seconds": 72.5, "end": "pause", "outcome": "typed",
+                                         "reason": "The agent is still working — pasted instead", "characters": 706]]])
         }
         server.register("secret") { [unowned self] args, done in
             guard let name = args["name"] else { done(["ok": false, "error": "secret needs name="]); return }
@@ -193,6 +201,8 @@ final class VoiceControlTests: XCTestCase {
         XCTAssertEqual(try parse(["history"]), .forward("history", ["action": "status"]))
         XCTAssertEqual(try parse(["history", "status"]), .forward("history", ["action": "status"]))
         XCTAssertEqual(try parse(["conversation"]), .forward("conversation", [:]))
+        XCTAssertEqual(try parse(["takes"]), .forward("takes", [:]))
+        XCTAssertEqual(try parse(["takes", "limit=5"]), .forward("takes", ["limit": "5"]))
         XCTAssertEqual(try parse(["send", "text=list my files"]), .forward("send", ["text": "list my files"]))
         XCTAssertEqual(try parse(["card", "pin"]), .forward("card", ["action": "pin"]))
         XCTAssertEqual(try parse(["card", "action=expand"]), .forward("card", ["action": "expand"]))
@@ -219,6 +229,8 @@ final class VoiceControlTests: XCTestCase {
         fails(["send"], "send needs text")
         fails(["card"], "card needs a state")
         fails(["card", "action=fold"], "not a card state")
+        fails(["takes", "limit=0"], "takes needs at least one")
+        fails(["takes", "limit=some"], "takes needs a number")
     }
 
     func testSeedingHistoryStartsFromTheResolvedDefault() {
@@ -248,6 +260,15 @@ final class VoiceControlTests: XCTestCase {
     }
 
     // MARK: - Forwarding to the host
+
+    func testTakesReachTheHost() {
+        let reply = run(["takes", "limit=3"])
+        XCTAssertEqual(reply["ok"] as? Bool, true, "\(reply)")
+        XCTAssertEqual(host.takesRequests, [["limit": "3"]])
+        let takes = reply["takes"] as? [[String: Any]]
+        XCTAssertEqual(takes?.first?["outcome"] as? String, "typed")
+        XCTAssertEqual((takes?.first?["trigger"] as? [String: Any])?["source"] as? String, "wake")
+    }
 
     func testStateAndActionsReachTheHost() {
         let state = run(["state"])

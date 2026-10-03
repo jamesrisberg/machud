@@ -200,14 +200,25 @@ struct WakePhraseModel {
 /// The wake word listener.
 @MainActor
 protocol WakeDriving: AnyObject {
-    var onWake: (() -> Void)? { get set }
+    /// A detection: its score and the phrase. The listener stays quiet until started again.
+    var onWake: ((WakeDetection) -> Void)? { get set }
     var onListeningChanged: ((Bool) -> Void)? { get set }
-    /// Listening stopped by itself (the microphone refused, the model failed), in words for the
-    /// user; nil when a start clears it.
-    var onProblem: ((String?) -> Void)? { get set }
+    /// Listening could not start or stopped by itself. Nothing reports it again until the next
+    /// start.
+    var onProblem: ((WakeFailure) -> Void)? { get set }
     /// Start (or restart) listening for `settings.wakePhrase`.
     func start(_ settings: VoiceSettings)
     func stop()
+}
+
+/// Why the wake listener could not start or stopped by itself.
+struct WakeFailure: Equatable {
+    /// In words for the user.
+    var reason: String
+    /// Starting it again as it is may work: the audio stopped, the microphone was refused or the
+    /// detector fell behind. False for a phrase without a model or a model that will not load,
+    /// which only a model or settings change fixes.
+    var retryable: Bool
 }
 
 /// MacHUD's `agent-sessions` broker (`sessions` on MacHUD's control socket).

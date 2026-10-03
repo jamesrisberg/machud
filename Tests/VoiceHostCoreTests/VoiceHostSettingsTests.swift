@@ -75,12 +75,47 @@ final class VoiceHostSettingsTests: XCTestCase {
 
     func testTakeEndRoundTripsInTheState() throws {
         let end = VoiceTakeEnd(reason: .pause, seconds: 6.4, quietMs: 2050, floor: 0.021, threshold: 0.05,
-                               pause: 3.5, grace: true)
+                               pause: 3.5, grace: true, trigger: .wake(score: 0.973, phrase: "Hey Jarvis"))
         let state = VoiceHostState(lastTakeEnd: end)
         XCTAssertEqual(try JSONDecoder().decode(VoiceHostState.self, from: JSONEncoder().encode(state)), state)
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(end)) as? [String: Any])
         XCTAssertEqual(object["reason"] as? String, "pause")
         XCTAssertEqual(object["quietMs"] as? Int, 2050)
+        let trigger = try XCTUnwrap(object["trigger"] as? [String: Any])
+        XCTAssertEqual(trigger["source"] as? String, "wake")
+        XCTAssertEqual(trigger["score"] as? Double, 0.973)
+        XCTAssertEqual(trigger["phrase"] as? String, "Hey Jarvis")
+        // A take end from before triggers were recorded still decodes.
+        let older = try JSONDecoder().decode(VoiceTakeEnd.self, from: Data(#"{"reason":"stop","seconds":2,"grace":false}"#.utf8))
+        XCTAssertNil(older.trigger)
+        XCTAssertEqual(older.reason, .stop)
+    }
+
+    func testTriggersEncodeWithTheirSource() throws {
+        func json(_ trigger: VoiceTakeTrigger) throws -> NSDictionary {
+            try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(trigger)) as? NSDictionary)
+        }
+        XCTAssertEqual(try json(.wake(score: 0.61, phrase: "Hey Jarvis")),
+                       ["source": "wake", "score": 0.61, "phrase": "Hey Jarvis"])
+        XCTAssertEqual(try json(.orb), ["source": "orb"])
+        XCTAssertEqual(try json(.socket(action: "ask")), ["source": "socket", "action": "ask"])
+        XCTAssertEqual(try json(.key(.alternate, retargeted: true)),
+                       ["source": "key", "gesture": "alternate", "retargeted": true])
+        for trigger: VoiceTakeTrigger in [.wake(score: 0.61, phrase: "Hey Jarvis"), .orb, .socket(action: "dictate"),
+                                          .key(.primary, retargeted: false)] {
+            XCTAssertEqual(try JSONDecoder().decode(VoiceTakeTrigger.self, from: JSONEncoder().encode(trigger)), trigger)
+        }
+    }
+
+    func testATriggerFromANewerBuildIsKeptAsItWas() throws {
+        let newer = #"{"source":"telepathy","strength":3,"detail":{"seen":[1,true,null,"x"]}}"#
+        let trigger = try JSONDecoder().decode(VoiceTakeTrigger.self, from: Data(newer.utf8))
+        XCTAssertEqual(trigger.source, "telepathy")
+        XCTAssertEqual(trigger.summary, "telepathy")
+        let again = try JSONSerialization.jsonObject(with: JSONEncoder().encode(trigger)) as? NSDictionary
+        XCTAssertEqual(again, try JSONSerialization.jsonObject(with: Data(newer.utf8)) as? NSDictionary,
+                       "encoded back unchanged")
+        XCTAssertEqual(try JSONDecoder().decode(VoiceTakeTrigger.self, from: JSONEncoder().encode(trigger)), trigger)
     }
 
     func testPhaseEncodesWithPlainNames() throws {
