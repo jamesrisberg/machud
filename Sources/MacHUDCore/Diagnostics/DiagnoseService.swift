@@ -1,9 +1,9 @@
 import Foundation
 import HUDKit
 
-/// The `diagnose` verb's one path: gather the replies of the verbs the snapshot embeds, build the
-/// snapshot from the providers, write it and report the file and what looks wrong. It changes no
-/// window and no setting.
+/// The `diagnose` verb and the status menu's Save Diagnostics item share this one path: gather
+/// the replies of the verbs the snapshot embeds, build the snapshot from the providers, write it
+/// and report the file and what looks wrong. It changes no window and no setting.
 @MainActor
 final class DiagnoseService {
     /// Produces one verb's reply, now or later, exactly once.

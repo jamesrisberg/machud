@@ -874,7 +874,7 @@ control socket, for `open-session` and `feed add`).
 
 ## Diagnostics
 
-`diagnose` (also the MCP tool `machud_diagnose`) writes one
+`diagnose` (also the status menu's **Save Diagnostics**, and the MCP tool `machud_diagnose`) writes one
 JSON file that holds what the window server and AppKit know about the family's windows, for the day
 something on the HUD (the voice orb, the tool dock, a widget) vanishes or sits on the wrong desktop.
 Run it before relaunching anything: a relaunch clears the state it records. It reads only: no window
@@ -909,6 +909,10 @@ desktops of its display but not the one showing, when it is on two or more of th
 for a full-screen app, naming the window that fills the screen or saying none does; a voice host that is not
 connected (not when voice is off or not part of the build); and a connected voice host none of whose windows is
 on screen.
+
+The status menu's **Save Diagnostics** item (above Advanced) runs the same code, then shows a toast
+(`Diagnostics saved. Nothing looks wrong.` or `Diagnostics saved. 2 things look wrong.`; `Could not save
+diagnostics` with the reason on a failure) and selects the file in Finder. The verb never reveals the file.
 
 ## MCP tool server
 

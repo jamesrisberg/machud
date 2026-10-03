@@ -4,7 +4,7 @@ import ServiceManagement
 
 /// The menu bar menu. Top to bottom: MacHUD itself (snapping, login item, permissions,
 /// settings), the menu bar manager and MacHUD's own panels, Loadouts, the apps with the tool
-/// dock they live on, Advanced, Quit.
+/// dock they live on, Save Diagnostics, Advanced, Quit.
 final class StatusMenu: NSObject, NSMenuDelegate {
     private let store: LayoutStore
     private let item: NSStatusItem
@@ -23,6 +23,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     var toolDockSection: (() -> [NSMenuItem])?
     /// The Widgets submenu, after Tool Dock.
     var widgetsSection: (() -> [NSMenuItem])?
+    /// Maintenance items (Save Diagnostics), right above Advanced.
+    var maintenanceSection: (() -> [NSMenuItem])?
 
     init(store: LayoutStore) {
         self.store = store
@@ -100,11 +102,13 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             menu.addItem(.separator())
         }
 
-        menu.addItem(advancedItem())
-        menu.addItem(.separator())
-
         let quit = NSMenuItem(title: "Quit MacHUD", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        menu.addItem(quit)
+        for item in Self.tail(maintenance: maintenanceSection?() ?? [], advanced: advancedItem(), quit: quit) { menu.addItem(item) }
+    }
+
+    /// The bottom of the menu, top to bottom: the maintenance items, Advanced, a separator, Quit.
+    static func tail(maintenance: [NSMenuItem], advanced: NSMenuItem, quit: NSMenuItem) -> [NSMenuItem] {
+        maintenance + [advanced, .separator(), quit]
     }
 
     /// The config file itself.

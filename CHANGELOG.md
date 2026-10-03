@@ -7,12 +7,13 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 ## [Unreleased]
 
 ### Added
-- `machud diagnose` for scripts and agents (the MCP tool `machud_diagnose`): when something on the HUD
-  vanishes (the voice orb, the tool dock, a widget), it saves a file with where every MacHUD window really
-  is, according to macOS and to the app, next to the displays, desktops, any full-screen window and the dock's,
-  widgets' and voice host's state (never what you dictated or what the agent answered), prints the file's path
-  and says what looks wrong. Take it before you relaunch anything, since a relaunch clears what it records.
-  Files go to `~/Library/Logs/MacHUD`; the newest 20 are kept.
+- **Save Diagnostics** in the MacHUD menu, and `machud diagnose` for scripts and agents (the MCP tool
+  `machud_diagnose`): when something on the HUD vanishes (the voice orb, the tool dock, a widget), it saves
+  a file with where every MacHUD window really is, according to macOS and to the app, next to the displays,
+  desktops, any full-screen window and the dock's, widgets' and voice host's state (never what you dictated or
+  what the agent answered), and says what looks wrong. The menu item shows a toast and selects the file in
+  Finder; the command prints the file's path and the list. Take it before you relaunch anything, since a
+  relaunch clears what it records. Files go to `~/Library/Logs/MacHUD`; the newest 20 are kept.
 
 ## [0.3.1] - 2026-10-02
 
