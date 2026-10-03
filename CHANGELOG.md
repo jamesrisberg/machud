@@ -23,6 +23,9 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - The voice host's account of each take and of the wake word's listening is in the system log
   (`log show --predicate 'subsystem == "com.jrisberg.machud.voice"'`), readable rather than
   redacted.
+- `machud voice state` says whether the voice orb is meant to be showing and, while a full-screen
+  app hides it, which app and window did; it also gives the orb window's place, transparency and
+  whether it is on the current desktop. Save Diagnostics records this too.
 
 ### Fixed
 - The wake word no longer stays off after the microphone stops for it (an audio device change, a

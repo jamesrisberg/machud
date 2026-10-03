@@ -2,7 +2,8 @@ import Foundation
 import HUDKit
 import VoiceKit
 
-/// The `machud-voice` socket's verbs: `hello`, `state`, `settings get|set settings=<json>`,
+/// The `machud-voice` socket's verbs: `hello`, `state` (the state and the orb's `VoiceOrbReport`),
+/// `settings get|set settings=<json>`,
 /// `action name=<click|ask|dictate|stop|cancel|approve|deny|dismiss|mute|unmute|open-session> [id=]`,
 /// `action name=say text=`, `brain status`, `models status|download id=kokoro|parakeet|<wake id>`,
 /// `history status`, `secret set|clear name=grok [value=]` (values are written, never read
@@ -93,7 +94,7 @@ final class VoiceHostCommands {
             return ["ok": true, "name": "MacHUDVoice", "version": version,
                     "pid": Int(ProcessInfo.processInfo.processIdentifier)]
         case "state":
-            return ["ok": true, "state": Self.jsonObject(controller.state)]
+            return ["ok": true, "state": Self.jsonObject(controller.state), "orb": Self.jsonObject(orbReport())]
         case "settings":
             return settings(args)
         case "action":
@@ -148,6 +149,15 @@ final class VoiceHostCommands {
         case let other:
             return ["ok": false, "error": "settings takes get or set, not \(other)"]
         }
+    }
+
+    /// `state`'s `orb`: whether the orb is meant to be shown, the window that hid it, and its
+    /// window now (none from a headless host).
+    private func orbReport() -> VoiceOrbReport {
+        let hidden = controller.state.hiddenForFullScreen
+        return VoiceOrbReport(intended: hidden ? .hiddenForFullScreen : .shown,
+                              hiddenBy: hidden ? controller.fullScreenEvidence : nil,
+                              window: controller.presenter?.orbWindowReport())
     }
 
     static func actionName(_ args: [String: String]) -> String? { args["name"] ?? args["_"] }

@@ -441,9 +441,115 @@ public protocol VoiceHostActing: AnyObject {
 public protocol VoiceHostPresenting: AnyObject {
     func render(_ state: VoiceHostState)
     func renderConversation(_ rows: [ConversationRow])
+    /// The orb's window as AppKit has it now, for `state`'s `orb`; nil from a presenter that
+    /// puts no orb on screen.
+    func orbWindowReport() -> VoiceOrbWindowReport?
 }
 
 extension VoiceHostPresenting {
     /// A presenter that shows no conversation ignores it.
     public func renderConversation(_ rows: [ConversationRow]) {}
+    public func orbWindowReport() -> VoiceOrbWindowReport? { nil }
+}
+
+/// What `state` says about the orb, built when asked rather than published with
+/// `VoiceHostState` (the window's frame and alpha change on every frame): what the host intends,
+/// the window that hid the orb, and the orb's window as AppKit has it.
+public struct VoiceOrbReport: Codable, Equatable, Sendable {
+    public enum Intent: String, Codable, Sendable {
+        case shown
+        /// `VoiceHostState.hiddenForFullScreen`.
+        case hiddenForFullScreen
+    }
+
+    public var intended: Intent
+    /// While hidden for full screen, the window that made the orb's screen full screen; absent
+    /// when the full-screen check named none.
+    public var hiddenBy: VoiceFullScreenEvidence?
+    /// Absent where no orb is drawn (a headless voice host).
+    public var window: VoiceOrbWindowReport?
+
+    public init(intended: Intent, hiddenBy: VoiceFullScreenEvidence? = nil, window: VoiceOrbWindowReport? = nil) {
+        self.intended = intended
+        self.hiddenBy = hiddenBy
+        self.window = window
+    }
+}
+
+/// The window that satisfied HUDKit's full-screen check for the orb's screen
+/// (`HUDFullscreenObserver.evidence(screenID:)`): a drawn layer-0 window of the frontmost app
+/// whose bounds equal the screen's frame.
+public struct VoiceFullScreenEvidence: Codable, Equatable, Sendable {
+    /// The window server's window number.
+    public var id: UInt32
+    /// The process that owns the window.
+    public var pid: Int32
+    /// That process's app name; nil when it is not known.
+    public var app: String?
+    /// The window's bounds in AppKit screen coordinates.
+    public var frame: VoiceRect
+    /// The window's level (`kCGWindowLayer`).
+    public var layer: Int
+
+    public init(id: UInt32, pid: Int32, app: String?, frame: VoiceRect, layer: Int) {
+        self.id = id
+        self.pid = pid
+        self.app = app
+        self.frame = frame
+        self.layer = layer
+    }
+}
+
+/// The orb's window as AppKit has it.
+public struct VoiceOrbWindowReport: Codable, Equatable, Sendable {
+    /// The display the orb is anchored to.
+    public struct Screen: Codable, Equatable, Sendable {
+        /// The display id (`NSScreenNumber`); nil when it is not known.
+        public var id: Int?
+        public var frame: VoiceRect
+        public var hasNotch: Bool
+
+        public init(id: Int?, frame: VoiceRect, hasNotch: Bool) {
+            self.id = id
+            self.frame = frame
+            self.hasNotch = hasNotch
+        }
+    }
+
+    /// The window number, as the window server lists it and HUDKit's presence log names it (`#n`).
+    public var number: Int
+    /// Ordered in.
+    public var isVisible: Bool
+    public var isOnActiveSpace: Bool
+    public var alpha: Double
+    public var frame: VoiceRect
+    public var level: Int
+    public var screen: Screen
+
+    public init(number: Int, isVisible: Bool, isOnActiveSpace: Bool, alpha: Double, frame: VoiceRect, level: Int,
+                screen: Screen) {
+        self.number = number
+        self.isVisible = isVisible
+        self.isOnActiveSpace = isOnActiveSpace
+        self.alpha = alpha
+        self.frame = frame
+        self.level = level
+        self.screen = screen
+    }
+}
+
+/// A rectangle on the socket: `{x, y, w, h}` in points, AppKit screen coordinates (origin at
+/// the bottom left of the primary screen), as `machud diagnose` writes them.
+public struct VoiceRect: Codable, Equatable, Sendable {
+    public var x: Double
+    public var y: Double
+    public var w: Double
+    public var h: Double
+
+    public init(_ rect: CGRect) {
+        x = Double(rect.minX)
+        y = Double(rect.minY)
+        w = Double(rect.width)
+        h = Double(rect.height)
+    }
 }

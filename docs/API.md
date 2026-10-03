@@ -672,7 +672,7 @@ see Running several instances).
 
 | Command | Args | Effect |
 | --- | --- | --- |
-| `voice state` | | `state {phase, inputLevel, partialTranscript, card?, hiddenForFullScreen, brainAvailable, brainProblem?, sessionKey?, sessionProvider?, activeRuntime?, wakeListening, wakeProblem?, muted, gesturePending, cardMode, lastTakeEnd?}` |
+| `voice state` | | `state {phase, inputLevel, partialTranscript, card?, hiddenForFullScreen, brainAvailable, brainProblem?, sessionKey?, sessionProvider?, activeRuntime?, wakeListening, wakeProblem?, muted, gesturePending, cardMode, lastTakeEnd?}` and `orb {intended, hiddenBy?, window?}` (below) |
 | `voice hello` | | the voice host's `name` (`MacHUDVoice`), `version`, `pid` |
 | `voice status` | | MacHUD's view of the process: `status` (`running`, `restarting`, `disabled`, `stopped`, `failed`, `notInstalled`), `pid` while running, `socket`, `connected`, `muted` and `lastTakeEnd` (see below) once connected, `error` (why it gave up) when `failed` |
 | `voice action` | `name=` `click`, `ask`, `dictate`, `stop`, `cancel`, `approve`, `deny`, `dismiss`, `mute`, `unmute`, `open-session`, `say`; `id=` for `approve`/`deny`; `text=` for `say` | performs it (`machud voice action mute` works too) |
@@ -711,7 +711,7 @@ HUDKit's JSON-lines socket, one request per connection, served by `MacHUDVoice` 
 | Command | Args | Returns |
 | --- | --- | --- |
 | `hello` | | `name`, `version` (the enclosing MacHUD's), `pid` |
-| `state` | | `state`: the host's state (below) |
+| `state` | | `state`: the host's state, and `orb`: what the host intends for the orb, the window that hid it and the orb's window (both below) |
 | `subscribe` | `events=state,models` (optional) | keeps the connection open and pushes `{"event": "state", "state": {…}}` on every change (many times a second while listening) and `{"event": "models", "kokoro": {…}, "parakeet": {…}, "wake": […]}` as a model's status changes (its download progress) |
 | `settings` | `action=get` | `settings`: the whole settings object |
 | `settings` | `action=set settings=<JSON object>` | replaces the whole object (decoded leniently: missing or invalid keys take their defaults, except that a choice setting (`keyMode`, `handsFree.endOfTurn`, `handsFree.sensitivity`, `history.mode`, `brain.runtime`, `voice.replyVoice`) with a value not among its choices is refused with `{ok: false, error}` and nothing is saved), saves `voice.json`, applies it and returns the stored `settings`. With `voice.wakeWordEnabled` true, a `voice.wakePhrase` no model detects (the default "Hey Computer") is saved as the first phrase there is a model for; while the wake word is off the phrase is kept as given |
@@ -915,6 +915,18 @@ window after a tap lapses (dictation, or a discarded tap in hold mode), a second
 take to the agent, or the take ends. The orb shows its armed look meanwhile and commits to the
 waveform or the agent's pulse once it is false. It is never true with the agent gesture off, or
 for a take started by the orb, the wake word or the socket.
+
+The `state` reply also has `orb`, read when asked (it is not part of the `state` events):
+`intended` is `shown` or `hiddenForFullScreen`. While the orb is hidden, `hiddenBy` is the window
+that made its screen full screen as HUDKit's full-screen check saw it (a drawn layer-0 window of
+the frontmost app whose bounds fill the screen): `{id, pid, app, frame, layer}`, the window
+server's window number, the owning process and its app name, the window's bounds and its level;
+it is absent if the check named no window. `window` is the orb's window as AppKit has it:
+`{number, isVisible, isOnActiveSpace, alpha, frame, level, screen {id, frame, hasNotch}}`, where
+`number` is the window number HUDKit's presence log uses (`#<number>`) and `screen` is the display
+the orb is anchored to; a headless voice host (`MACHUD_VOICE_HEADLESS=1`) has none. Frames are
+`{x, y, w, h}` in points, AppKit screen coordinates (origin at the bottom left of the primary
+screen).
 
 The host reads its environment: `MACHUD_VOICE_SOCKET` (its socket), `MACHUD_CONFIG` (the folder
 of that path holds `voice.json`), `MACHUD_VOICE_PARENT_PIPE=1` (exit when stdin reaches end of

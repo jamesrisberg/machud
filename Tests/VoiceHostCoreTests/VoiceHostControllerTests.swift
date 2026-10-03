@@ -1313,11 +1313,17 @@ final class VoiceHostControllerTests: XCTestCase {
 
     // MARK: Presentation
 
-    func testFullScreenHidesTheOrb() {
+    func testFullScreenHidesTheOrbAndKeepsTheWindowThatDidIt() {
         let controller = makeController()
-        controller.setHiddenForFullScreen(true)
+        let safari = VoiceFullScreenEvidence(id: 4321, pid: 567, app: "Safari",
+                                             frame: VoiceRect(CGRect(x: 0, y: 0, width: 2560, height: 1440)), layer: 0)
+        controller.setHiddenForFullScreen(true, evidence: safari)
         XCTAssertTrue(controller.state.hiddenForFullScreen)
         XCTAssertEqual(presenter.states.last?.hiddenForFullScreen, true)
+        XCTAssertEqual(controller.fullScreenEvidence, safari)
+        controller.setHiddenForFullScreen(false, evidence: safari)
+        XCTAssertFalse(controller.state.hiddenForFullScreen)
+        XCTAssertNil(controller.fullScreenEvidence, "kept only while the orb is hidden")
     }
 
     func testEveryChangeIsRendered() {

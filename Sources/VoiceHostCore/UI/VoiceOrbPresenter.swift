@@ -32,7 +32,7 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
     private var geometry: HUDNotchGeometry
     private var reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
 
-    private let orbWindow: HUDPanelWindow
+    let orbWindow: HUDPanelWindow
     private let orbView: OrbView
     private let cardWindow: HUDPanelWindow
     private let cardView = OrbCardView(frame: .zero)
@@ -480,6 +480,17 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
             self?.actions?.perform(.setCardMode(.expanded))
         })
         return menu
+    }
+
+    // MARK: Report
+
+    public func orbWindowReport() -> VoiceOrbWindowReport? {
+        let screenID = screen.map(HUDScreenSnapshot.id(for:)).flatMap { Int($0) }
+        return VoiceOrbWindowReport(
+            number: orbWindow.windowNumber, isVisible: orbWindow.isVisible, isOnActiveSpace: orbWindow.isOnActiveSpace,
+            alpha: Double(orbWindow.alphaValue), frame: VoiceRect(orbWindow.frame), level: orbWindow.level.rawValue,
+            screen: VoiceOrbWindowReport.Screen(id: screenID, frame: VoiceRect(geometry.screenFrame),
+                                                hasNotch: geometry.hasNotch))
     }
 
     // MARK: Environment
