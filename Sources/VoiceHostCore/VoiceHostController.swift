@@ -677,7 +677,9 @@ public final class VoiceHostController: VoiceHostActing {
             take?.mode = mode
             state.phase = .listening(mode)
         case .level(let level):
-            guard isCurrent else { return }
+            // A non-finite level is ignored and the previous one stands: in the state it would
+            // make `state` unencodable, and in the endpointer it would poison the noise floor.
+            guard isCurrent, level.isFinite else { return }
             state.inputLevel = level
             switch take?.endpointer?.observe(level: level, at: now()) {
             case .pause?: endTake(.pause)

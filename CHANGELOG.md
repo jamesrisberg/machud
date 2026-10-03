@@ -41,6 +41,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - The voice orb's working arc keeps turning however long MacHUD has been running; after about 40
   minutes of animation it was no longer drawn.
 - A glitched microphone level reading can no longer freeze the voice orb's listening pulse.
+- A glitched microphone level reading no longer makes `machud voice state` answer with an empty
+  state, or throws off when a hands-free take ends: the reading is ignored.
 
 ## [0.3.1] - 2026-10-02
 

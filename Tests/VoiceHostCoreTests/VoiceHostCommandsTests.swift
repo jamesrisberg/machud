@@ -146,6 +146,27 @@ final class VoiceHostCommandsTests: XCTestCase {
         XCTAssertEqual(end["trigger"] as? [String: String], ["source": "socket", "action": "ask"])
     }
 
+    func testANonFiniteLevelIsIgnored() throws {
+        _ = commands.handle("action", ["name": "ask"])
+        // First in the take: fed to the endpointer, it would make its floor and threshold
+        // non-finite, and lastTakeEnd with them.
+        dictation.level(.nan)
+        dictation.level(.infinity)
+        XCTAssertEqual(controller.state.inputLevel, 0, "the previous level stands")
+        dictation.level(0.3)
+        dictation.level(-.infinity)
+        dictation.level(.nan)
+        XCTAssertEqual(controller.state.inputLevel, 0.3)
+        XCTAssertNotNil(commands.handle("state", [:])["state"] as? [String: Any], "the state still encodes")
+
+        _ = commands.handle("action", ["name": "stop"])
+        let end = try XCTUnwrap(controller.state.lastTakeEnd)
+        XCTAssertEqual(end.floor.map(\.isFinite), true)
+        XCTAssertEqual(end.threshold.map(\.isFinite), true)
+        let state = try XCTUnwrap(commands.handle("state", [:])["state"] as? [String: Any], "the state still encodes")
+        XCTAssertNotNil(state["lastTakeEnd"] as? [String: Any])
+    }
+
     func testTheSocketsClickIsNotTheOrbs() {
         _ = commands.handle("action", ["name": "click"])
         _ = commands.handle("action", ["name": "click"])
