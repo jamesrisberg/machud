@@ -556,6 +556,12 @@ final class LoadoutEngine {
         if !job.askedForWindow, let app = running.first {
             job.askedForWindow = AXWindow.openNewWindow(pid: app.processIdentifier)
             if !job.askedForWindow, !job.activated {
+                // Bringing forward an app whose windows are all on desktops that are not showing
+                // shows one of them; with multi-desktop loadouts off nothing switches desktops.
+                if !store.config.multiDesktopLoadouts, Self.windowsOnlyOnOtherDesktops(pid: app.processIdentifier) {
+                    return .failed("cannot: \(job.occupant.label) has windows only on another desktop "
+                                   + "and would not open one here without coming forward")
+                }
                 job.activated = true
                 job.previousFront = NSWorkspace.shared.frontmostApplication
                 // A freshly launched app can sit there with neither window nor menu
@@ -565,6 +571,12 @@ final class LoadoutEngine {
             }
         }
         return .waiting
+    }
+
+    /// The window server lists windows for `pid` and none of them is on a desktop showing now.
+    private static func windowsOnlyOnOtherDesktops(pid: pid_t) -> Bool {
+        let mine = AllSpacesWindows.list().filter { $0.pid == pid }
+        return !mine.isEmpty && !mine.contains(where: \.onScreen)
     }
 
     private func resolveBuiltinWeb(url: String) -> Resolution {

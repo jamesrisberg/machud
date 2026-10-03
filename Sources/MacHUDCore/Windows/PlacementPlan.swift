@@ -1,7 +1,8 @@
 import CoreGraphics
 import Foundation
 
-/// What apply does with an occupant whose only window is on a desktop that is not showing.
+/// What apply does with an occupant whose only window is on a desktop that is not showing, while
+/// multi-desktop loadouts are on (`PlacementPlan.Mode`).
 enum SpacesPolicy: String, Codable, Equatable, CaseIterable {
     /// Fetch the existing window: show its desktop, move it, go back (default). Needs the
     /// window to be on another display, or a second display to hop it through; otherwise
@@ -11,6 +12,21 @@ enum SpacesPolicy: String, Codable, Equatable, CaseIterable {
     case launchNew
     /// Leave it where it is and report `leave`.
     case leave
+}
+
+extension SpacesPolicy {
+    /// With multi-desktop loadouts off apply keeps to the desktop showing and `spaces.policy` is
+    /// not read: an app whose only window is on another desktop gets a new window here when it
+    /// can open one, and a single-window app gets `oneScreenSingleWindow`.
+    static func oneScreen(_ newWindow: NewWindowClass) -> SpacesPolicy {
+        newWindow.canOpenAnother ? .launchNew : oneScreenSingleWindow
+    }
+
+    /// What a single-window app (Messages, Signal…) whose window is on another desktop gets while
+    /// multi-desktop loadouts are off: `launchNew` leaves the window there and fails its slot,
+    /// naming the app (it cannot open a second one); `bring` fetches it by switching desktops, as
+    /// `spaces.policy: bring` does (which needs a second display to carry it across).
+    static let oneScreenSingleWindow: SpacesPolicy = .launchNew
 }
 
 /// `spaces` in layouts.json.
@@ -99,6 +115,24 @@ enum PlacementPlan {
 
     enum Kind: Equatable { case app, web, panel }
 
+    /// Whether multi-desktop loadouts are on (see `ExperimentalLoadouts`).
+    enum Mode: Equatable {
+        /// On: a slot may name a desktop, and `spaces.policy` decides what happens to a window on
+        /// a desktop that is not showing.
+        case multiDesktop(SpacesPolicy)
+        /// Off: the desktop showing only. A slot's desktop is not read and the window's desktop
+        /// is never shown; `SpacesPolicy.oneScreen` decides instead of `spaces.policy`.
+        case oneScreen
+
+        /// As `apply … plan=1` reports it (`policy`).
+        var name: String {
+            switch self {
+            case .multiDesktop(let policy): return policy.rawValue
+            case .oneScreen: return "oneScreen"
+            }
+        }
+    }
+
     struct SlotInput {
         var regionID: String
         var regionName: String
@@ -171,19 +205,25 @@ enum PlacementPlan {
         var places: Bool { ![.leave, .cannot].contains(action) }
     }
 
-    static func plan(_ slots: [SlotInput], screens: [Screen], policy: SpacesPolicy) -> [Step] {
-        slots.map { step(for: $0, screens: screens, policy: policy) }
-    }
-
     private static func name(_ screens: [Screen], _ i: Int?) -> String? {
         i.flatMap { screens.indices.contains($0) ? screens[$0].name : nil }
     }
 
-    static func step(for slot: SlotInput, screens: [Screen], policy: SpacesPolicy) -> Step {
+    static func step(for slot: SlotInput, screens: [Screen], mode: Mode) -> Step {
+        let policy: SpacesPolicy
+        let slotSpace: Int?
+        switch mode {
+        case .multiDesktop(let chosen):
+            policy = chosen
+            slotSpace = slot.space
+        case .oneScreen:
+            policy = .oneScreen(slot.newWindow)
+            slotSpace = nil
+        }
         let target = screens.indices.contains(slot.screen) ? screens[slot.screen] : nil
         let showing = target?.currentSpace
-        let wantedSpace = slot.space ?? showing
-        let needsSwitch = slot.space != nil && slot.space != showing
+        let wantedSpace = slotSpace ?? showing
+        let needsSwitch = slotSpace != nil && slotSpace != showing
         let to = Location(screen: target?.name, space: wantedSpace, frame: slot.rect)
         var step = Step(regionID: slot.regionID, regionName: slot.regionName, occupant: slot.occupant,
                         action: .cannot, from: nil, to: to, reason: "")
@@ -195,7 +235,7 @@ enum PlacementPlan {
             step.reason = "display not attached"
             return step
         }
-        let switchNote = needsSwitch ? "show desktop \(slot.space!) on \(target!.name), then " : ""
+        let switchNote = needsSwitch ? "show desktop \(slotSpace!) on \(target!.name), then " : ""
 
         guard let window = choose(slot.candidates, target: slot.screen, space: wantedSpace) else {
             // Nothing to reuse.
@@ -251,8 +291,9 @@ enum PlacementPlan {
         }
 
         // Its only window is on a desktop that is not showing.
-        let whereNow = "on desktop \(window.space.map(String.init) ?? "?")"
+        let desktop = "desktop \(window.space.map(String.init) ?? "?")"
             + (window.screen.flatMap { name(screens, $0) }.map { " of \($0)" } ?? "")
+        let whereNow = "on \(desktop)"
         func launchNew(_ why: String) -> Step {
             var s = step
             if slot.newWindow.canOpenAnother {
@@ -260,6 +301,9 @@ enum PlacementPlan {
                 s.newWindow = true
                 s.window = nil
                 s.reason = "\(why)open a new \(slot.occupant) window here; the one \(whereNow) stays"
+            } else if mode == .oneScreen, why.isEmpty {
+                s.action = .cannot
+                s.reason = "\(slot.occupant) has one window, on another desktop (\(desktop))"
             } else {
                 s.action = .cannot
                 s.reason = "\(slot.occupant) has one window, \(whereNow)\(why.isEmpty ? "" : " (\(why.trimmingCharacters(in: CharacterSet(charactersIn: "; "))))")"

@@ -55,6 +55,11 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   Capturing every screen (`screens=all`), walking desktops (`desktops=`), filling a layout per
   display (`screens=<layout>@<display>`) and `machud spaces action=switch` are experimental: while
   **Multi-desktop loadouts** is off they answer with an error saying how to turn it on.
+- Applying a loadout never switches desktops while **Multi-desktop loadouts** is off. An app whose
+  only window is on another desktop gets a new window on this one when it can open one; an app
+  with a single window (Messages, Signal, Slack…) is left where it is and the toast names it.
+  Windows on another display are still moved over, and minimised ones restored. `spaces.policy`
+  in layouts.json applies only with the setting on.
 
 ### Fixed
 - With multi-desktop loadouts on, the wheel says how many desktops a captured multi-desktop

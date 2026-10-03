@@ -109,14 +109,26 @@ final class OneScreenApplyTests: XCTestCase {
         XCTAssertEqual(engine.planJSON(desk)["ok"] as? Bool, true)
     }
 
-    func testWithTheSettingOnSpanningLoadoutsArePlanned() throws {
+    /// `spaces.policy` defaulted to `bring` (and the fixture sets it): with the setting off it is
+    /// not read, the planner keeps to the desktop showing, and the plan says so.
+    func testAOneScreenPlanDoesNotReadSpacesPolicy() throws {
+        let engine = try engine(multiDesktop: nil)
+        XCTAssertEqual(engine.planMode, .oneScreen)
+        let desk = try XCTUnwrap(engine.store.loadout(named: "Desk"))
+        XCTAssertEqual(engine.planJSON(desk)["policy"] as? String, "oneScreen")
+    }
+
+    func testWithTheSettingOnSpanningLoadoutsArePlannedAndSpacesPolicyDecides() throws {
         let engine = try engine(multiDesktop: true)
+        XCTAssertEqual(engine.planMode, .multiDesktop(.bring))
         for name in ["Desk", "Studio", "Pinned"] {
             let loadout = try XCTUnwrap(engine.store.loadout(named: name))
             let (steps, report) = engine.plan(loadout)
             XCTAssertNil(report.refused, name)
             XCTAssertEqual(steps.count, 1, name)
-            XCTAssertEqual(engine.planJSON(loadout)["ok"] as? Bool, true, name)
+            let json = engine.planJSON(loadout)
+            XCTAssertEqual(json["ok"] as? Bool, true, name)
+            XCTAssertEqual(json["policy"] as? String, "bring", name)
         }
     }
 }

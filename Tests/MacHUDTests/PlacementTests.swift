@@ -3,7 +3,8 @@ import XCTest
 @testable import MacHUDCore
 
 /// The planner's decision table (`PlacementPlan`) against fake window lists across
-/// displays and desktops.
+/// displays and desktops. `step(_:_:)` plans with multi-desktop loadouts on (`spaces.policy`
+/// decides, `bring` by default); the `oneScreen` tests plan with them off.
 final class PlacementPlanTests: XCTestCase {
     typealias P = PlacementPlan
     // Main 2560×1440 showing desktop 3 of 4; built-in to its right showing its only desktop.
@@ -26,7 +27,7 @@ final class PlacementPlanTests: XCTestCase {
     }
 
     private func step(_ s: P.SlotInput, _ policy: SpacesPolicy = .bring) -> P.Step {
-        P.step(for: s, screens: screens, policy: policy)
+        P.step(for: s, screens: screens, mode: .multiDesktop(policy))
     }
 
     func testWindowAlreadyInPlaceStays() {
@@ -68,7 +69,7 @@ final class PlacementPlanTests: XCTestCase {
         var screens = self.screens
         screens[1].currentSpace = 2
         screens[1].spaces = 2
-        let s = P.step(for: slot([win(1, screen: 1, space: 1, visible: false)]), screens: screens, policy: .bring)
+        let s = P.step(for: slot([win(1, screen: 1, space: 1, visible: false)]), screens: screens, mode: .multiDesktop(.bring))
         XCTAssertEqual(s.action, .switchSpace)
         XCTAssertEqual(s.bring, .acrossDisplays(fromScreen: 1, space: 1))
     }
@@ -82,7 +83,7 @@ final class PlacementPlanTests: XCTestCase {
 
     func testOneDisplaySingleWindowAppCannotBeBrought() {
         let one = [screens[0]]
-        let s = P.step(for: slot([win(1, screen: 0, space: 1, visible: false)]), screens: one, policy: .bring)
+        let s = P.step(for: slot([win(1, screen: 0, space: 1, visible: false)]), screens: one, mode: .multiDesktop(.bring))
         XCTAssertEqual(s.action, .cannot)
         XCTAssertTrue(s.reason.contains("one window"), s.reason)
         XCTAssertTrue(s.reason.contains("desktop 1"), s.reason)
@@ -91,7 +92,7 @@ final class PlacementPlanTests: XCTestCase {
     func testOneDisplayMenuAppFallsBackToANewWindow() {
         let one = [screens[0]]
         let s = P.step(for: slot([win(1, screen: 0, space: 1, visible: false)], newWindow: .menu),
-                       screens: one, policy: .bring)
+                       screens: one, mode: .multiDesktop(.bring))
         XCTAssertEqual(s.action, .launch)
         XCTAssertTrue(s.newWindow)
         XCTAssertNil(s.window)
@@ -165,6 +166,81 @@ final class PlacementPlanTests: XCTestCase {
         XCTAssertEqual(c.spaces?.effectivePolicy, .launchNew)
         let none = try JSONDecoder().decode(Config.self, from: Data("{}".utf8))
         XCTAssertEqual(none.spaces?.effectivePolicy ?? .bring, .bring)
+    }
+
+    // MARK: Multi-desktop loadouts off: the desktop showing only
+
+    private func oneScreen(_ s: P.SlotInput, screens: [P.Screen]? = nil) -> P.Step {
+        P.step(for: s, screens: screens ?? self.screens, mode: .oneScreen)
+    }
+
+    func testOneScreenOpensANewWindowForAnAppThatCan() {
+        // Its only window is on hidden desktop 1 of this display, and a second display could
+        // carry it across: with the feature off nothing switches desktops, so a new one opens here.
+        for kind in [NewWindowClass.menu, .browser] {
+            let s = oneScreen(slot([win(1, screen: 0, space: 1, visible: false)], newWindow: kind))
+            XCTAssertEqual(s.action, .launch, "\(kind)")
+            XCTAssertTrue(s.newWindow, "\(kind)")
+            XCTAssertNil(s.bring, "\(kind)")
+            XCTAssertNil(s.window, "\(kind)")
+        }
+    }
+
+    func testOneScreenLeavesASingleWindowAppAndNamesIt() {
+        for screens in [self.screens, [self.screens[0]]] {
+            let s = oneScreen(slot([win(1, screen: 0, space: 1, visible: false)], newWindow: .single), screens: screens)
+            XCTAssertEqual(s.action, .cannot)
+            XCTAssertFalse(s.places)
+            XCTAssertNil(s.bring)
+            XCTAssertTrue(s.reason.hasPrefix("Signal "), s.reason)
+            XCTAssertTrue(s.reason.contains("on another desktop"), s.reason)
+        }
+    }
+
+    func testOneScreenDoesNotFetchWhatBringWould() {
+        // On built-in desktop 1 while it shows 2: `bring` would show desktop 1 there and carry it over.
+        var screens = self.screens
+        screens[1].currentSpace = 2
+        screens[1].spaces = 2
+        let input = slot([win(1, screen: 1, space: 1, visible: false)], newWindow: .menu)
+        XCTAssertEqual(P.step(for: input, screens: screens, mode: .multiDesktop(.bring)).bring, .acrossDisplays(fromScreen: 1, space: 1))
+        let s = oneScreen(input, screens: screens)
+        XCTAssertEqual(s.action, .launch)
+        XCTAssertTrue(s.newWindow)
+        XCTAssertNil(s.bring)
+    }
+
+    func testOneScreenNeverSwitchesDesktops() {
+        let windows: [P.Candidate] = [
+            win(1, screen: 0, space: 1, visible: false), win(2, screen: 1, space: 2, visible: false),
+            win(3, screen: 0, space: nil, visible: false), win(4, screen: 0, space: 3, visible: true),
+            win(5, screen: 1, space: 1, visible: true), win(6, screen: 0, space: nil, visible: false, minimized: true),
+        ]
+        for kind in [NewWindowClass.menu, .browser, .single] {
+            for candidates in [[]] + windows.map({ [$0] }) {
+                for space in [nil, 2] {
+                    let s = oneScreen(slot(candidates, space: space, newWindow: kind))
+                    XCTAssertNotEqual(s.action, .switchSpace, "\(kind) \(candidates) slot desktop \(space as Any): \(s.reason)")
+                    XCTAssertNil(s.bring, "\(kind) \(candidates)")
+                }
+            }
+        }
+    }
+
+    func testOneScreenStillMovesAcrossDisplaysAndRestoresFromTheDock() {
+        let other = oneScreen(slot([win(1, screen: 1, space: 1, visible: true)]))
+        XCTAssertEqual(other.action, .move)
+        XCTAssertEqual(other.from?.screen, "Built-in")
+        let minimized = oneScreen(slot([win(1, screen: 0, space: 2, visible: false, minimized: true)]))
+        XCTAssertEqual(minimized.action, .resize)
+        XCTAssertTrue(minimized.reason.contains("Dock"))
+        XCTAssertEqual(oneScreen(slot([win(1, screen: 0, space: 3, visible: true, frame: rect)])).action, .stay)
+    }
+
+    func testThePlanNamesItsMode() {
+        XCTAssertEqual(P.Mode.oneScreen.name, "oneScreen")
+        XCTAssertEqual(P.Mode.multiDesktop(.bring).name, "bring")
+        XCTAssertEqual(P.Mode.multiDesktop(.leave).name, "leave")
     }
 }
 

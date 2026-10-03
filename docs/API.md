@@ -49,7 +49,7 @@ display). Region geometry in `layouts` is fractions of the screen's visible area
 | `loadouts startup` | `name` (omit, or `name=none`, to clear) | set `startupLoadout`, the loadout applied at launch |
 | `reload` | | re-read `~/.config/machud/layouts.json` |
 | `apply` | `loadout`, `clear=1`, `screen=<ref>` (optional) | launch/find each occupant and place it in its region; with `clear`, first minimise the other windows showing on each screen the loadout covers (on the desktops it visits); then the loadout's `hud` part, if any (see HUD loadouts). `screen` picks the display for the one-screen form (default: under the mouse). A loadout that spans several desktops or displays while multi-desktop loadouts are off is refused before anything moves: `ok: false` and `error` say why. Returns `placed[]`, `failed{}`, `cleared`, `redirected[]` when a display was missing, `hud {dock?, apps {id: "applied" or why not}}`, and `slots[]`: the plan step per slot plus `result` (`placed`/`failed`), `error`, and `actual` {x, y, w, h} when the app kept a different frame. See [Placement plan](#placement-plan) |
-| `apply` | `loadout`, `plan=1` (+ optional `screen`) | **dry run**: `plan[]` of `{slot, region, occupant, action, from?, to, reason, window?}` without moving anything, plus `policy`, `failed{}` / `redirected[]` for missing displays and layouts. Refused like `apply` |
+| `apply` | `loadout`, `plan=1` (+ optional `screen`) | **dry run**: `plan[]` of `{slot, region, occupant, action, from?, to, reason, window?}` without moving anything, plus `policy` (`oneScreen`, or `spaces.policy` while multi-desktop loadouts are on), `failed{}` / `redirected[]` for missing displays and layouts. Refused like `apply` |
 | `preview` | `loadout` (default: the active one), `action=show\|apply\|cancel` | draw the plan over every display (regions coloured by action, Apply / Cancel); `apply` / `cancel` answer it. Returns `visible`, `loadout` |
 | `capture` | `name`, optional `screen=<ref>` | **derive a layout from the windows on that screen** (one region per window at the window's exact frame, stacked windows included) and a loadout of the same name that fills it; both are saved and the layout becomes active. Regions of an existing layout with that name are reused where they still match, so editor tweaks survive a recapture. Returns `layout`, `regions`, `slots`, `screen`, `loadout` |
 | `capture` | `name`, `layout=<name>` (+ optional `screen`) | fill only: snapshot which window sits in each region of an existing layout, without touching its regions |
@@ -108,6 +108,8 @@ takes effect at once. While it is off:
 - `apply` (and `plan=1`, and the preview) refuses a spanning loadout by name before anything
   moves, saying how to turn the setting on. The startup loadout and the re-apply after a
   display change do not run one either; a toast says so.
+- `apply` never switches desktops and `spaces.policy` is not read (see
+  [Placement plan](#placement-plan)).
 - `capture` takes one display, on the desktop showing: the default form, `screen=`, `layout=`
   and `hud=only` work as described; `screens=all`, `desktops=` and `screens=<layout>@<ref>`
   answer `ok: false` with an `error` naming the setting. `spaces action=switch` does too;
@@ -151,7 +153,7 @@ and the preview draws). `action` is one of:
 | `stay` | the window is already in its region |
 | `resize` | same display and desktop: moved/resized in place (or restored from the Dock) |
 | `move` | on another display's showing desktop: moved across |
-| `switchSpace` | a desktop is switched first: the slot's own `space`, or (`bring`) the desktop the window is on |
+| `switchSpace` | multi-desktop loadouts only: a desktop is switched first, the slot's own `space` or (`bring`) the desktop the window is on |
 | `launch` | no usable window: launch the app, ask it for a window, or (`launchNew`) open a second one |
 | `leave` | left on its desktop (`spaces.policy: "leave"`) |
 | `cannot` | not placeable; `reason` says why (not installed, single-window app on another desktop, …) |
@@ -161,8 +163,17 @@ desktop on that display. The window used is the one on the target display's
 showing desktop, else on the slot's desktop, else on another display, else a
 minimised one, else one on a hidden desktop.
 
-`spaces.policy` in layouts.json decides what happens to a window on a desktop that
-is not showing:
+While multi-desktop loadouts are off (the default) the plan's `policy` is `oneScreen`:
+apply never switches desktops, a slot's `space` is not read, and neither is `spaces.policy`. An
+app whose only window is on a desktop that is not showing gets a new window here when it can
+open one (as `launchNew` below); a single-window app is left there and its slot reports
+`cannot`, naming the app and saying it is on another desktop. An app whose windows are all on
+other desktops and that would not open a window without being brought forward is not brought
+forward (that would show its desktop); its slot reports `cannot` too. A window showing on another
+display is still moved over, and a minimised one restored.
+
+While they are on, `spaces.policy` in layouts.json decides what happens to a window on a
+desktop that is not showing:
 
 - `bring` (default): show its desktop, move the window to the target display (it
   joins that display's showing desktop), switch back. When it is on the target
@@ -1043,7 +1054,7 @@ are in [MCP.md](MCP.md).
 - `~/.config/machud/layouts.json` — layouts, loadouts, hotkeys, trigger, grid, browser, apps, menuBar, toolDock, spaces, widgets. Hot-reloaded
   on save (atomic or in place).
   `spaces`: `{"policy": "bring"}` (or `launchNew`, `leave`): what apply does with a window on a desktop that is not
-  showing (see Placement plan).
+  showing while multi-desktop loadouts are on (see Placement plan).
   `menuBar`: `{"enabled": false, "autoCollapseSeconds": 10, "hotkey": {"key": "b", "modifiers": ["control", "option"]}, "consumeSiblings": true}`,
   every key optional (these are the defaults). The hotkey can also be given as `hotkeys.menuBar`; `menuBar.hotkey`
   wins, and `{"key": ""}` turns it off. It is only registered while `enabled`.

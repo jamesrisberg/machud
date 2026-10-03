@@ -82,13 +82,19 @@ struct WindowLocator {
 extension LoadoutEngine {
     // MARK: - Planning
 
+    /// How the planner treats other desktops: `spaces.policy` is read only while multi-desktop
+    /// loadouts are on; off, nothing switches desktops (`PlacementPlan.Mode.oneScreen`).
+    var planMode: PlacementPlan.Mode {
+        store.config.multiDesktopLoadouts ? .multiDesktop(store.spacesPolicy) : .oneScreen
+    }
+
     /// Decide every slot of `groups` (see `PlacementPlan`), store the step on its job and
     /// return the steps in apply order. Reads windows, never moves one.
     @discardableResult
     func attachPlan(to groups: [ResolvedGroup]) -> [PlacementPlan.Step] {
         let locator = WindowLocator()
         let screens = locator.planScreens
-        let policy = store.spacesPolicy
+        let mode = planMode
         var claimed: Set<Int> = []
         var steps: [PlacementPlan.Step] = []
         for group in groups {
@@ -96,7 +102,7 @@ extension LoadoutEngine {
             for job in group.jobs {
                 var input = slotInput(job, screen: screenIndex, space: group.space, locator: locator)
                 input.candidates.removeAll { $0.number != 0 && claimed.contains($0.number) }
-                let step = PlacementPlan.step(for: input, screens: screens, policy: policy)
+                let step = PlacementPlan.step(for: input, screens: screens, mode: mode)
                 if let n = step.window, n != 0 { claimed.insert(n) }
                 job.step = step
                 steps.append(step)
@@ -160,7 +166,7 @@ extension LoadoutEngine {
     func planJSON(_ loadout: Loadout, screen: NSScreen? = nil) -> [String: Any] {
         let (steps, report) = plan(loadout, screen: screen)
         if report.refused != nil { return report.json }
-        var d: [String: Any] = ["ok": true, "loadout": loadout.name, "policy": store.spacesPolicy.rawValue,
+        var d: [String: Any] = ["ok": true, "loadout": loadout.name, "policy": planMode.name,
                                 "plan": steps.map(\.json)]
         if loadout.hud != nil { d["hud"] = true }
         if !report.failed.isEmpty { d["failed"] = report.failed }
