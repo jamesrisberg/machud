@@ -191,8 +191,8 @@ update it, or refine regions and occupants in the editor. Sibling apps' panels
 are windows too: ⇧-drag them into regions or capture them like anything else.
 
 **Apply** from the wheel, the menu bar, a per-loadout hotkey, or `machud apply loadout=Work`
-(`screen=<display>` picks another display). It does not matter which desktop the windows were
-on when you captured. What apply does with each slot's window:
+(`screen=<display>` picks another display). A loadout names no desktop and no display, so it
+applies to whichever you are on. What apply does with each slot's window:
 
 - **On this screen's desktop**: moved and resized into its region (or left, when it is there).
 - **Visible on another display**: moved over. **Minimized**: restored. **In a hidden app**
