@@ -189,8 +189,15 @@ extension LoadoutEngine {
 
     // MARK: - Carrying out the plan
 
+    /// How long the fetches of one group may take, all told: each switches desktops there and
+    /// back, one keystroke per desktop when "Switch to Desktop N" is off. A fetch is never cut
+    /// short (that would leave a desktop switched); the next one does not start after this.
+    static let fetchBudget: TimeInterval = 30
+
     /// Before a group's slots are resolved: fail the slots the plan leaves out, pin the
-    /// chosen windows, and fetch windows from hidden desktops one at a time.
+    /// chosen windows, and fetch windows from hidden desktops one at a time, within
+    /// `fetchBudget`. When a display cannot be put back on its desktop the group's other
+    /// slots are not placed (they would land on the wrong desktop) and each says why.
     func prepare(_ group: ResolvedGroup, report: ApplyReport, completion: @escaping (ApplyReport) -> Void) {
         var report = report
         var fetches: [SlotJob] = []
@@ -206,20 +213,48 @@ extension LoadoutEngine {
                 if step.bring != nil { fetches.append(job) }
             }
         }
+        let deadline = Date().addingTimeInterval(Self.fetchBudget)
         func next() {
             guard !fetches.isEmpty else { completion(report); return }
             let job = fetches.removeFirst()
-            bring(job, into: group.screen) { failure in
-                MainActor.assumeIsolated {
-                    if let failure { self.bringFailed(job, failure, report: &report) }
+            guard Date() < deadline else {
+                bringFailed(job, "no time was left to fetch it", report: &report)
+                next()
+                return
+            }
+            bring(job, into: group.screen) { outcome in
+                switch outcome {
+                case .fetched:
                     next()
+                case .failed(let reason):
+                    self.bringFailed(job, reason, report: &report)
+                    next()
+                case .leftOnAnotherDesktop(let reason):
+                    NSLog("MacHUD: fetching %@ left a display on another desktop: %@", job.occupant.label, reason)
+                    self.cannot(job, "could not bring it from its desktop: \(reason)", report: &report)
+                    for other in group.jobs where !other.done {
+                        self.cannot(other, "not placed: fetching \(job.occupant.label) could not put every display back (\(reason))",
+                                    report: &report)
+                    }
+                    completion(report)
                 }
             }
         }
         next()
     }
 
-    /// Fetching failed: open a new window instead when the app can, else report it.
+    /// Fail a slot and say why, in its plan step too.
+    private func cannot(_ job: SlotJob, _ reason: String, report: inout ApplyReport) {
+        job.done = true
+        report.failed[job.regionID] = "cannot: \(reason)"
+        if let index = report.steps.firstIndex(where: { $0.regionID == job.regionID }) {
+            report.steps[index].action = .cannot
+            report.steps[index].reason = reason
+        }
+    }
+
+    /// Fetching failed with every display put back: open a new window instead when the app
+    /// can, else report it.
     private func bringFailed(_ job: SlotJob, _ failure: String, report: inout ApplyReport) {
         NSLog("MacHUD: could not bring %@: %@", job.occupant.label, failure)
         var canOpen = false
@@ -227,77 +262,64 @@ extension LoadoutEngine {
            let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first {
             canOpen = NewWindowClass.of(bundleID: bundleID, pid: app.processIdentifier).canOpenAnother
         }
-        let index = report.steps.firstIndex { $0.regionID == job.regionID }
-        if canOpen {
-            job.preferredWindow = nil
-            job.newWindowOnly = true
-            if let index {
-                report.steps[index].action = .launch
-                report.steps[index].reason = "could not bring it (\(failure)); opened a new window here"
-            }
-        } else {
-            job.done = true
-            report.failed[job.regionID] = "cannot: could not bring it from its desktop (\(failure))"
-            if let index {
-                report.steps[index].action = .cannot
-                report.steps[index].reason = "could not bring it from its desktop (\(failure))"
-            }
+        guard canOpen else {
+            cannot(job, "could not bring it from its desktop (\(failure))", report: &report)
+            return
+        }
+        job.preferredWindow = nil
+        job.newWindowOnly = true
+        if let index = report.steps.firstIndex(where: { $0.regionID == job.regionID }) {
+            report.steps[index].action = .launch
+            report.steps[index].reason = "could not bring it (\(failure)); opened a new window here"
         }
     }
 
-    /// Fetch a window from a desktop that is not showing. On another display: show its
-    /// desktop there, move it into the region (it joins the target display's showing
-    /// desktop), switch that display back. On the target display itself: the same, but
-    /// parked on another display while this one switches back, then moved home. macOS 26
-    /// ignores the private move-to-space call, so a display is the only way across.
-    func bring(_ job: SlotJob, into target: NSScreen, completion: @escaping (String?) -> Void) {
-        guard let number = job.preferredWindow, number != 0 else { completion("no window number"); return }
+    /// Fetch a window from a desktop that is not showing (`DesktopFetch`). On another display:
+    /// show its desktop there, move it into the region (it joins the target display's showing
+    /// desktop), switch that display back. On the target display itself: the same, but parked
+    /// on another display while this one switches back, then moved home. macOS 26 ignores the
+    /// private move-to-space call, so a display is the only way across.
+    func bring(_ job: SlotJob, into target: NSScreen, completion: @escaping (DesktopFetch.Outcome) -> Void) {
+        guard let number = job.preferredWindow, number != 0 else { completion(.failed("no window number")); return }
         let locator = WindowLocator()
         guard let entry = locator.entries.first(where: { $0.number == number }) else {
-            completion("window \(number) is gone"); return
+            completion(.failed("window \(number) is gone")); return
         }
-        if entry.onScreen { completion(nil); return }
+        if entry.onScreen { completion(.fetched); return }
         let place = locator.location(number: number, frame: entry.frame, onScreen: false)
-        guard let from = place.screen, let space = place.space else { completion("its desktop is unknown"); return }
-        let home = locator.screens[from]
-        let via = home == target ? locator.screens.first { $0 != target } : nil
-        if home == target, via == nil { completion("only one display"); return }
-        let origin = Spaces.monitor(for: home, in: locator.monitors)?.currentIndex
+        guard let from = place.screen, let space = place.space else { completion(.failed("its desktop is unknown")); return }
+        let screens = locator.screens
+        let home = screens[from]
+        var via: CGRect?
+        if home == target {
+            guard let other = screens.first(where: { $0 != target }) else { completion(.failed("only one display")); return }
+            let rect = job.rect
+            let size = CGSize(width: min(rect.width, other.visibleFrame.width), height: min(rect.height, other.visibleFrame.height))
+            via = CGRect(x: other.visibleFrame.midX - size.width / 2, y: other.visibleFrame.midY - size.height / 2,
+                         width: size.width, height: size.height)
+        }
         let pid = entry.pid
-        let rect = job.rect
-
-        func ax() -> AXWindow? {
-            AllSpacesWindows.axWindows(pid: pid, wanted: [number]).first { $0.number == number }?.window
-        }
-        func after(_ seconds: Double, _ body: @escaping () -> Void) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { MainActor.assumeIsolated { body() } }
-        }
-        func finish() {
-            after(0.3) {
-                let shown = WindowList.onScreen().contains { $0.number == number }
-                completion(shown ? nil : "it stayed on desktop \(space)")
-            }
-        }
-
-        Spaces.switchTo(space, on: home) { result in
-            if case .failure(let error) = result { completion(error.reason); return }
-            guard let window = ax() else { completion("accessibility cannot reach it"); return }
-            if window.isMinimized { window.isMinimized = false }
-            if let via {
-                let size = CGSize(width: min(rect.width, via.visibleFrame.width), height: min(rect.height, via.visibleFrame.height))
-                window.setCocoaFrame(CGRect(x: via.visibleFrame.midX - size.width / 2, y: via.visibleFrame.midY - size.height / 2,
-                                            width: size.width, height: size.height))
-            } else {
-                window.setCocoaFrame(rect)
-            }
-            after(0.3) {
-                guard let origin else { finish(); return }
-                Spaces.switchTo(origin, on: home) { _ in
-                    if via != nil { ax()?.setCocoaFrame(rect) }
-                    finish()
+        let world = DesktopFetch.World(
+            showing: {
+                let monitors = Spaces.monitors()
+                return screens.map { Spaces.monitor(for: $0, in: monitors)?.currentIndex }
+            },
+            displayName: { screens.indices.contains($0) ? screens[$0].localizedName : "display \($0 + 1)" },
+            switchTo: { desktop, display, done in Spaces.switchTo(desktop, on: screens[display], completion: done) },
+            reach: {
+                guard let window = AllSpacesWindows.axWindows(pid: pid, wanted: [number]).first(where: { $0.number == number })?.window
+                else { return nil }
+                return { frame in
+                    if window.isMinimized { window.isMinimized = false }
+                    window.setCocoaFrame(frame)
                 }
-            }
-        }
+            },
+            isOnScreen: { WindowList.onScreen().contains { $0.number == number } },
+            after: { seconds, body in
+                DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { MainActor.assumeIsolated { body() } }
+            })
+        DesktopFetch.run(DesktopFetch.Request(home: from, desktop: space, target: job.rect, via: via),
+                         world: world, completion: completion)
     }
 
     /// The window the plan chose, when accessibility can reach it here.

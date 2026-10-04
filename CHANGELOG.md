@@ -60,7 +60,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   (Messages, Signal, Slack…) has its window fetched: MacHUD shows that desktop, brings the window
   over and switches back, the one time an apply switches desktops with the setting off. When it
   cannot (one display, the switch fails), the window is left where it is and the toast names the
-  app. Windows on another display are still moved over, and minimised ones restored.
+  app. Every display is switched back to the desktop it showed whatever goes wrong; if one cannot
+  be, the toast says which desktop it was left on and the rest of that screen is not arranged. Windows on another display are still moved over, and minimised ones restored.
   `spaces.policy` in layouts.json applies only with the setting on.
 - An app can open another window when its menus have a **New Window** item (or "New Finder
   Window", Mail's "New Viewer Window" and the like), which MacHUD presses, not when it merely has

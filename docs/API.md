@@ -195,7 +195,15 @@ desktop that is not showing:
   joins that display's showing desktop), switch back. When it is on the target
   display itself it is parked on another display while that one switches back.
   With a single display macOS 26 offers no way across, so it falls back to
-  `launchNew`.
+  `launchNew`. Which desktop every display shows is noted before the first keystroke
+  (nothing starts when the window's display cannot say), and every display is switched
+  back to it whatever happens, a step failing or a switch stopping part-way included (a second
+  pass follows when any display still differs, and every display is read again before the
+  answer).
+  When a display cannot be switched back the slot fails saying where it was left ("left
+  on desktop 2 of DELL"), and the slots still to be placed on that screen are not placed.
+  The fetches of one screen get 30 s together; one that has not started by then is not
+  fetched (`launchNew` when the app can, else `cannot`).
 - `launchNew`: leave it, and open a new window here without activating the app:
   browsers by Apple event, other apps through their New Window menu item (above).
   Apps without one (Messages, Signal, Notes, …) report `cannot`.
