@@ -163,10 +163,37 @@ final class RadialWheelSnapshotTests: XCTestCase {
         if let directory { print("Wheel snapshots: \(directory.path)") }
     }
 
-    /// The time one frame of a twelve-wedge wheel's words takes to draw at 2x with a button
-    /// lit, and the time its words take to render once: printed for review. The tint is its
-    /// own view, composited by the GPU.
-    func testAFrameOfTwelveWedgesDrawsQuickly() throws {
+    /// How long the wheel takes, offscreen at 2x, printed for review: from a hotkey press to
+    /// its first frame (laying it out, its field, its words) the first time it opens and when it
+    /// opens again, at eight and twelve wedges on a large and a small display; and one frame
+    /// of twelve wedges' words with a button lit.
+    func testHowLongTheWheelTakesToOpenAndToDraw() throws {
+        let displays = [("1440x900", RadialMenu.Display(frame: CGRect(x: 0, y: 0, width: 1440, height: 900),
+                                                        visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 875), primaryHeight: 900)),
+                        ("1024x640", RadialMenu.Display(frame: CGRect(x: 0, y: 0, width: 1024, height: 640),
+                                                        visibleFrame: CGRect(x: 0, y: 0, width: 1024, height: 616), primaryHeight: 640))]
+        for (label, display) in displays {
+            for loadouts in [5, 9] {
+                let wedges = Self.wedges(Self.long, loadouts: loadouts)
+                let menu = RadialMenu()
+                menu.warpPointer = { _ in }
+                let context = try XCTUnwrap(Self.context(size: CGSize(width: 1400, height: 1400)))
+                var times: [Double] = []
+                for _ in 0..<3 {
+                    let start = Date()
+                    menu.prepare(wedges: Self.wedges(Self.long, loadouts: loadouts), at: CGPoint(x: display.frame.midX, y: display.frame.midY),
+                                 on: display, movesPointer: true)
+                    NSGraphicsContext.saveGraphicsState()
+                    NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+                    NSAppearance(named: .darkAqua)?.performAsCurrentDrawingAppearance { menu.wheel.draw(menu.wheel.bounds) }
+                    NSGraphicsContext.restoreGraphicsState()
+                    times.append(Date().timeIntervalSince(start) * 1000)
+                }
+                print(String(format: "Wheel open to first frame, %d wedges on %@: first %.0f ms, then %.0f ms and %.0f ms",
+                             wedges.count, label, times[0], times[1], times[2]))
+            }
+        }
+
         let wedges = Self.wedges(Self.long, loadouts: 9)
         let layout = RadialLayout(wedges: wedges)
         let field = RadialField(layout: layout, reduced: false)
@@ -174,16 +201,12 @@ final class RadialWheelSnapshotTests: XCTestCase {
         view.configure(layout: layout, field: field, wedges: wedges)
         view.settle(selection: .wedge(index: 3, ring: .middle))
         let context = try XCTUnwrap(Self.context(size: field.canvas.size))
-        let graphics = NSGraphicsContext(cgContext: context, flipped: false)
-        let frames = 60
+        let frames = 30
         var elapsed: TimeInterval = 0
         NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = graphics
-        var first: TimeInterval = 0
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
         NSAppearance(named: .darkAqua)?.performAsCurrentDrawingAppearance {
-            let once = Date()
             view.draw(view.bounds)
-            first = Date().timeIntervalSince(once)
             let start = Date()
             for _ in 0..<frames {
                 context.clear(CGRect(origin: .zero, size: field.canvas.size))
@@ -192,8 +215,7 @@ final class RadialWheelSnapshotTests: XCTestCase {
             elapsed = Date().timeIntervalSince(start)
         }
         NSGraphicsContext.restoreGraphicsState()
-        print(String(format: "Wheel at twelve wedges: first frame (rendering the words) %.1f ms, then %.2f ms a frame",
-                     first * 1000, elapsed / Double(frames) * 1000))
+        print(String(format: "Wheel frame at twelve wedges: %.2f ms", elapsed / Double(frames) * 1000))
     }
 
     // MARK: Rendering
@@ -297,7 +319,7 @@ final class RadialWheelSnapshotTests: XCTestCase {
             return blur(p) * (1 - RadialField.rim * u * u * (3 - 2 * u))
         }
         let room = CGRect(x: c.x - a - fade - 8, y: c.y - b - fade - 8, width: 2 * (a + fade + 8), height: 2 * (b + fade + 8)).integral
-        let images = RadialField.images(over: room, blur: blur, tint: tint)
+        let images = RadialField.images(over: room) { p in (blur(p), tint(p)) }
         return (images.0, images.1, images.2)
     }
 

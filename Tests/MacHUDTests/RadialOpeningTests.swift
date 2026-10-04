@@ -106,6 +106,26 @@ final class RadialOpeningTests: XCTestCase {
         XCTAssertNil(on(.zero, []))
     }
 
+    /// A wheel opened again with the same words in the same room reuses its layout; any other
+    /// words (a widgets button that reads Lower now) or room lay it out anew.
+    func testALayoutIsReusedOnlyForTheSameWordsAndRoom() {
+        let menu = menu()
+        let display = Self.displays[1]
+        let at = CGPoint(x: display.frame.midX, y: display.frame.midY)
+        func widgetsButton() -> [String]? { menu.layout.word(.button(7, .inner))?.fit.lines }
+        var wedges = RadialLayoutTests.wedges(8, RadialLayoutTests.short)
+        menu.prepare(wedges: wedges, at: at, on: display, movesPointer: true)
+        XCTAssertEqual(widgetsButton(), ["Reveal"])
+        let first = menu.layout
+        menu.prepare(wedges: wedges, at: at, on: display, movesPointer: true)
+        XCTAssertEqual(menu.layout, first)
+        wedges[7].kind = .widgets(.init(revealed: true))
+        menu.prepare(wedges: wedges, at: at, on: display, movesPointer: true)
+        XCTAssertEqual(widgetsButton(), ["Lower"])
+        menu.prepare(wedges: wedges, at: CGPoint(x: 100, y: 100), on: Self.displays[0], movesPointer: true)
+        XCTAssertLessThan(menu.layout.scale, 1, "the small screen's room")
+    }
+
     /// Screen points (y up from the primary display's bottom) become display points (y down
     /// from its top), which is what moving the pointer takes.
     func testThePointerIsMovedInDisplayPoints() {

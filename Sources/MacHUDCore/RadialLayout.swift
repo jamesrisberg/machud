@@ -24,8 +24,8 @@ import AppKit
 ///
 /// `scale` draws the whole wheel smaller (radii, words and gaps alike), for a screen it would
 /// not otherwise fit (`fitting(_:in:)`).
-struct RadialLayout {
-    struct Word {
+struct RadialLayout: Equatable {
+    struct Word: Equatable {
         enum Role: Hashable {
             case name(Int)
             case button(Int, RadialGeometry.Ring)
@@ -126,15 +126,20 @@ struct RadialLayout {
         // Out until no grown button touches another and each fits its region grown at least
         // `minimumGrow`.
         let dead = Self.deadZone * s
-        var geometry = RadialGeometry(count: count, ringCounts: ringCounts)
+        func rings(_ extra: CGFloat) -> RadialGeometry {
+            let inner = dead + depth[0] + extra
+            return RadialGeometry(count: count, ringCounts: ringCounts, deadZone: dead, innerEdge: inner,
+                                  middleEdge: inner + depth[1], outerEdge: inner + depth[1] + depth[2],
+                                  nameRadius: inner + depth[1] + depth[2] + Self.nameGap * s)
+        }
+        // Each label fitted once: moving the rings out only gives it more room.
+        let labels = Self.fitLabels(wedges, geometry: rings(0), style: labelStyle, room: { ($0 - gap) / grow + 0.01 })
+        var geometry = rings(0)
         var buttons: [Word] = []
         var extra: CGFloat = 0
         for _ in 0..<400 {
-            let inner = dead + depth[0] + extra
-            geometry = RadialGeometry(count: count, ringCounts: ringCounts, deadZone: dead, innerEdge: inner,
-                                      middleEdge: inner + depth[1], outerEdge: inner + depth[1] + depth[2],
-                                      nameRadius: inner + depth[1] + depth[2] + Self.nameGap * s)
-            buttons = Self.buttons(wedges, geometry: geometry, style: labelStyle, room: { ($0 - gap) / grow + 0.01 })
+            geometry = rings(extra)
+            buttons = Self.buttons(labels, geometry: geometry, style: labelStyle)
             let inside = buttons.allSatisfy {
                 Self.inside(Self.grown($0.frame, by: Self.minimumGrow), region: $0.role, geometry: geometry, margin: s)
             }
@@ -207,17 +212,28 @@ struct RadialLayout {
     }
 
     /// Each wedge's buttons; `room` is the width a label may take in a band of the given depth.
-    private static func buttons(_ wedges: [RadialMenu.Wedge], geometry g: RadialGeometry, style: TextFit.Style,
-                                room: (CGFloat) -> CGFloat) -> [Word] {
+    /// Each wedge's ring labels fitted to `room` for their band's depth in `g`, with the size
+    /// of their box.
+    private static func fitLabels(_ wedges: [RadialMenu.Wedge], geometry g: RadialGeometry, style: TextFit.Style,
+                                  room: (CGFloat) -> CGFloat) -> [(role: Word.Role, fit: TextFit, size: CGSize)] {
         wedges.indices.flatMap { i in
-            g.rings(of: i).map { ring -> Word in
+            g.rings(of: i).map { ring -> (role: Word.Role, fit: TextFit, size: CGSize) in
                 let band = g.band(ring, of: i)
-                let room = room(band.r1 - band.r0)
-                let fit = TextFit.fit(RadialMenu.ringLabel(ring, for: wedges[i].kind), style: style, width: room)
-                return Word(role: .button(i, ring), fit: fit, style: style,
-                            frame: box(fit, style: style, centredAt: point((band.r0 + band.r1) / 2, g.centerAngle(of: i))),
-                            align: 0.5, icons: 0)
+                let fit = TextFit.fit(RadialMenu.ringLabel(ring, for: wedges[i].kind), style: style, width: room(band.r1 - band.r0))
+                return (.button(i, ring), fit, box(fit, style: style, centredAt: .zero).size)
             }
+        }
+    }
+
+    /// The fitted labels as buttons, each in the middle of its region in `g`.
+    private static func buttons(_ labels: [(role: Word.Role, fit: TextFit, size: CGSize)], geometry g: RadialGeometry,
+                                style: TextFit.Style) -> [Word] {
+        labels.compactMap { label -> Word? in
+            guard case .button(let i, let ring) = label.role else { return nil }
+            let band = g.band(ring, of: i)
+            let p = point((band.r0 + band.r1) / 2, g.centerAngle(of: i))
+            let frame = CGRect(x: p.x - label.size.width / 2, y: p.y - label.size.height / 2, width: label.size.width, height: label.size.height)
+            return Word(role: label.role, fit: label.fit, style: style, frame: frame, align: 0.5, icons: 0)
         }
     }
 
@@ -353,18 +369,21 @@ struct RadialField {
         }
 
         /// Full inside the shape, falling smoothly to 0 over `fade` outside it.
-        func blur(at p: CGPoint) -> CGFloat {
-            var d = hypot(p.x, p.y) - disc
-            for box in boxes { d = RadialField.smoothMin(d, RadialField.distance(p, to: box) - pad, smoothing) }
-            guard d < fade else { return 0 }
-            let t = max(0, d / fade)
-            return 1 - t * t * t * (t * (t * 6 - 15) + 10)
-        }
+        func blur(at p: CGPoint) -> CGFloat { profiles(at: p).blur }
 
         /// `blur`, weaker by up to `rim` toward the farthest word.
-        func tint(at p: CGPoint) -> CGFloat {
-            let u = min(1, hypot(p.x, p.y) / reach)
-            return blur(at: p) * (1 - RadialField.rim * u * u * (3 - 2 * u))
+        func tint(at p: CGPoint) -> CGFloat { profiles(at: p).tint }
+
+        /// Both profiles at `p`, the shape measured once.
+        func profiles(at p: CGPoint) -> (blur: CGFloat, tint: CGFloat) {
+            let r = hypot(p.x, p.y)
+            var d = r - disc
+            for box in boxes { d = RadialField.smoothMin(d, RadialField.distance(p, to: box) - pad, smoothing) }
+            guard d < fade else { return (0, 0) }
+            let t = max(0, d / fade)
+            let blur = 1 - t * t * t * (t * (t * 6 - 15) + 10)
+            let u = min(1, r / reach)
+            return (blur, blur * (1 - RadialField.rim * u * u * (3 - 2 * u)))
         }
     }
 
@@ -416,7 +435,7 @@ struct RadialField {
         }
         let margin = shape.fade + shape.smoothing
         (support, blurImage, tintImage) = Self.images(over: extent.insetBy(dx: -margin, dy: -margin).integral,
-                                                      blur: shape.blur, tint: shape.tint)
+                                                      profiles: shape.profiles)
     }
 
     func blur(at p: CGPoint) -> CGFloat { shape.blur(at: p) }
@@ -435,10 +454,9 @@ struct RadialField {
     }
 
     /// The blur's and the tint's images (black, alpha the profile), one pixel per `step` points,
-    /// top row first, cropped from `room` to where `blur` is not 0 with two empty pixels around
-    /// it; and the rectangle they cover. `tint` is nowhere stronger than `blur`.
-    static func images(over room: CGRect, blur: (CGPoint) -> CGFloat,
-                       tint: (CGPoint) -> CGFloat) -> (CGRect, CGImage, CGImage) {
+    /// top row first, cropped from `room` to where the blur is not 0 with two empty pixels
+    /// around it; and the rectangle they cover. The tint is nowhere stronger than the blur.
+    static func images(over room: CGRect, profiles: (CGPoint) -> (blur: CGFloat, tint: CGFloat)) -> (CGRect, CGImage, CGImage) {
         let width = max(1, Int((room.width / step).rounded(.up)))
         let height = max(1, Int((room.height / step).rounded(.up)))
         var values = [(blur: CGFloat, tint: CGFloat)](repeating: (0, 0), count: width * height)
@@ -446,10 +464,9 @@ struct RadialField {
         for row in 0..<height {
             let y = room.maxY - (CGFloat(row) + 0.5) * step
             for column in 0..<width {
-                let p = CGPoint(x: room.minX + (CGFloat(column) + 0.5) * step, y: y)
-                let b = blur(p)
-                guard b > 0.5 / 255 else { continue }
-                values[row * width + column] = (b, tint(p))
+                let v = profiles(CGPoint(x: room.minX + (CGFloat(column) + 0.5) * step, y: y))
+                guard v.blur > 0.5 / 255 else { continue }
+                values[row * width + column] = v
                 (left, right, top, bottom) = (min(left, column), max(right, column), min(top, row), max(bottom, row))
             }
         }

@@ -39,6 +39,35 @@ final class RadialMenuWindowTests: XCTestCase {
         }
     }
 
+    /// The words are drawn into their pictures once per layout, backing scale and appearance:
+    /// the same wheel opened again reuses them, new words or another appearance draw them anew.
+    @MainActor
+    func testTheWordsAreDrawnOncePerLayoutScaleAndAppearance() throws {
+        let wedges = RadialLayoutTests.wedges(8, RadialLayoutTests.short)
+        let layout = RadialLayout(wedges: wedges)
+        let field = RadialField(layout: layout, reduced: false)
+        let view = RadialWheelView(frame: CGRect(origin: .zero, size: field.canvas.size))
+        let context = try XCTUnwrap(CGContext(data: nil, width: 64, height: 64, bitsPerComponent: 8, bytesPerRow: 0,
+                                              space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        func open(_ layout: RadialLayout, _ wedges: [RadialMenu.Wedge], appearance: NSAppearance.Name = .darkAqua) {
+            view.appearance = NSAppearance(named: appearance)
+            view.configure(layout: layout, field: field, wedges: wedges)
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+            view.draw(view.bounds)
+            NSGraphicsContext.restoreGraphicsState()
+        }
+        open(layout, wedges)
+        XCTAssertEqual(view.wordRenders, 1)
+        open(RadialLayout(wedges: wedges), RadialLayoutTests.wedges(8, RadialLayoutTests.short))
+        XCTAssertEqual(view.wordRenders, 1, "the same words again")
+        let other = RadialLayoutTests.wedges(8, RadialLayoutTests.long)
+        open(RadialLayout(wedges: other), other)
+        XCTAssertEqual(view.wordRenders, 2, "new words")
+        open(RadialLayout(wedges: other), other, appearance: .aqua)
+        XCTAssertEqual(view.wordRenders, 3, "another appearance")
+    }
+
     /// The view redraws whenever what it shows changes (the selection, the wedges, the
     /// appearance) and while its springs move, and not once they have settled.
     @MainActor
