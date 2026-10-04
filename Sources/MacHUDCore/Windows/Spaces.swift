@@ -267,7 +267,7 @@ enum Spaces {
     /// after any keystroke it typed.
     @MainActor
     static func type(_ shortcut: Shortcut, with typist: Typist,
-                     consent: @escaping (@escaping (Permissions.Status) -> Void) -> Void = Spaces.systemEventsConsent,
+                     consent: @escaping @MainActor (@escaping (Permissions.Status) -> Void) -> Void = Spaces.systemEventsConsent,
                      run: @escaping (String, @escaping (Result<String, AppleScriptRunner.Failure>) -> Void) -> Void
                          = AppleScriptRunner.run,
                      completion: @escaping (Result<Void, SwitchError>) -> Void) {
