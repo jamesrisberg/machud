@@ -28,4 +28,62 @@ final class EnvTests: XCTestCase {
         // Presence, not content, decides: `MACHUD_NO_HOTKEYS=` is set.
         XCTAssertEqual(Env.value("NO_HOTKEYS", in: ["MACHUD_NO_HOTKEYS": ""]), "")
     }
+
+    // MARK: - Where an instance keeps its config
+
+    func testConfigIsTheFileMACHUD_CONFIGNames() {
+        XCTAssertEqual(Env.configURL(in: ["MACHUD_CONFIG": "/tmp/t/layouts.json"]),
+                       URL(fileURLWithPath: "/tmp/t/layouts.json"))
+        XCTAssertEqual(Env.configURL(in: ["MACHUD_CONFIG": "~/t/layouts.json"])?.path,
+                       (NSHomeDirectory() as NSString).appendingPathComponent("t/layouts.json"))
+    }
+
+    func testASocketAloneKeepsTheConfigBesideTheSocket() {
+        XCTAssertEqual(Env.configURL(in: ["MACHUD_SOCKET": "/tmp/machud-try.sock"]),
+                       URL(fileURLWithPath: "/tmp/machud-try-config/layouts.json"))
+        XCTAssertEqual(Env.configURL(in: ["MACHUD_SOCKET": "/tmp/try"]),
+                       URL(fileURLWithPath: "/tmp/try-config/layouts.json"), "no extension to drop")
+        XCTAssertEqual(Env.configURL(in: ["MACHUD_SOCKET": "/tmp/a.b.sock"]),
+                       URL(fileURLWithPath: "/tmp/a.b-config/layouts.json"), "only the last extension goes")
+    }
+
+    func testAConfigWinsOverASocket() {
+        XCTAssertEqual(Env.configURL(in: ["MACHUD_SOCKET": "/tmp/try.sock", "MACHUD_CONFIG": "/tmp/own/layouts.json"]),
+                       URL(fileURLWithPath: "/tmp/own/layouts.json"))
+    }
+
+    func testNeitherNamesNoConfig() {
+        XCTAssertNil(Env.configURL(in: [:]), "the real instance uses the home folder's")
+        XCTAssertNil(Env.configURL(in: ["MACHUD_NO_HOTKEYS": "1", "OTHER_SOCKET": "/tmp/x.sock"]))
+        XCTAssertNil(Env.configURL(in: ["MACHUD_SOCKET": ""]), "an empty socket names no place")
+    }
+
+    func testEveryIsolatedInstanceHasAConfigOfItsOwn() {
+        for isolated in [["MACHUD_SOCKET": "/tmp/t.sock"], ["MACHUD_CONFIG": "/tmp/t/layouts.json"]] {
+            XCTAssertTrue(Env.isIsolated(in: isolated))
+            XCTAssertNotNil(Env.configURL(in: isolated), "\(isolated) must not fall through to ~/.config/machud")
+        }
+    }
+}
+
+/// The path of `layouts.json`: the real instance's under the home folder, an isolated one's
+/// anywhere but there.
+final class ConfigLocationTests: XCTestCase {
+    private let home = URL(fileURLWithPath: "/Users/someone")
+
+    func testTheRealInstanceKeepsItsConfigUnderTheHomeFolder() {
+        XCTAssertEqual(LayoutStore.defaultConfigURL(environment: [:], home: home).path,
+                       "/Users/someone/.config/machud/layouts.json")
+    }
+
+    func testAnInstanceStartedWithOnlyASocketNeverTouchesTheHomeConfig() {
+        let url = LayoutStore.defaultConfigURL(environment: ["MACHUD_SOCKET": "/tmp/machud-try.sock"], home: home)
+        XCTAssertEqual(url.path, "/tmp/machud-try-config/layouts.json")
+        XCTAssertFalse(url.path.hasPrefix(home.path))
+    }
+
+    func testAConfigNamedExplicitlyIsUsedAsGiven() {
+        let environment = ["MACHUD_SOCKET": "/tmp/try.sock", "MACHUD_CONFIG": "/tmp/own/layouts.json"]
+        XCTAssertEqual(LayoutStore.defaultConfigURL(environment: environment, home: home).path, "/tmp/own/layouts.json")
+    }
 }

@@ -400,8 +400,8 @@ MACHUD_SOCKET=/tmp/machud-try.sock scripts/machud quit
 
 | Variable | Effect |
 | --- | --- |
-| `MACHUD_SOCKET` | Control socket path |
-| `MACHUD_CONFIG` | `layouts.json` path; the dock publishes to `docks.json` beside it |
+| `MACHUD_SOCKET` | Control socket path. Without `MACHUD_CONFIG` the config lives beside it, in `<socket path without extension>-config/layouts.json`: an instance started with only a socket never reads or saves `~/.config/machud` |
+| `MACHUD_CONFIG` | `layouts.json` path; the `state/` folder, `docks.json` (where the dock publishes) and `host.json` sit beside it |
 | `MACHUD_NO_HOTKEYS` | Register no global hotkeys and do not watch window drags |
 | `MACHUD_DRAG` | With `MACHUD_NO_HOTKEYS`, watch drags anyway. Do not use while another instance runs: both react to the same drag |
 | `MACHUD_DOCKS_FILE` | Where the tool dock publishes its frames |

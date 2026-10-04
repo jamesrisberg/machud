@@ -58,7 +58,8 @@ Nothing talks to a remote backend. What is shared across worktrees on this Mac:
 - The live MacHUD (the dev build `build/MacHUD.app`) and its socket, config (`~/.config/machud`)
   and UserDefaults domain (`com.jrisberg.machud`). A test instance must set
   `MACHUD_SOCKET` and `MACHUD_CONFIG`, and must not run `settings set`, since it shares
-  the UserDefaults domain.
+  the UserDefaults domain. With only `MACHUD_SOCKET` its config lives beside the socket, in
+  `<socket path without extension>-config/layouts.json`, never in `~/.config/machud`.
 - The user's real windows and apps. An isolated instance still drives them through
   Accessibility: `apply`, `capture`, `clear`, `park`, `place`, previews and the editor act on
   the live desktop. Tests and lanes must not capture or apply against them; use unit tests

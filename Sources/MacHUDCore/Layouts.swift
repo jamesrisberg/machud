@@ -451,8 +451,14 @@ struct Config: Codable, Equatable {
 final class LayoutStore {
     /// Config directory under the home folder; `state/` (parking) lives inside it.
     static let configSubpath = ".config/machud"
-    static let configURL: URL = Env.configURL ?? FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(configSubpath).appendingPathComponent("layouts.json")
+    static let configURL: URL = defaultConfigURL()
+    /// `layouts.json` for an environment: an isolated instance's (`Env.configURL`), else under
+    /// the home folder.
+    static func defaultConfigURL(environment: [String: String] = ProcessInfo.processInfo.environment,
+                                 home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
+        Env.configURL(in: environment)
+            ?? home.appendingPathComponent(configSubpath).appendingPathComponent("layouts.json")
+    }
     static let configDirectory = configURL.deletingLastPathComponent()
 
     private(set) var config: Config = .defaults

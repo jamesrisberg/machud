@@ -11,8 +11,19 @@ enum Env {
         environment[prefix + name]
     }
 
-    static var configURL: URL? {
-        value("CONFIG").map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
+    /// Where an isolated instance keeps its `layouts.json` (and the state and files beside it):
+    /// `MACHUD_CONFIG`, else `<socket path without extension>-config/layouts.json` beside its
+    /// `MACHUD_SOCKET`, as the voice socket and the diagnostics folder sit beside it. nil for the
+    /// real instance, which keeps its config under the home folder. An instance started with
+    /// only a socket must never read or save the real one's.
+    static var configURL: URL? { configURL(in: ProcessInfo.processInfo.environment) }
+    static func configURL(in environment: [String: String]) -> URL? {
+        if let config = value("CONFIG", in: environment) {
+            return URL(fileURLWithPath: (config as NSString).expandingTildeInPath)
+        }
+        guard let socket = value("SOCKET", in: environment), !socket.isEmpty else { return nil }
+        return URL(fileURLWithPath: (socket as NSString).deletingPathExtension + "-config", isDirectory: true)
+            .appendingPathComponent("layouts.json")
     }
     static var socketPath: String? { value("SOCKET") }
     static var noHotkeys: Bool { value("NO_HOTKEYS") != nil }

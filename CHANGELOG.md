@@ -99,6 +99,9 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   with "opened its new window on another desktop".
 - `machud apply loadout=… screen=<display>` with a display that is not attached says so instead
   of arranging the screen under the pointer.
+- A copy of MacHUD started with only `MACHUD_SOCKET` (for tests) keeps its config, state and dock
+  registry beside the socket, in `<socket path without extension>-config/`, instead of reading and
+  saving `~/.config/machud`. `MACHUD_CONFIG` still names the file when it is set.
 - With multi-desktop loadouts on, the wheel says how many desktops a captured multi-desktop
   loadout covers (it said none).
 - After the first capture, onboarding points to the menu item that edits it (Loadouts › its name ›
