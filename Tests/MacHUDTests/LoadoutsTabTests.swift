@@ -508,7 +508,8 @@ final class LoadoutsTabTests: XCTestCase {
     // MARK: - Snapshots
 
     /// Renders the settings window on the Loadouts tab offscreen (never on screen) into
-    /// `MACHUD_LOADOUTS_SNAPSHOT_DIR`, else a temporary folder. With multi-desktop loadouts on:
+    /// `MACHUD_LOADOUTS_SNAPSHOT_DIR`, else a temporary folder removed when the test ends. With
+    /// multi-desktop loadouts on:
     /// the two-display, two-desktop loadout on each desktop, a one-screen one, the HUD-only one,
     /// the delete question, the rename field and the empty tab.
     func testSnapshots() throws {
@@ -562,10 +563,20 @@ final class LoadoutsTabTests: XCTestCase {
         try assertNotBlank(files)
     }
 
-    private var snapshotDirectory: URL {
+    /// `MACHUD_LOADOUTS_SNAPSHOT_DIR`: where the pictures are kept for review.
+    private var keptSnapshotDirectory: URL? {
         ProcessInfo.processInfo.environment["MACHUD_LOADOUTS_SNAPSHOT_DIR"].map { URL(fileURLWithPath: $0) }
-            ?? FileManager.default.temporaryDirectory.appendingPathComponent("machud-loadouts-snapshots-\(getpid())")
     }
+
+    /// The kept folder, else one of this test's own that is removed when it ends, so a plain
+    /// `swift test` leaves nothing in the temporary directory.
+    private lazy var snapshotDirectory: URL = {
+        if let kept = keptSnapshotDirectory { return kept }
+        let scratch = FileManager.default.temporaryDirectory
+            .appendingPathComponent("machud-loadouts-snapshots-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: scratch) }
+        return scratch
+    }()
 
     private func snapshotWindow(_ harness: Harness) -> (SettingsWindowModel, LoadoutsTabModel) {
         let tab = harness.model()
@@ -598,6 +609,6 @@ final class LoadoutsTabTests: XCTestCase {
             }
             XCTAssertTrue(differs, "\(url.lastPathComponent) is blank")
         }
-        print("Loadouts snapshots: \(snapshotDirectory.path)")
+        if let kept = keptSnapshotDirectory { print("Loadouts snapshots: \(kept.path)") }
     }
 }
