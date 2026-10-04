@@ -966,8 +966,9 @@ replaced since (`From a wake listener stopped or replaced since`), that is not o
 listened for (`Not the wake phrase listened for`) or that comes while another is being confirmed
 (`Another wake is being confirmed`) is refused before anything else: it writes its line and its
 log line and changes nothing, not the reply being spoken, the orb or the listener. So is a wake
-whose phrase is not confirmed (above), and one whose listener was stopped or replaced while it
-was being confirmed (a take started meanwhile, a mute, new settings). A confirmed wake from the
+whose phrase is not confirmed (above). A wake whose listener stops or is replaced while it is
+being confirmed (a take started meanwhile, a mute, new settings) is refused at that moment, with
+that reason and no answer, so the listener started again hears the next one. A confirmed wake from the
 listener running now is refused as any other take start is: the brain off or unable to take a
 turn, or the agent still working (`The agent is still working`), which stops a reply being
 spoken and shows on the orb.

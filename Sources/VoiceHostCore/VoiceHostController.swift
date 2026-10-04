@@ -620,9 +620,13 @@ public final class VoiceHostController: VoiceHostActing {
     /// A detection starts an agent take once its phrase is confirmed (`confirmWake`), or at once
     /// with confirmation off. One that arrives after the listener was told to stop (no listener is
     /// wanted: voice off, muted, the wake word off, a take recording), from a listener stopped or
-    /// replaced since, not of the phrase listened for, or while another is being confirmed is
-    /// refused before anything else: it is journaled and logged and touches nothing, not the
-    /// reply's speech, the orb or the listener running now. Its audio is not kept.
+    /// replaced since, or not of the phrase listened for is refused before anything else: it is
+    /// journaled and logged and touches nothing, not the reply's speech, the orb or the listener
+    /// running now. Its audio is not kept.
+    ///
+    /// The listener makes one detection per arm and a wake being confirmed is decided whenever its
+    /// listener stops or is replaced (`refusePendingWake`), so a detection from the listener running
+    /// now never meets another being confirmed; if one did, it is refused and the listener re-armed.
     private func wakeDetected(_ detection: WakeDetection, current: Bool) {
         let trigger = VoiceTakeTrigger(detection)
         guard let listening = runningWake else {
@@ -632,7 +636,10 @@ public final class VoiceHostController: VoiceHostActing {
         guard TriggerPhrase.normalize(detection.phrase) == TriggerPhrase.normalize(listening.wakePhrase) else {
             return refused(trigger, mode: .agent, reason: Self.otherWakePhrase)
         }
-        guard wakeConfirmation == nil else { return refused(trigger, mode: .agent, reason: Self.wakeBeingConfirmed) }
+        guard wakeConfirmation == nil else {
+            refused(trigger, mode: .agent, reason: Self.wakeBeingConfirmed)
+            return rearmWake()
+        }
         guard settings.wakeConfirm else { return startWakeTake(trigger, run: wakeRun) }
         confirmWake(detection, trigger: trigger)
     }
@@ -667,35 +674,47 @@ public final class VoiceHostController: VoiceHostActing {
         case cannot(String)
     }
 
-    /// The first answer for the wake being confirmed, the time running out included; a later one
-    /// finds it gone. The words decide and go no further. A wake whose phrase is not in them, or
-    /// that could not be checked, is refused and its listener re-armed; one whose listener was
-    /// stopped or replaced meanwhile is refused and touches nothing.
+    /// The first answer for the wake being confirmed, the time running out included; a later one,
+    /// or one for a wake already refused because its listener stopped, finds it gone. The words
+    /// decide and go no further. A wake whose phrase is not in them, or that could not be checked,
+    /// is refused and its listener re-armed.
     private func wakeChecked(_ id: UUID, _ check: WakeCheck) {
         guard let pending = wakeConfirmation, pending.id == id else { return }
         wakeConfirmation = nil
         let confirmed: Bool
         let refusal: String
+        let problem: String?
         switch check {
         case .heard(let words):
             confirmed = TriggerPhrase.transcript(words, contains: pending.phrase)
             refusal = Self.wakeNotConfirmed
-            wakeConfirmProblem = nil
+            problem = nil
         case .cannot(let why):
             confirmed = false
             refusal = why
-            wakeConfirmProblem = why
+            problem = why
         }
-        refreshWakeProblem()
         let trigger = pending.trigger.confirming(confirmed, ms: Int(((now() - pending.startedAt) * 1000).rounded()))
+        // Unreachable while every stop of the listener decides its wake; kept so an answer for an
+        // older listener can never act, or show a problem new settings cleared.
         guard pending.run == wakeRun, runningWake != nil else {
             return refused(trigger, mode: .agent, reason: runningWake == nil ? wakeStopReason : Self.staleWake)
         }
+        wakeConfirmProblem = problem
+        refreshWakeProblem()
         guard confirmed else {
             refused(trigger, mode: .agent, reason: refusal)
             return rearmWake()
         }
         startWakeTake(trigger, run: pending.run)
+    }
+
+    /// The listener the wake being confirmed came from stops or is replaced: the wake is refused
+    /// now, with no answer, so the next detection, from the listener started again, is heard.
+    private func refusePendingWake(_ reason: String) {
+        guard let pending = wakeConfirmation else { return }
+        wakeConfirmation = nil
+        refused(pending.trigger, mode: .agent, reason: reason)
     }
 
     static func message(for failure: WakeConfirmFailure) -> String {
@@ -1309,6 +1328,7 @@ public final class VoiceHostController: VoiceHostActing {
         let wanted = wakeWanted && take == nil && wakeModel?.store.status.installed == true ? settings.voice : nil
         guard wanted != runningWake else { return }
         if runningWake != nil {
+            refusePendingWake(wanted == nil ? wakeStopReason : Self.staleWake)
             wakeRun += 1
             wakeRearming = false
             wake.stop()
@@ -1325,8 +1345,10 @@ public final class VoiceHostController: VoiceHostActing {
         startWake(wake, wanted)
     }
 
-    /// Every start of the listener begins a run of its own.
+    /// Every start of the listener begins a run of its own; a wake still being confirmed from an
+    /// earlier one (a listener that failed meanwhile) is refused.
     private func startWake(_ wake: WakeDriving, _ settings: VoiceSettings) {
+        refusePendingWake(Self.staleWake)
         wakeRun += 1
         wakeRearming = false
         wake.start(settings)

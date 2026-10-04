@@ -1117,46 +1117,151 @@ final class VoiceHostControllerTests: XCTestCase {
                        "no confirmation recorded")
     }
 
-    /// A take started by the orb, a mute or new settings while a wake is confirmed: the answer
-    /// finds the listener it came from gone and starts nothing.
-    func testAWakeConfirmedAfterItsListenerStoppedStartsNothing() {
+    /// After a wake is decided, whatever the outcome, a take records or the listener listens,
+    /// unless the wake word is meant to be off (voice off, muted, the wake word off).
+    private func assertTheWakeWordIsNotDeaf(_ controller: VoiceHostController, file: StaticString = #filePath,
+                                            line: UInt = #line) {
+        let off = !controller.settings.enabled || controller.state.muted || !controller.settings.voice.wakeWordEnabled
+        XCTAssertTrue(off || dictation.isCapturing || (wake.listening && !wake.woke && controller.state.wakeListening),
+                      "neither a take recording nor the listener listening", file: file, line: line)
+    }
+
+    /// A take started by the orb while a wake is confirmed stops the listener: the wake is refused
+    /// then, without waiting for its answer, which changes nothing when it comes.
+    func testAWakeBeingConfirmedWhenATakeStartsIsRefusedThen() {
         var settings = VoiceHostSettings()
         settings.voice.wakeWordEnabled = true
         let controller = makeController(settings)
         confirmer.immediate = nil
         wake.detect(score: 0.8)
         controller.perform(.orbClicked)
+        XCTAssertEqual(journal.records.last?.reason, VoiceHostController.takeRecording)
+        XCTAssertEqual(journal.records.last?.trigger, .wake(score: 0.8, phrase: "Hey Jarvis", frames: 2, peak: 0.8),
+                       "decided without an answer")
         confirmer.answer("hey jarvis")
         XCTAssertEqual(dictation.starts, [.caller], "only the orb's take")
         XCTAssertEqual(controller.state.phase, .listening(.agent))
-        XCTAssertEqual(journal.records.last?.reason, VoiceHostController.takeRecording)
-        XCTAssertEqual(journal.records.last?.trigger,
-                       .wake(score: 0.8, phrase: "Hey Jarvis", frames: 2, peak: 0.8, confirmed: true, confirmMs: 0))
+        XCTAssertEqual(journal.records.count, 1)
+        assertTheWakeWordIsNotDeaf(controller)
         controller.perform(.cancel)
-
-        wake.detect(score: 0.81)
-        controller.perform(.setMuted(true))
-        controller.perform(.setMuted(false))
-        let rearms = wake.rearms.count
-        confirmer.answer("hey jarvis")
-        XCTAssertEqual(dictation.starts, [.caller])
-        XCTAssertEqual(journal.records.last?.reason, VoiceHostController.staleWake, "the listener was started again since")
-        XCTAssertEqual(wake.rearms.count, rearms, "the listener running now is left alone")
-        XCTAssertTrue(controller.state.wakeListening)
+        assertTheWakeWordIsNotDeaf(controller)
     }
 
-    func testOneWakeIsConfirmedAtATime() {
+    /// A mute and unmute while a wake is confirmed: that wake is refused when the listener stops,
+    /// and the next one, from the listener started again, is confirmed and heard.
+    func testAWakeAfterAMuteWhileAnotherWasConfirmedIsHeard() {
         var settings = VoiceHostSettings()
         settings.voice.wakeWordEnabled = true
         let controller = makeController(settings)
-        defer { withExtendedLifetime(controller) {} }
         confirmer.immediate = nil
         wake.detect(score: 0.8)
+        controller.perform(.setMuted(true))
+        XCTAssertEqual(journal.records.map(\.reason), [VoiceHostController.voiceMuted])
+        controller.perform(.setMuted(false))
+        assertTheWakeWordIsNotDeaf(controller)
         wake.detect(score: 0.9)
-        XCTAssertEqual(confirmer.heard.count, 1)
-        XCTAssertEqual(journal.records.map(\.reason), [VoiceHostController.wakeBeingConfirmed])
+        XCTAssertEqual(confirmer.heard.count, 2, "the second wake goes to the speech model too")
+        confirmer.answer("hey jarvis")
+        XCTAssertTrue(dictation.starts.isEmpty, "the first answer finds its wake decided")
         confirmer.answer("hey jarvis")
         XCTAssertEqual(dictation.starts, [.caller])
+        XCTAssertEqual(journal.records.map(\.reason), [VoiceHostController.voiceMuted])
+        assertTheWakeWordIsNotDeaf(controller)
+    }
+
+    /// New settings while a wake is confirmed replace the listener: that wake is refused then, and
+    /// the next one is heard.
+    func testAWakeAfterNewSettingsWhileAnotherWasConfirmedIsHeard() {
+        var settings = VoiceHostSettings()
+        settings.voice.wakeWordEnabled = true
+        let controller = makeController(settings)
+        confirmer.immediate = nil
+        wake.detect(score: 0.8)
+        settings.voice.wakeThreshold = 0.6
+        controller.apply(settings)
+        XCTAssertEqual(journal.records.map(\.reason), [VoiceHostController.staleWake])
+        assertTheWakeWordIsNotDeaf(controller)
+        wake.detect(score: 0.9)
+        confirmer.answer("hey jarvis")
+        confirmer.answer("Hey Javier")
+        XCTAssertTrue(dictation.starts.isEmpty)
+        XCTAssertEqual(journal.records.map(\.reason), [VoiceHostController.staleWake, VoiceHostController.wakeNotConfirmed])
+        assertTheWakeWordIsNotDeaf(controller)
+        wake.detect(score: 0.95)
+        confirmer.answer("hey jarvis")
+        XCTAssertEqual(dictation.starts, [.caller])
+        assertTheWakeWordIsNotDeaf(controller)
+    }
+
+    /// Confirmation turned off while a wake is confirmed: that wake is still decided by its answer;
+    /// the next one starts its take at once.
+    func testTurningConfirmationOffWhileAWakeIsConfirmed() {
+        var settings = VoiceHostSettings()
+        settings.voice.wakeWordEnabled = true
+        let controller = makeController(settings)
+        confirmer.immediate = nil
+        wake.detect(score: 0.8)
+        settings.wakeConfirm = false
+        controller.apply(settings)
+        XCTAssertTrue(journal.records.isEmpty, "the listener did not change")
+        confirmer.answer("Hey Javier")
+        XCTAssertEqual(journal.records.map(\.reason), [VoiceHostController.wakeNotConfirmed])
+        assertTheWakeWordIsNotDeaf(controller)
+        wake.detect(score: 0.9)
+        XCTAssertEqual(confirmer.heard.count, 1, "not confirmed any more")
+        XCTAssertEqual(dictation.starts, [.caller])
+        assertTheWakeWordIsNotDeaf(controller)
+    }
+
+    /// A timeout or a failure for a wake whose listener was replaced brings back no problem the
+    /// new settings cleared.
+    func testALateAnswerForAReplacedListenerShowsNoProblem() {
+        var settings = VoiceHostSettings()
+        settings.voice.wakeWordEnabled = true
+        let controller = makeController(settings)
+        confirmer.immediate = nil
+        wake.detect()
+        settings.voice.wakeThreshold = 0.6
+        controller.apply(settings)
+        clock.advance(to: VoiceHostController.wakeConfirmTimeout)
+        confirmer.answer(.failure(.failed))
+        XCTAssertNil(controller.state.wakeProblem)
+        XCTAssertEqual(journal.records.map(\.reason), [VoiceHostController.staleWake])
+        assertTheWakeWordIsNotDeaf(controller)
+    }
+
+    /// Whatever became of a wake, the wake word listens again (or a take records).
+    func testTheWakeWordListensAgainAfterEveryKindOfDecision() async {
+        var settings = VoiceHostSettings()
+        settings.voice.wakeWordEnabled = true
+        let controller = makeController(settings)
+        // Confirmed: a take records; after it, the listener listens.
+        wake.detect()
+        assertTheWakeWordIsNotDeaf(controller)
+        controller.perform(.stop)
+        dictation.finish("")
+        assertTheWakeWordIsNotDeaf(controller)
+        // Not confirmed, and cannot be confirmed.
+        for answer: Result<String, WakeConfirmFailure> in [.success("hey javier"), .failure(.noModel), .failure(.loading)] {
+            confirmer.immediate = answer
+            wake.detect()
+            assertTheWakeWordIsNotDeaf(controller)
+        }
+        // No answer in time.
+        confirmer.immediate = nil
+        clock.now = 100
+        wake.detect()
+        clock.advance(to: 100 + VoiceHostController.wakeConfirmTimeout)
+        assertTheWakeWordIsNotDeaf(controller)
+        // Confirmed and refused: the agent is still working.
+        confirmer.immediate = .success("hey jarvis")
+        brain.push(status: "running", requestId: "other")
+        wake.detect()
+        XCTAssertEqual(controller.state.phase, .failed(VoiceHostController.agentBusy))
+        assertTheWakeWordIsNotDeaf(controller)
+        // Refused as stale, from a listener replaced since.
+        wake.detect(current: false)
+        assertTheWakeWordIsNotDeaf(controller)
     }
 
     func testAWakeBeingConfirmedWhenTheHostQuitsIsJournaled() {
