@@ -492,15 +492,15 @@ final class WakeWordTests: XCTestCase {
     }
 
     /// A detection on its way from a listener when new settings replace it reaches the host marked
-    /// as not from the listener running now.
+    /// as not from the listener running now. The chunk's scoring is queued before the replaced
+    /// listener's stop, so the detection is made before that listener knows it was stopped.
     func testADetectionInFlightFromAReplacedListenerIsNotCurrent() async throws {
-        let first = GatedWakeDetector()
-        var detectors: [GatedWakeDetector] = []
+        var detectors: [ScriptedWakeDetector] = []
         var sources: [FakeWakeSource] = []
         let listener = WakeWordListener(
             modelsRoot: directory,
             makeDetector: { _, _ in
-                let detector = detectors.isEmpty ? first : GatedWakeDetector()
+                let detector = ScriptedWakeDetector()
                 detectors.append(detector)
                 return detector
             },
@@ -512,9 +512,8 @@ final class WakeWordTests: XCTestCase {
         settings.wakePhrase = "Hey Jarvis"
         listener.start(settings)
         await waitUntil { sources.first?.running == true }
+        detectors[0].next = WakeDetection(score: 0.9, phrase: "Hey Jarvis", frames: 2)
         sources[0].send(Array(repeating: 0.5, count: 1600))
-        await waitUntil { first.isWaiting }
-        first.fire(WakeDetection(score: 0.9, phrase: "Hey Jarvis", frames: 2))
         settings.wakeThreshold = 0.6
         listener.start(settings)
         await waitUntil { !wakes.isEmpty }
@@ -523,9 +522,8 @@ final class WakeWordTests: XCTestCase {
 
         // The listener running now is current.
         await waitUntil { sources.count == 2 && sources[1].running }
+        detectors[1].next = WakeDetection(score: 0.8, phrase: "Hey Jarvis", frames: 2)
         sources[1].send(Array(repeating: 0.5, count: 1600))
-        await waitUntil { detectors[1].isWaiting }
-        detectors[1].fire(WakeDetection(score: 0.8, phrase: "Hey Jarvis", frames: 2))
         await waitUntil { wakes.count == 2 }
         XCTAssertEqual(wakes.last?.current, true)
     }
@@ -624,29 +622,21 @@ private final class FakeWakeEngine: WakeScoringEngine, @unchecked Sendable {
     }
 }
 
-/// A detector that answers each chunk only when told: `fire` hands over a detection.
+/// A detector that answers the next chunk with `next`, at once, and every other with nothing.
 @MainActor
-private final class GatedWakeDetector: WakeDetector {
-    private var waiting: CheckedContinuation<WakeDetection?, Never>?
-    var isWaiting: Bool { waiting != nil }
+private final class ScriptedWakeDetector: WakeDetector {
+    var next: WakeDetection?
 
     func arm(threshold: Double, frames: Int) async throws -> WakeDetectorInfo {
         WakeDetectorInfo(phrase: "Hey Jarvis", model: "fake")
     }
 
     func detect(_ samples: [Float]) async throws -> WakeDetection? {
-        await withCheckedContinuation { waiting = $0 }
+        defer { next = nil }
+        return next
     }
 
-    func disarm() async { answer(nil) }
-
-    func fire(_ detection: WakeDetection) { answer(detection) }
-
-    private func answer(_ detection: WakeDetection?) {
-        let continuation = waiting
-        waiting = nil
-        continuation?.resume(returning: detection)
-    }
+    func disarm() async {}
 }
 
 /// The microphone, as the wake listener sees it.
