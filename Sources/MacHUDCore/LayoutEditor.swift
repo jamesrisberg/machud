@@ -162,6 +162,18 @@ struct RectSpring {
 
 // MARK: - Glass panel (floating toolbar)
 
+extension HUDGlassView.Style {
+    /// `.panel` on the classic frosted material, for a panel inside a screen-sized clear window
+    /// that dims the desktop (the layout editor, the loadout preview). The family's backdrop is
+    /// the window server's blur of the whole window, which there would blur the desktop the
+    /// overlay exists to show; the classic material blurs only the panel.
+    static var overlayPanel: HUDGlassView.Style {
+        var style = HUDGlassView.Style.panel
+        style.material = .visualEffect
+        return style
+    }
+}
+
 /// Frosted, draggable container. Clicks on its own background start a drag;
 /// clicks on embedded controls go to the controls.
 final class GlassPanel: HUDGlassView {
@@ -171,7 +183,7 @@ final class GlassPanel: HUDGlassView {
     private var lastPoint: CGPoint = .zero
 
     init(frame: NSRect) {
-        super.init(frame: frame, style: .panel)
+        super.init(frame: frame, style: .overlayPanel)
     }
 
     required init?(coder: NSCoder) { fatalError() }
