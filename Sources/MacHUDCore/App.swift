@@ -215,12 +215,7 @@ extension AppDelegate {
             store?.config.startupLoadout.flatMap { store?.loadout(named: $0) }
         }, isRunning: { [weak supervisor] id in !(supervisor?.livePIDs(id).isEmpty ?? true) },
            isReachable: { [weak supervisor] id in supervisor?.record(id)?.health == .running },
-           apply: { [weak engine] loadout in
-            NSLog("MacHUD: applying startup loadout '%@'", loadout.name)
-            engine?.apply(loadout, clear: false) { report in
-                NSLog("MacHUD: startup loadout '%@': %@", loadout.name, "\(report.json)")
-            }
-        })
+           apply: { [weak engine] loadout in engine?.applyAutomatically(loadout, .startup) })
         startup.start()
         self.startup = startup
     }
@@ -261,7 +256,7 @@ extension AppDelegate {
         control.register("edit") { [weak self] args, done in
             guard let self else { done(["ok": false, "error": "app gone"]); return }
             if let name = args["loadout"] {
-                guard self.store.loadout(named: name) != nil else { done(["ok": false, "error": "no such loadout"]); return }
+                if let refusal = self.engine.editRefusal(loadout: name) { done(refusal); return }
                 LoadoutMenu.shared?.editLoadout?(name)
             } else if ["1", "true", "yes"].contains((args["new"] ?? "0").lowercased()) {
                 LoadoutMenu.shared?.openNewLayout?()
@@ -271,15 +266,8 @@ extension AppDelegate {
             done(["ok": true])
         }
         control.register("apply") { [weak self] args, done in
-            guard let self, let name = args["loadout"], let loadout = self.store.loadout(named: name) else {
-                done(["ok": false, "error": "no such loadout"]); return
-            }
-            let clear = ["1", "true", "yes"].contains((args["clear"] ?? "0").lowercased())
-            let screen = args["screen"].flatMap { ScreenRef.parse($0)?.resolve() }
-            if ["1", "true", "yes"].contains((args["plan"] ?? "0").lowercased()) {
-                done(self.engine.planJSON(loadout, screen: screen)); return
-            }
-            self.engine.apply(loadout, clear: clear, screen: screen) { report in done(report.json) }
+            guard let self else { done(["ok": false, "error": "app gone"]); return }
+            self.engine.handleApply(args, done: done)
         }
         control.register("windows") { [weak self] _, done in
             done(["ok": true, "windows": self?.engine.windows().map { $0.json } ?? []])
@@ -548,11 +536,7 @@ extension AppDelegate {
         widgets.configChanged()
         store.pinDisplays()
         guard Env.autoApply, let name = engine.activeLoadout, let loadout = store.loadout(named: name) else { return }
-        engine.apply(loadout, clear: false) { report in
-            NSLog("MacHUD: displays changed, re-applied %@: %d placed, %d failed",
-                  name, report.placed.count, report.failed.count)
-            Toast.show("Displays changed", detail: "Re-applied \(name)")
-        }
+        engine.applyAutomatically(loadout, .displaysChanged)
     }
 }
 

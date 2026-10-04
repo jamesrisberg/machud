@@ -55,8 +55,12 @@ final class LoadoutEngine {
         var actual: [String: CGRect] = [:]
         /// What became of the loadout's `hud` part, if it has one.
         var hud: HUDLoadoutEngine.Report?
+        /// Why the loadout was not applied at all, nothing having moved: it spans desktops or
+        /// displays while that is off (`ExperimentalLoadouts`), or another apply is still running.
+        var refused: String?
 
         var json: [String: Any] {
+            if let refused { return ["ok": false, "loadout": loadout, "error": refused] }
             let hudOK = hud?.apps.values.allSatisfy { $0 == "applied" } ?? true
             var d: [String: Any] = ["ok": failed.isEmpty && hudOK, "loadout": loadout, "placed": placed,
                                     "failed": failed, "cleared": cleared]
@@ -135,6 +139,9 @@ final class LoadoutEngine {
     let panels: PanelRegistry
     /// Name of the most recently applied loadout.
     private(set) var activeLoadout: String?
+    /// The loadout being applied now. One apply runs at a time: two would each record the desktop
+    /// showing and switch back to it, and whichever finished last would win.
+    private(set) var applying: String?
     /// Redirections the most recent apply made, so `status` can report them.
     var redirects: [Redirect] = []
     /// The loadout those redirections belong to.
@@ -240,10 +247,23 @@ final class LoadoutEngine {
     /// Apply `loadout` on `screen` (default: screen under the mouse).
     /// `clear`: minimize every other window (and close MacHUD-owned web windows) first.
     /// A loadout's `hud` part (tool dock and sibling panels) goes after its windows, so it
-    /// has the last word on a sibling panel that is in both.
+    /// has the last word on a sibling panel that is in both. Refused before anything moves
+    /// (`ApplyReport.refused`): a loadout that spans desktops or displays while that is off, and
+    /// any apply while another is still running (never queued).
     func apply(_ loadout: Loadout, clear: Bool, screen: NSScreen? = nil, completion: @escaping (ApplyReport) -> Void) {
+        let refusal = ExperimentalLoadouts.refusal(for: loadout, in: store.config)
+            ?? applying.map { "\($0) is still being applied" }
+        if let refusal {
+            NSLog("MacHUD: not applying '%@': %@", loadout.name, refusal)
+            var report = ApplyReport(loadout: loadout.name)
+            report.refused = refusal
+            completion(report)
+            return
+        }
+        applying = loadout.name
         activeLoadout = loadout.name
         let completion: (ApplyReport) -> Void = { [weak self] report in
+            self?.applying = nil
             completion(report)
             self?.onApplied?(report)
         }
@@ -252,11 +272,21 @@ final class LoadoutEngine {
             applyAcrossScreens(loadout, clear: clear, screen: screen, completion: completion)
             return
         }
-        let applyHUD: (ApplyReport) -> Void = { report in
-            hudEngine.apply(hud) { hudReport in
+        // A sibling that never starts listening would hold its commands, and this apply (with
+        // every later one), for good: the HUD part gets `hudTimeLimit`.
+        let applyHUD: (ApplyReport) -> Void = { [hudTimeLimit] report in
+            let finish = Once<HUDLoadoutEngine.Report> { hudReport in
                 var report = report
                 report.hud = hudReport
                 completion(report)
+            }
+            hudEngine.apply(hud) { finish.give($0) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + hudTimeLimit) {
+                MainActor.assumeIsolated {
+                    var late = HUDLoadoutEngine.Report(dock: hud.dock?.position.rawValue)
+                    for id in (hud.apps ?? [:]).keys { late.apps[id] = "no answer in time" }
+                    finish.give(late)
+                }
             }
         }
         if loadout.allSlots.isEmpty && !clear {
@@ -266,9 +296,87 @@ final class LoadoutEngine {
         }
     }
 
+    /// How long a group's slots may take to be placed once their windows are asked for.
+    var placementTimeLimit: TimeInterval = 15
+    /// How long the sibling apps of a loadout's HUD part may take to answer.
+    var hudTimeLimit: TimeInterval = 30
+
+    /// Passes on the first value only.
+    @MainActor
+    final class Once<Value> {
+        private var body: ((Value) -> Void)?
+        init(_ body: @escaping (Value) -> Void) { self.body = body }
+        func give(_ value: Value) {
+            guard let body else { return }
+            self.body = nil
+            body(value)
+        }
+    }
+
     /// Called after every apply finishes, however it was started (wheel, menu, socket,
     /// startup, a display change): the onboarding's radial practice waits for it.
     var onApplied: ((ApplyReport) -> Void)?
+
+    /// Says what an automatic apply did: a toast, or a recorder in tests.
+    var notify: (_ title: String, _ detail: String?, _ seconds: TimeInterval) -> Void = { title, detail, seconds in
+        Toast.show(title, detail: detail, seconds: seconds)
+    }
+
+    /// An apply nobody asked for just now.
+    enum AutomaticApply {
+        /// `startupLoadout`, about two seconds after launch.
+        case startup
+        /// The active loadout again, after the set of displays changed.
+        case displaysChanged
+    }
+
+    /// Apply `loadout` without `clear` because of `why`, and say so: a refused loadout (one that
+    /// spans desktops or displays while that is off) in one toast, the engine having logged it.
+    func applyAutomatically(_ loadout: Loadout, _ why: AutomaticApply) {
+        if why == .startup { NSLog("MacHUD: applying startup loadout '%@'", loadout.name) }
+        apply(loadout, clear: false) { [weak self] report in
+            guard let self else { return }
+            switch why {
+            case .startup:
+                if let refused = report.refused {
+                    self.notify("Startup loadout not applied", refused, 8)
+                } else {
+                    NSLog("MacHUD: startup loadout '%@': %@", loadout.name, "\(report.json)")
+                }
+            case .displaysChanged:
+                if let refused = report.refused {
+                    self.notify("Displays changed", "Did not re-apply \(loadout.name). \(refused)", 8)
+                } else {
+                    NSLog("MacHUD: displays changed, re-applied %@: %d placed, %d failed",
+                          loadout.name, report.placed.count, report.failed.count)
+                    self.notify("Displays changed", "Re-applied \(loadout.name)", 2.5)
+                }
+            }
+        }
+    }
+
+    /// The `apply` verb (see docs/API.md).
+    func handleApply(_ args: [String: String], done: @escaping ([String: Any]) -> Void) {
+        guard let name = args["loadout"], let loadout = store.loadout(named: name) else {
+            done(["ok": false, "error": "no such loadout"]); return
+        }
+        let yes = ["1", "true", "yes"]
+        let ref = args["screen"].flatMap { ScreenRef.parse($0) }
+        let screen = ref?.resolve()
+        if let ref, screen == nil {
+            done(["ok": false, "error": "no screen matching \(ref.label)"]); return
+        }
+        if yes.contains((args["plan"] ?? "0").lowercased()) {
+            done(planJSON(loadout, screen: screen)); return
+        }
+        apply(loadout, clear: yes.contains((args["clear"] ?? "0").lowercased()), screen: screen) { report in done(report.json) }
+    }
+
+    /// Why `edit loadout=<name>` may not open the editor, as the verb's reply; nil when it may.
+    func editRefusal(loadout name: String) -> [String: Any]? {
+        guard let loadout = store.loadout(named: name) else { return ["ok": false, "error": "no such loadout"] }
+        return ExperimentalLoadouts.refusal(for: loadout, in: store.config).map { ["ok": false, "error": $0] }
+    }
 
     /// Captures and applies loadouts' `hud` part; set by the app once the tool dock exists.
     var hudEngine: HUDLoadoutEngine?
@@ -315,6 +423,18 @@ final class LoadoutEngine {
         var newWindowOnly = false
         /// When the new window was asked for.
         var askedAt: Date?
+        /// Why the slot is still waiting, given at the deadline instead of "timed out".
+        var stalled: String?
+        /// When the app's menus were last walked for a New Window item.
+        private var lastMenuWalk: Date?
+
+        /// Whether the app's menus may be walked now: at most once a second, since a walk is many
+        /// Accessibility calls and the slot is polled every 100 ms.
+        func mayWalkMenu(at now: Date) -> Bool {
+            if let last = lastMenuWalk, now.timeIntervalSince(last) < 1 { return false }
+            lastMenuWalk = now
+            return true
+        }
 
         var z: Int { slot?.stackOrder ?? 0 }
 
@@ -342,6 +462,8 @@ final class LoadoutEngine {
             switch self {
             case .ax(let w):
                 if w.isMinimized { w.isMinimized = false }
+                // A hidden (⌘H) app's window shows again; unhiding does not bring the app forward.
+                if let app = NSRunningApplication(processIdentifier: w.pid), app.isHidden { app.unhide() }
                 w.setCocoaFrame(rect)
             case .own(let w):
                 w.setFrame(rect, display: true)
@@ -369,7 +491,7 @@ final class LoadoutEngine {
     /// each window is placed on the main thread as soon as it shows up.
     func run(_ jobs: [SlotJob], report: ApplyReport, completion: @escaping (ApplyReport) -> Void) {
         var report = report
-        let deadline = Date().addingTimeInterval(15)
+        let deadline = Date().addingTimeInterval(placementTimeLimit)
 
         func finish() {
             browsers.finishOpening()
@@ -430,7 +552,7 @@ final class LoadoutEngine {
             if Date() >= deadline {
                 for job in jobs where !job.done {
                     job.restoreFocus()
-                    report.failed[job.regionID] = "timed out"
+                    report.giveUp(job.regionID, stalled: job.stalled)
                 }
                 finish()
                 return
@@ -539,12 +661,25 @@ final class LoadoutEngine {
             }
             return .waiting
         }
-        // Running but window-less (TextEdit and friends): ask it for one. An app with
-        // no window often has no reachable menu bar either until it is frontmost, so
-        // activate it once and hand focus back as soon as its window is placed.
-        if !job.askedForWindow, let app = running.first {
-            job.askedForWindow = AXWindow.openNewWindow(pid: app.processIdentifier)
-            if !job.askedForWindow, !job.activated {
+        // Running but window-less: the launch above asked it to reopen, which shows a document
+        // app's window (TextEdit); ask by its New Window item too, every poll. ⌘N is never
+        // pressed (in Notes or Mail it makes a note or a message). See `windowlessMove` for
+        // when it is unhidden or brought forward instead.
+        if !job.askedForWindow, let app = running.first, job.mayWalkMenu(at: Date()) {
+            let pid = app.processIdentifier
+            if !app.isHidden {
+                job.askedForWindow = NewWindowMenu.press(pid: pid)
+                if job.askedForWindow { return .waiting }
+            }
+            let windows = app.isHidden || job.activated ? [] : AllSpacesWindows.list().filter { $0.pid == pid }
+            switch Self.windowlessMove(label: job.occupant.label, hidden: app.isHidden, activated: job.activated,
+                                       multiDesktop: store.config.multiDesktopLoadouts,
+                                       windowsOnScreen: windows.map(\.onScreen)) {
+            case .unhide:
+                app.unhide()
+            case .wait(let reason):
+                if let reason { job.stalled = reason }
+            case .activate:
                 job.activated = true
                 job.previousFront = NSWorkspace.shared.frontmostApplication
                 // A freshly launched app can sit there with neither window nor menu
@@ -554,6 +689,28 @@ final class LoadoutEngine {
             }
         }
         return .waiting
+    }
+
+    /// What to do next for a running app that showed no window to place and would not open one
+    /// from its menu. A hidden (⌘H) app is unhidden: its windows are here, and unhiding does not
+    /// bring it forward. Otherwise it is brought forward once, so its menus answer, except, with
+    /// multi-desktop loadouts off, when all its windows are on desktops that are not showing:
+    /// that would show one of them, so its menu is asked again each poll and the slot gives
+    /// `wait`'s reason at the deadline.
+    enum WindowlessMove: Equatable {
+        case unhide
+        case activate
+        case wait(String?)
+    }
+
+    nonisolated static func windowlessMove(label: String, hidden: Bool, activated: Bool, multiDesktop: Bool,
+                                           windowsOnScreen: [Bool]) -> WindowlessMove {
+        if hidden { return .unhide }
+        if activated { return .wait(nil) }
+        if !multiDesktop, !windowsOnScreen.isEmpty, !windowsOnScreen.contains(true) {
+            return .wait("\(label) has windows only on another desktop and would not open one here without coming forward")
+        }
+        return .activate
     }
 
     private func resolveBuiltinWeb(url: String) -> Resolution {
@@ -572,11 +729,15 @@ final class LoadoutEngine {
         return panel
     }
 
-    /// A web page in a browser window. Re-applying a loadout reuses the window
-    /// MacHUD already opened for that url.
+    /// A web page in a browser window. Re-applying a loadout reuses the window MacHUD already
+    /// opened for that url, unless the plan asked for a new one here and that window is on
+    /// another desktop: a new one is opened then.
     private func resolveWeb(_ job: SlotJob, url: String, host: WebHost) -> Resolution {
         browsers.prune()
-        if let existing = browsers.window(url: url) { return .ready(.ax(existing)) }
+        let onScreen = job.newWindowOnly ? Set(WindowList.onScreen().map(\.number)) : []
+        if let existing = browsers.reusable(url: url, newWindowOnly: job.newWindowOnly, onScreen: onScreen) {
+            return .ready(.ax(existing.window))
+        }
         if let reason = browsers.takeFailure(job.regionID) { return .failed(reason) }
         if let kind = BrowserWindow.Kind(host: host) { return resolveBrowserWindow(job, url: url, kind: kind) }
         // `.chromeApp` with Arc or Safari configured as the browser: they have no
@@ -644,7 +805,7 @@ final class LoadoutEngine {
             guard browsers.hasTimedOut(regionID: job.regionID, bundleID: bundleID) else { return .waiting }
             browsers.finishOpening(bundleID: bundleID)
             if NewWindow.isOnAnotherDesktop(job.baseline, bundleID: bundleID) {
-                return .failed("\(browserName) opened \(url) on another desktop")
+                return .failed("\(browserName) opened \(url) on another desktop; it was left there")
             }
             return .failed("\(browserName) opened no window for \(url)")
         }
@@ -880,5 +1041,13 @@ enum Geometry {
     static func matches(_ a: CGRect, _ b: CGRect, tolerance: CGFloat) -> Bool {
         abs(a.minX - b.minX) <= tolerance && abs(a.minY - b.minY) <= tolerance
             && abs(a.width - b.width) <= tolerance && abs(a.height - b.height) <= tolerance
+    }
+}
+
+extension BrowserWindows {
+    /// The window MacHUD opened for `url` that a slot reuses: the newest, and, when the slot was
+    /// planned a new window here, only one on a desktop showing (`onScreen`, window numbers).
+    func reusable(url: String, newWindowOnly: Bool, onScreen: Set<Int>) -> Entry? {
+        entries.last { $0.url == url && (!newWindowOnly || onScreen.contains($0.number)) }
     }
 }

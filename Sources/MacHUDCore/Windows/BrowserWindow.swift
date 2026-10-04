@@ -29,6 +29,10 @@ enum BrowserWindow {
             }
         }
 
+        /// A new window opens on the browser's own desktop (where its other windows are), not on
+        /// the one showing, so it cannot be asked for a window here (`NewWindowClass.single`).
+        var opensNewWindowsOnItsOwnDesktop: Bool { self == .arc }
+
         init?(host: WebHost) {
             switch host {
             case .arc: self = .arc
@@ -174,11 +178,19 @@ enum NewWindow {
         baseline(bundleID: bundleID).contains(number)
     }
 
-    /// True when the browser did open a window but on another desktop — Arc puts a
-    /// new window wherever its own window already is. Accessibility cannot reach a
-    /// window on another desktop, so there is nothing to place until it is switched to.
+    /// True when the app did open a normal window, but on a desktop that is not showing:
+    /// Accessibility cannot reach it there, so there is nothing to place. A popup or tooltip
+    /// (another window layer) does not count.
     static func isOnAnotherDesktop(_ known: Set<Int>, bundleID: String) -> Bool {
-        !baseline(bundleID: bundleID).subtracting(known).isEmpty
+        let pids = Set(NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .filter { !$0.isTerminated }.map(\.processIdentifier))
+        return openedElsewhere(known, windows: AllSpacesWindows.list().filter { pids.contains($0.pid) })
+    }
+
+    /// Whether `windows` (normal windows, as `AllSpacesWindows.list` gives them) hold one that
+    /// is not in `known` and not on a desktop showing.
+    static func openedElsewhere(_ known: Set<Int>, windows: [AllSpacesWindows.Entry]) -> Bool {
+        windows.contains { !known.contains($0.number) && !$0.onScreen }
     }
 
     private static func numbers(bundleID: String, options: CGWindowListOption) -> Set<Int> {
@@ -251,8 +263,6 @@ final class BrowserWindows {
     func add(url: String, host: WebHost, window: AXWindow, number: Int, bundleID: String) {
         entries.append(Entry(url: url, host: host, window: window, number: number, bundleID: bundleID))
     }
-
-    func window(url: String) -> AXWindow? { entries.first { $0.url == url }?.window }
 
     /// The occupant a window on screen came from.
     func entry(number: Int) -> Entry? { entries.first { $0.number == number } }

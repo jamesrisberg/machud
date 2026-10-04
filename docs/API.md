@@ -27,7 +27,7 @@ display). Region geometry in `layouts` is fractions of the screen's visible area
 | `help` | | `commands`: every command the running app accepts |
 | `ping` | | `pid` |
 | `layouts` | | `active` layout name, `layouts[]` with `regions[] {id, name, x, y, w, h}`; each carries `hidden` (true: kept for one loadout, not offered to snap into) |
-| `loadouts` | | `loadouts[]` (full `Loadout` objects: `name`, `layout`, `slots[] {regionID, occupant}`, `hotkey`, `screens?`, `hud?` — see HUD loadouts) and `startup` (the `startupLoadout`, or empty). The editing actions are under [Layouts and loadouts](#layouts-and-loadouts) |
+| `loadouts` | | `loadouts[]` (full `Loadout` objects: `name`, `layout`, `slots[] {regionID, occupant}`, `hotkey`, `screens?`, `hud?` — see HUD loadouts) and `startup` (the `startupLoadout`, or empty). While multi-desktop loadouts are off, loadouts that span several desktops or displays are left out and counted in `heldBack`, with `heldBackNote` saying why (see [One screen, or several](#one-screen-or-several)). The editing actions are under [Layouts and loadouts](#layouts-and-loadouts) |
 | `windows` | | `windows[] {window, pid, bundleID, app, title, x, y, w, h}` for every on-screen user window; windows MacHUD opened also carry `panel`, `web` or `browser` + `host` |
 | `diagnose` | | saves a snapshot of where every MacHUD-family window really is and answers `path` (the file) and `anomalies[]` (what looks wrong, one sentence each); changes nothing on screen or in any setting. See [Diagnostics](#diagnostics) |
 | `status` | `screen=<ref>` (optional) | `layout`, `activeLoadout`, `regions[] {region, name, x, y, w, h, screen, space, occupant?, window?, iou, fits}` — what sits in each region now, plus `redirected[]` when the last apply had to stand in for a missing display |
@@ -35,30 +35,30 @@ display). Region geometry in `layouts` is fractions of the screen's visible area
 | `spaces` | `screen=<ref>` (optional) | desktop count, current desktop, which Mission Control shortcuts are enabled, `privateAPI` |
 | `panels` | | `panels[] {id, title, visible}` — MacHUD's own windows (`web:<url>`), `menubar` and `tooldock`, then sibling apps' panels with `app`, `panel` (the app's own id), `health`, `cooperative`, `mode`, `badge`/`status` when the app reports them, `frames[] {x, y, w, h}` (its on-screen windows on any layer, largest first, parked ones included, its widgets left out), and for a visible panel MacHUD showed, `onScreen` plus `elsewhere` (`"another desktop"` or `"off screen"`) when it is not (see Show verification). External ids are `<app bundle id>/<panel id>` |
 | `apps` | | MacHUD-aware apps found by manifest: `apps[] {id, name, bundle, socket, health, running, reachable, autoLaunch, launchAttempts, panels[], widgets[], manifest, lastError?, duplicates?, outdated?, outdatedReason?, newerCopy?, newerCopyVersion?, newerCopyBuilt?, contract?}` (`panels` are the full ids of its hover and windowed panels, `widgets` the ids of the widget types it serves, `manifest` the app's `machud.json` as MacHUD read it, each panel's `verbs` and `capabilities` included; `autoLaunch` is also true for an app with widgets placed, see Desktop widgets), plus `known[]` (announced bundles), `failures[]` for unreadable manifests and `duplicates {id: [bundle]}` for ids declared by several bundles. `health` is `running` (subscribed), `socketUnreachable`, `launching`, `notRunning` or `notInstalled`. A running app also has `outdated`: the bundle it runs from is newer than the process (rebuilt after the process started, or a different `CFBundleShortVersionString` than its `hello` reported), so a relaunch picks something up; `outdatedReason` says which. `newerCopy` (with `newerCopyVersion` and `newerCopyBuilt`) names another bundle declaring the same id whose build is newer than the one running, for information only: a relaunch restarts the bundle the app runs from and never switches copies. Once it answered `hello` it also has `contract {app, machud, older}` (the HUDKit contracts as `major.minor`; `older` when the app's is behind MacHUD's; MacHUD still talks to it) |
-| `menu` | | radial wheel description: `wedges[] {index, title, digit, angleStart/Center/End, kind, rings[]}` (the ring labels inside out), `rings` (radii), `visible`, current `selection`. A loadout wedge's rings are Preview / Apply / Clear this screen + Apply (P over a loadout wedge previews it too); the capture wedge's are Capture this screen / Capture all screens / Draw a new layout; the park wedge has two: Park front window / Restore parked; while any app serves widgets a Widgets wedge has two: Reveal widgets / Edit widgets |
+| `menu` | | radial wheel description: `wedges[] {index, title, digit, angleStart/Center/End, kind, rings[]}` (the ring labels inside out), `rings` (radii), `visible`, current `selection`. A loadout wedge's rings are Preview / Apply / Clear this screen + Apply (P over a loadout wedge previews it too); the capture wedge's are Capture this screen as a loadout / Draw a new layout, with Capture all screens as a loadout between them while multi-desktop loadouts are on; the park wedge has two: Park front window / Restore parked; while any app serves widgets a Widgets wedge has two: Reveal widgets / Edit widgets |
 
 ## Layouts and loadouts
 
 | Command | Args | Effect |
 | --- | --- | --- |
 | `select-layout` | `name` | make a layout the active one (used for Shift-drag snapping and `status`) |
-| `edit` | `loadout=<name>` or `new=1` (optional) | open the visual layout editor (a drag never opens it; with no layout, Shift-drag offers it in a toast); `loadout` opens it on that loadout's layout (on a per-display loadout, the layout of the display under the mouse) with the loadout selected, `new=1` on a blank layout to draw |
+| `edit` | `loadout=<name>` or `new=1` (optional) | open the visual layout editor (a drag never opens it; with no layout, Shift-drag offers it in a toast); `loadout` opens it on that loadout's layout (on a per-display loadout, the layout of the display under the mouse) with the loadout selected, `new=1` on a blank layout to draw. A loadout that spans several desktops or displays while multi-desktop loadouts are off is refused (`ok: false`, `error`) and the editor stays closed |
 | `loadouts rename` | `name`, `to` | rename a loadout. The layouts a capture made for it alone (hidden ones no other loadout uses, named `<name>`, `<name> · <display>`, …) are renamed with it, and `startupLoadout` follows. Returns `loadout`, `renamedLayouts {old: new}` |
 | `loadouts duplicate` | `name`, `to` (optional, default `<name> copy`) | copy a loadout. The layouts it owns are copied too (new names, new region ids) so the two can be edited apart; shared layouts stay shared. The copy has no hotkey. Returns `loadout`, `addedLayouts[]` |
 | `loadouts delete` | `name` | delete a loadout and the hidden layouts it owns; clears `startupLoadout` if it was this one. Returns `removedLayouts[]` |
-| `loadouts startup` | `name` (omit, or `name=none`, to clear) | set `startupLoadout`, the loadout applied at launch |
+| `loadouts startup` | `name` (omit, or `name=none`, to clear) | set `startupLoadout`, the loadout applied at launch. One that spans several desktops or displays while multi-desktop loadouts are off is refused (it would be refused at launch); `rename`, `duplicate` and `delete` act on it by name as on any other |
 | `reload` | | re-read `~/.config/machud/layouts.json` |
-| `apply` | `loadout`, `clear=1`, `screen=<ref>` (optional) | launch/find each occupant and place it in its region; with `clear`, first minimise the other windows showing on each screen the loadout covers (on the desktops it visits); then the loadout's `hud` part, if any (see HUD loadouts). `screen` picks the display for the one-screen form (default: under the mouse). Returns `placed[]`, `failed{}`, `cleared`, `redirected[]` when a display was missing, `hud {dock?, apps {id: "applied" or why not}}`, and `slots[]`: the plan step per slot plus `result` (`placed`/`failed`), `error`, and `actual` {x, y, w, h} when the app kept a different frame. See [Placement plan](#placement-plan) |
-| `apply` | `loadout`, `plan=1` (+ optional `screen`) | **dry run**: `plan[]` of `{slot, region, occupant, action, from?, to, reason, window?}` without moving anything, plus `policy`, `failed{}` / `redirected[]` for missing displays and layouts |
-| `preview` | `loadout` (default: the active one), `action=show\|apply\|cancel` | draw the plan over every display (regions coloured by action, Apply / Cancel); `apply` / `cancel` answer it. Returns `visible`, `loadout` |
+| `apply` | `loadout`, `clear=1`, `screen=<ref>` (optional) | launch/find each occupant and place it in its region; with `clear`, first minimise the other windows showing on each screen the loadout covers (on the desktops it visits); then the loadout's `hud` part, if any (see HUD loadouts). `screen` picks the display for the one-screen form (default: under the mouse; one that matches no display is an error). A loadout that spans several desktops or displays while multi-desktop loadouts are off is refused before anything moves: `ok: false` and `error` say why. One loadout is applied at a time: while one is being applied, another `apply` (from any surface, the startup loadout or a display change) is refused at once with `error` "<name> is still being applied", never queued. The loadout's HUD part gets 30 s; a sibling that has not answered by then is reported as `no answer in time`. Returns `placed[]`, `failed{}`, `cleared`, `redirected[]` when a display was missing, `hud {dock?, apps {id: "applied" or why not}}`, and `slots[]`: the plan step per slot plus `result` (`placed`/`failed`), `error`, and `actual` {x, y, w, h} when the app kept a different frame. See [Placement plan](#placement-plan) |
+| `apply` | `loadout`, `plan=1` (+ optional `screen`) | **dry run**: `plan[]` of `{slot, region, occupant, action, from?, to, reason, window?}` without moving anything, plus `policy` (`oneScreen`, or `spaces.policy` while multi-desktop loadouts are on), `failed{}` / `redirected[]` for missing displays and layouts. Refused like `apply` |
+| `preview` | `loadout` (default: the active one), `action=show\|apply\|cancel` | draw the plan over every display (regions coloured by action, Apply / Cancel); `apply` / `cancel` answer it. Returns `visible`, `loadout`. Refused like `apply` |
 | `capture` | `name`, optional `screen=<ref>` | **derive a layout from the windows on that screen** (one region per window at the window's exact frame, stacked windows included) and a loadout of the same name that fills it; both are saved and the layout becomes active. Regions of an existing layout with that name are reused where they still match, so editor tweaks survive a recapture. Returns `layout`, `regions`, `slots`, `screen`, `loadout` |
 | `capture` | `name`, `layout=<name>` (+ optional `screen`) | fill only: snapshot which window sits in each region of an existing layout, without touching its regions |
-| `capture` | `name`, `screens=all`, optional `desktops=…` | **derive a layout per display** (and per desktop) from the windows on it: one `ScreenAssignment` per attached display, each with its own layout named `<name> · <display>` (`· Desktop N` when desktops are walked), on that display's current desktop. `desktops=1,3` walks those desktops on every display, `desktops=main:1,2;builtin:1` per display; the desktop that was showing is restored afterwards. A window seen on several desktops (an "all desktops" app) is captured once, on the first desktop it was seen on. Returns `layout`, `regions`, `slots`, `screens[] {screen, layout, regions, slots, space?}`, `loadout` |
-| `capture` | `name`, `desktops=…` (+ optional `screen`) | the same walk on one display |
-| `capture` | `name`, `screens=<layout>@<ref>,<layout>@<ref>` | fill only, one existing layout per display |
+| `capture` | `name`, `screens=all`, optional `desktops=…` | multi-desktop loadouts only (see [One screen, or several](#one-screen-or-several)): **derive a layout per display** (and per desktop) from the windows on it: one `ScreenAssignment` per attached display, each with its own layout named `<name> · <display>` (`· Desktop N` when desktops are walked), on that display's current desktop. `desktops=1,3` walks those desktops on every display, `desktops=main:1,2;builtin:1` per display; the desktop that was showing is restored afterwards. A window seen on several desktops (an "all desktops" app) is captured once, on the first desktop it was seen on. Returns `layout`, `regions`, `slots`, `screens[] {screen, layout, regions, slots, space?}`, `loadout` |
+| `capture` | `name`, `desktops=…` (+ optional `screen`) | multi-desktop loadouts only: the same walk on one display |
+| `capture` | `name`, `screens=<layout>@<ref>,<layout>@<ref>` | multi-desktop loadouts only: fill only, one existing layout per display |
 | `capture` | `name`, `hud=only` | **the HUD only**: the tool dock's position and every running sibling's panels into the loadout `name` (created with no layout or slots if it does not exist; an existing one keeps its windows). Returns `loadout` |
 | `capture` | any of the above plus `hud=1` | the windows as above, then the HUD added to the same loadout; the reply also carries `hud`. Re-capturing windows without `hud=` keeps a loadout's existing `hud` |
-| `spaces` | `action=switch`, `n=<desktop>`, `screen=<ref>` (optional) | switch that display to desktop `n` via the Mission Control shortcuts |
+| `spaces` | `action=switch`, `n=<desktop>`, `screen=<ref>` (optional) | multi-desktop loadouts only: switch that display to desktop `n` via the Mission Control shortcuts |
 | `clear` | | minimise every user window **on every desktop** except MacHUD's own, running sibling apps' (external panels) and hidden apps' |
 | `restore` | | un-minimise everything the last `clear` (or `apply … clear=1`) minimised; returns `restored` |
 | `place` | `window` (CGWindow number from `windows`), `region` (region id, name, or index) | move one window into one region |
@@ -75,7 +75,8 @@ attached and unambiguous; `main`, `builtin` and `index` stay roles.
 
 When the set of attached displays changes (debounced 1 s; resolution and
 arrangement changes do not count), the active loadout is re-applied without
-`clear`.
+`clear`; one that spans several desktops or displays while multi-desktop loadouts are
+off is not, and a toast says so.
 
 Multi-screen loadouts carry `screens[]` instead of (or as well as) the single
 `layout` + `slots` pair, and any slot may name a desktop:
@@ -92,6 +93,30 @@ Multi-screen loadouts carry `screens[]` instead of (or as well as) the single
 
 An assignment's `space` is the desktop the whole assignment belongs to (what a
 capture that walked the desktops writes); a slot's own `space` wins over it.
+
+## One screen, or several
+
+A loadout is one screen: the display under the pointer, on the desktop showing. Loadouts that
+span several displays or desktops (per-display `screens[]`, or a slot that names a desktop), and
+what exists only for them, are experimental: they work only while
+`experimental.multiDesktopLoadouts` is on (MacHUD's settings, Experimental, **Multi-desktop
+loadouts**, or `settings set experimental.multiDesktopLoadouts=true`). It is off by default and
+takes effect at once. While it is off:
+
+- `loadouts` lists only the one-screen loadouts and counts the others in `heldBack`. Nothing
+  is converted or deleted: turning the setting on brings them back. `loadouts startup` refuses
+  one; `rename`, `duplicate` and `delete` still act on it by name.
+- `apply` (and `plan=1`, and the preview) refuses a spanning loadout by name before anything
+  moves, saying how to turn the setting on. The startup loadout and the re-apply after a
+  display change do not run one either; a toast says so.
+- `spaces.policy` is not read, and `apply` switches desktops only to fetch the window of an app
+  that has a single window and cannot open another (see [Placement plan](#placement-plan)).
+- `capture` takes one display, on the desktop showing: the default form, `screen=`, `layout=`
+  and `hud=only` work as described; `screens=all`, `desktops=` and `screens=<layout>@<ref>`
+  answer `ok: false` with an `error` naming the setting. So does any capture, `hud=only`
+  included, into the name of a hidden loadout, which it would replace unseen. `spaces
+  action=switch` is refused too; `spaces`, `screens` and `status` still report the desktops.
+- `edit loadout=` and `preview loadout=` refuse a spanning loadout as `apply` does.
 
 ## Missing displays
 
@@ -118,7 +143,10 @@ An assignment whose display is not attached is not lost. `whenScreenMissing`
 
 Desktop switching drives the Mission Control shortcuts ("Switch to Desktop N",
 else "Move left/right a space"); if both are disabled the slot fails with
-`spacesShortcutDisabled`. An existing window on a desktop that is not showing is
+`spacesShortcutDisabled`. When the system ignores the typed keystroke, System Events types
+it, only if MacHUD may already control System Events (see `permissions`): MacHUD never asks
+in the middle of an apply, and fails with `automationNotAsked` (or `automationDenied`)
+instead. A switch waits for System Events to finish typing before anything else switches. An existing window on a desktop that is not showing is
 handled by `spaces.policy` (next section).
 
 ## Placement plan
@@ -131,7 +159,7 @@ and the preview draws). `action` is one of:
 | `stay` | the window is already in its region |
 | `resize` | same display and desktop: moved/resized in place (or restored from the Dock) |
 | `move` | on another display's showing desktop: moved across |
-| `switchSpace` | a desktop is switched first: the slot's own `space`, or (`bring`) the desktop the window is on |
+| `switchSpace` | a desktop is switched first: the slot's own `space` or (`bring`) the desktop the window is on. With multi-desktop loadouts off, only to fetch a single-window app's window |
 | `launch` | no usable window: launch the app, ask it for a window, or (`launchNew`) open a second one |
 | `leave` | left on its desktop (`spaces.policy: "leave"`) |
 | `cannot` | not placeable; `reason` says why (not installed, single-window app on another desktop, …) |
@@ -141,17 +169,52 @@ desktop on that display. The window used is the one on the target display's
 showing desktop, else on the slot's desktop, else on another display, else a
 minimised one, else one on a hidden desktop.
 
-`spaces.policy` in layouts.json decides what happens to a window on a desktop that
-is not showing:
+While multi-desktop loadouts are off (the default) the plan's `policy` is `oneScreen`: a
+slot's `space` is not read, and neither is `spaces.policy`. An app whose only window is on a
+desktop that is not showing gets a new window here when it can open one (as `launchNew` below).
+A single-window app's window is fetched instead (as `bring` below: `switchSpace`, with the
+reason saying which desktop is shown and how the window comes over); this is the one time an
+apply switches desktops with the setting off. When it cannot be fetched (one display, the
+Mission Control shortcuts that would reach its desktop are off, the switch fails), its slot
+reports `cannot`, naming the app, saying it is on another desktop and why; the plan says so
+before anything moves.
+An app whose windows are all on other desktops and that would not open a window without being
+brought forward is not brought forward (that would show its desktop): its New Window item is
+asked again each poll, and at the placement deadline its step becomes `cannot`, saying why. A
+hidden (⌘H) app's windows are not on another desktop: they are unhidden where they are (which
+does not bring the app forward) and placed, with `unhide it` in the step's reason. A window showing on another display is still moved over, and a minimised one restored.
+Whether an app can open another window: browsers can, except Arc, which opens a new window on its
+own desktop rather than the one showing (an Arc window, or a page in Arc, is fetched); any other app can when its menus hold an
+enabled item titled "New Window" or "New <something> Window" ("New Finder Window", Mail's "New
+Viewer Window"; a private or incognito one only when there is no other), in a menu or one submenu
+down (Xcode's File › New › Window counts as "New Window"; the Window menu's list of open windows
+is not read), and MacHUD presses that item whatever its shortcut. ⌘N is never pressed (in Notes or Mail it makes a note or a message); an app with no
+window at all is asked to reopen, which shows a document app's window. Titles are matched in
+English: under another system language no item matches, so the app counts as single-window and
+its window is fetched.
+
+While they are on, `spaces.policy` in layouts.json decides what happens to a window on a
+desktop that is not showing:
 
 - `bring` (default): show its desktop, move the window to the target display (it
   joins that display's showing desktop), switch back. When it is on the target
   display itself it is parked on another display while that one switches back.
   With a single display macOS 26 offers no way across, so it falls back to
-  `launchNew`.
+  `launchNew`. Which desktop every display shows is noted before the first keystroke
+  (nothing starts when the window's display cannot say), and every display is switched
+  back to it whatever happens, a step failing or a switch stopping part-way included (a second
+  pass follows when any display still differs, and every display is read again before the
+  answer).
+  When a display cannot be switched back the slot fails saying where it was left ("left
+  on desktop 2 of DELL"), and the slots still to be placed on that screen are not placed.
+  The fetches of one screen get 30 s together; one that has not started by then is not
+  fetched (`launchNew` when the app can, else `cannot`).
 - `launchNew`: leave it, and open a new window here without activating the app:
-  browsers by Apple event, apps with a plain ⌘N menu item through that item.
-  Single-window apps (Messages, Signal, Beeper, Slack, Discord, …) report `cannot`.
+  browsers by Apple event, other apps through their New Window menu item (above).
+  Apps without one (Messages, Signal, Notes, Arc, …) report `cannot`. A web page whose window
+  MacHUD opened is on another desktop gets a new window here, not that one. A window MacHUD asked
+  for that opens on another desktop all the same is left there (MacHUD never closes a window),
+  and the slot says so.
 - `leave`: report `leave`.
 
 The apply toast lists every move, desktop switch and launch with its reason, every
@@ -240,7 +303,7 @@ MacHUD also serves the HUDKit contract every MacHUD-aware app implements (see HU
 | `hello` | | `hudkit` version, `app`, `name`, `panels[] {id, title, symbol, ...}`, `verbs` |
 | `state` | | `panels[] {id, visible, mode, badge?, status?}`, sibling panels included |
 | `subscribe` | `events=state` (optional) | keeps the connection open and pushes `{"event": "state", "panels": [...]}` lines whenever a panel changes: through the socket, a hotkey, the menu, its close button, or a sibling app's own push |
-| `settings` | `get [key=]` / `set k=v ...` / `schema` | MacHUD's own settings: `enabled` (bool), `trigger` (shift/option/control/command/always), `gap` (int), `browser` (bundle id, empty = default), `orbsHidden` (bool), `menuBar.enabled` (bool), `menuBar.autoCollapseSeconds` (int, 0 = never), `menuBar.consumeSiblings` (bool, default true). `set` validates every value first; `schema` returns the `HUDSettingsSchema` the settings window renders |
+| `settings` | `get [key=]` / `set k=v ...` / `schema` | MacHUD's own settings: `enabled` (bool), `trigger` (shift/option/control/command/always), `gap` (int), `browser` (bundle id, empty = default), `orbsHidden` (bool), `toolDock.enabled`, `toolDock.position`, `toolDock.autoHide`, `toolDock.iconSize` (int, 24 to 96), `toolDock.magnify`, `hotkeys.loadoutMenu` and `hotkeys.dock` (`control+option+space` form, empty = off), `menuBar.enabled` (bool), `menuBar.autoCollapseSeconds` (int, 0 = never), `menuBar.consumeSiblings` (bool, default true), `experimental.multiDesktopLoadouts` (bool, default false; see [One screen, or several](#one-screen-or-several)). `set` validates every value first; `schema` returns the `HUDSettingsSchema` the settings window renders |
 | `action` | `name=` | no app-specific actions yet |
 
 
@@ -588,13 +651,15 @@ only that (`"layout": ""`, `"slots": []`):
 - **At startup**: `startupLoadout` (layouts.json) names a loadout applied about 2 s after
   launch, as soon as every sibling it names that is already running is listening (at most
   8 s more; apps that are not running are launched by the apply). The Save dialog's "Put
-  it back when MacHUD starts" and each loadout's **Apply at Startup** menu item set it.
+  it back when MacHUD starts" and each loadout's **Apply at Startup** menu item set it. A
+  startup loadout that spans several desktops or displays while multi-desktop loadouts are
+  off is not applied; a toast says so.
 
 ## Settings window
 
 | Command | Args | Effect |
 | --- | --- | --- |
-| `settings-window` | `show\|hide\|toggle\|state`, `tab=<bundle id, name, loadouts, voice, brain or apps>`, `activate=0` | the shared settings window: a tab for MacHUD and each discovered app, plus Loadouts (every loadout with a preview per display and desktop; `state` reports it as `loadouts {selected, desktop, loadouts[] {name, summary, startup, active, screens, desktops, regions, ownedLayouts[], problems[]}}`), Voice and Brain (see Voice; `state` reports them as `voice {status, settings?}`) and Apps (see App catalog; `state` reports it as `apps {rows[], selected[], selfUpdate?}`), rendering the app's settings schema (`settings schema` over its socket, else the file its manifest names) and reading/writing through `settings get/set` on its socket. Keys without a schema show as text rows. `show` answers once every tab has loaded with `tabs[] {id, title, status, schema, sections[{group?, rows[{key, title, control, value}]}]}`; `activate=0` shows it without taking focus |
+| `settings-window` | `show\|hide\|toggle\|state`, `tab=<bundle id, name, loadouts, voice, brain or apps>`, `activate=0` | the shared settings window: a tab for MacHUD and each discovered app, plus Loadouts (every loadout with a preview per display and desktop; `state` reports it as `loadouts {selected, desktop, multiDesktop, heldBack?, loadouts[] {name, summary, startup, active, screens, desktops, regions, ownedLayouts[], problems[]}}`, where `multiDesktop` is the setting and `heldBack` how many loadouts it hides while off), Voice and Brain (see Voice; `state` reports them as `voice {status, settings?}`) and Apps (see App catalog; `state` reports it as `apps {rows[], selected[], selfUpdate?}`), rendering the app's settings schema (`settings schema` over its socket, else the file its manifest names) and reading/writing through `settings get/set` on its socket. Keys without a schema show as text rows. `show` answers once every tab has loaded with `tabs[] {id, title, status, schema, sections[{group?, rows[{key, title, control, value}]}]}`; `activate=0` shows it without taking focus |
 
 The status menu's MacHUD section lists the discovered apps (● running, ○ not) with Show/Hide,
 Park/Reveal, Relaunch, Launch/Quit and a Settings… item per app, plus Settings… for the
@@ -1022,7 +1087,7 @@ are in [MCP.md](MCP.md).
 - `~/.config/machud/layouts.json` — layouts, loadouts, hotkeys, trigger, grid, browser, apps, menuBar, toolDock, spaces, widgets. Hot-reloaded
   on save (atomic or in place).
   `spaces`: `{"policy": "bring"}` (or `launchNew`, `leave`): what apply does with a window on a desktop that is not
-  showing (see Placement plan).
+  showing while multi-desktop loadouts are on (see Placement plan).
   `menuBar`: `{"enabled": false, "autoCollapseSeconds": 10, "hotkey": {"key": "b", "modifiers": ["control", "option"]}, "consumeSiblings": true}`,
   every key optional (these are the defaults). The hotkey can also be given as `hotkeys.menuBar`; `menuBar.hotkey`
   wins, and `{"key": ""}` turns it off. It is only registered while `enabled`.
@@ -1037,6 +1102,10 @@ are in [MCP.md](MCP.md).
   absent means the main display). An `edge` key is read as that edge's position (and `offset`
   ignored); neither is written.
   `startupLoadout`: the name of a loadout applied at launch (see HUD loadouts).
+  `experimental`: `{"multiDesktopLoadouts": false, "spacesPrivateAPI": false}`, every key optional (these are
+  the defaults). `multiDesktopLoadouts` turns on loadouts that span several desktops or displays (see
+  [One screen, or several](#one-screen-or-several)); `spacesPrivateAPI` lets such an apply try SkyLight's private
+  move-to-desktop call for a window on another desktop.
   `catalog`: `{"url": "https://jamesrisberg.github.io/machud/catalog.json", "installDir": null, "refreshHours": 6}`,
   every key optional (these are the defaults). `url` may be `file://` or a path; `installDir` replaces the
   /Applications-else-~/Applications choice and is also searched for apps (see App catalog).

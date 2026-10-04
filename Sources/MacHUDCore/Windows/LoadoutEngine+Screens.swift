@@ -225,8 +225,10 @@ extension LoadoutEngine {
         let numbers = running.flatMap { SpacesPrivate.windows(pid: $0.processIdentifier).map(\.number) }
         guard !numbers.isEmpty else { return nil }
         // One attempt at dragging the windows over, then judge by the result:
-        // the private call reports nothing and is a no-op on some systems.
-        if store.config.experimental?.spacesPrivateAPI == true, !job.movedForSpace, let spaceID = job.spaceID {
+        // the private call reports nothing and is a no-op on some systems. It is a second
+        // experimental key under multi-desktop loadouts.
+        if store.config.multiDesktopLoadouts, store.config.experimental?.spacesPrivateAPI == true,
+           !job.movedForSpace, let spaceID = job.spaceID {
             job.movedForSpace = true
             if SpacesPrivate.move(windowNumbers: numbers, toSpace: spaceID) { return nil }
         }

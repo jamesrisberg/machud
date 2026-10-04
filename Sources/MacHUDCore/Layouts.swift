@@ -374,8 +374,9 @@ struct Experimental: Codable, Equatable {
     /// `CGSMoveWindowsToManagedSpace`, instead of reporting `onOtherSpace`.
     var spacesPrivateAPI: Bool?
     /// Loadouts that span several desktops or displays, and what exists for them: capturing
-    /// every screen, walking desktops, switching desktops to fetch a window (see
-    /// `ExperimentalLoadouts`). Off, a loadout is one screen: the desktop the user is on.
+    /// every screen, walking desktops, slots bound to a desktop, and `spaces.policy` for windows
+    /// on other desktops (see `ExperimentalLoadouts`). Off, a loadout is one screen: the desktop
+    /// the user is on.
     var multiDesktopLoadouts: Bool?
 }
 

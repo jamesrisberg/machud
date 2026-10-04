@@ -1,7 +1,8 @@
 import CoreGraphics
 import Foundation
 
-/// What apply does with an occupant whose only window is on a desktop that is not showing.
+/// What apply does with an occupant whose only window is on a desktop that is not showing, while
+/// multi-desktop loadouts are on (`PlacementPlan.Mode`).
 enum SpacesPolicy: String, Codable, Equatable, CaseIterable {
     /// Fetch the existing window: show its desktop, move it, go back (default). Needs the
     /// window to be on another display, or a second display to hop it through; otherwise
@@ -11,6 +12,22 @@ enum SpacesPolicy: String, Codable, Equatable, CaseIterable {
     case launchNew
     /// Leave it where it is and report `leave`.
     case leave
+}
+
+extension SpacesPolicy {
+    /// With multi-desktop loadouts off `spaces.policy` is not read: an app whose only window is on
+    /// another desktop gets a new window here when it can open one, and a single-window app gets
+    /// `oneScreenSingleWindow`.
+    static func oneScreen(_ newWindow: NewWindowClass) -> SpacesPolicy {
+        newWindow.canOpenAnother ? .launchNew : oneScreenSingleWindow
+    }
+
+    /// What a single-window app (Messages, Signal…) whose window is on another desktop gets while
+    /// multi-desktop loadouts are off: `bring` fetches it by switching desktops (it needs a
+    /// display to carry it across; without one, or when the switch fails, the slot is left and
+    /// names the app). It is the one desktop switch an apply makes with the setting off.
+    /// `launchNew` would leave the window there and fail the slot instead.
+    static let oneScreenSingleWindow: SpacesPolicy = .bring
 }
 
 /// `spaces` in layouts.json.
@@ -24,19 +41,11 @@ struct SpacesConfig: Codable, Equatable {
 enum NewWindowClass: String, Equatable {
     /// A browser: asked by Apple event (`make new window`), or a new `--app` window.
     case browser
-    /// Its menus have a plain ⌘N item that opens a window (TextEdit, Finder, terminals).
+    /// Its menus have a New Window item, found by title (`NewWindowMenu`): Finder, Mail, terminals.
     case menu
-    /// One window per app (Messages, Signal, Slack…): there is no second window to open.
+    /// No such item (Messages, Signal, Notes…, or a menu in another language): there is no
+    /// second window to open.
     case single
-
-    /// Chat and media apps whose ⌘N does not open a window (it starts a conversation or
-    /// does nothing) or that refuse a second instance.
-    static let singleWindowApps: Set<String> = [
-        "com.apple.MobileSMS", "org.whispersystems.signal-desktop", "com.automattic.beeper.desktop",
-        "com.tinyspeck.slackmacgap", "com.hnc.Discord", "net.whatsapp.WhatsApp", "ru.keepcoder.Telegram",
-        "com.spotify.client", "com.apple.Music", "com.apple.FaceTime", "us.zoom.xos", "com.microsoft.teams2",
-        "com.apple.systempreferences", "com.apple.AppStore",
-    ]
 
     static let browsers: Set<String> = [
         "com.google.Chrome", "com.google.Chrome.canary", "com.brave.Browser", "com.microsoft.edgemac",
@@ -44,10 +53,24 @@ enum NewWindowClass: String, Equatable {
         "org.mozilla.firefox",
     ]
 
+    /// `hasNewWindowMenu`: `NewWindowMenu` found an item to press.
     static func of(bundleID: String, hasNewWindowMenu: Bool) -> NewWindowClass {
+        if opensWindowsElsewhere(bundleID) { return .single }
         if browsers.contains(bundleID) { return .browser }
-        if singleWindowApps.contains(bundleID) { return .single }
         return hasNewWindowMenu ? .menu : .single
+    }
+
+    /// A browser whose new windows open on its own desktop (Arc) counts as single-window.
+    static func opensWindowsElsewhere(_ bundleID: String) -> Bool {
+        BrowserWindow.Kind(bundleID: bundleID)?.opensNewWindowsOnItsOwnDesktop == true
+    }
+
+    /// A web page's window: `.browser`, unless the browser it opens in (its host, or the one a
+    /// Chrome-app page falls back to) opens new windows on its own desktop.
+    static func forWeb(host: WebHost, configuredBrowser: String?) -> NewWindowClass {
+        let opensIn = BrowserWindow.Kind(host: host)
+            ?? WebHost.chromeAppFallback(configuredBrowser: configuredBrowser).flatMap { BrowserWindow.Kind(host: $0) }
+        return opensIn?.opensNewWindowsOnItsOwnDesktop == true ? .single : .browser
     }
 
     var canOpenAnother: Bool { self != .single }
@@ -80,6 +103,23 @@ enum PlacementPlan {
         /// 1-based desktop showing now.
         var currentSpace: Int?
         var spaces: Int = 1
+        /// The desktops this display can be switched to from the one showing and back again with
+        /// the Mission Control shortcuts that are on; nil when that is not known.
+        var switchable: Set<Int>? = nil
+
+        func canSwitch(to desktop: Int) -> Bool { switchable?.contains(desktop) ?? true }
+
+        /// The desktops reachable there and back from `current` (`Spaces.route`); nil when the
+        /// showing desktop is unknown.
+        static func switchable(current: Int?, count: Int, shortcuts: (Int) -> Spaces.Shortcut?) -> Set<Int>? {
+            guard let current else { return nil }
+            return Set((1...max(count, 1)).filter { n in
+                guard case .success = Spaces.route(to: n, current: current, count: count, shortcuts: shortcuts),
+                      case .success = Spaces.route(to: current, current: n, count: count, shortcuts: shortcuts)
+                else { return false }
+                return true
+            })
+        }
     }
 
     /// A window the occupant could use.
@@ -92,12 +132,33 @@ enum PlacementPlan {
         var screen: Int?
         /// 1-based desktop on that screen; nil when unknown (or on every desktop).
         var space: Int?
-        /// On a desktop that is showing now.
+        /// On a desktop that is showing now (a hidden app's window there included).
         var visible: Bool
         var minimized: Bool = false
+        /// Its app is hidden (⌘H): placing the window unhides the app, which does not bring it forward.
+        var hidden: Bool = false
     }
 
     enum Kind: Equatable { case app, web, panel }
+
+    /// Whether multi-desktop loadouts are on (see `ExperimentalLoadouts`).
+    enum Mode: Equatable {
+        /// On: a slot may name a desktop, and `spaces.policy` decides what happens to a window on
+        /// a desktop that is not showing.
+        case multiDesktop(SpacesPolicy)
+        /// Off: the desktop showing. A slot's desktop is not read, and `SpacesPolicy.oneScreen`
+        /// decides instead of `spaces.policy`: only a single-window app's window is fetched from
+        /// another desktop.
+        case oneScreen
+
+        /// As `apply … plan=1` reports it (`policy`).
+        var name: String {
+            switch self {
+            case .multiDesktop(let policy): return policy.rawValue
+            case .oneScreen: return "oneScreen"
+            }
+        }
+    }
 
     struct SlotInput {
         var regionID: String
@@ -171,19 +232,25 @@ enum PlacementPlan {
         var places: Bool { ![.leave, .cannot].contains(action) }
     }
 
-    static func plan(_ slots: [SlotInput], screens: [Screen], policy: SpacesPolicy) -> [Step] {
-        slots.map { step(for: $0, screens: screens, policy: policy) }
-    }
-
     private static func name(_ screens: [Screen], _ i: Int?) -> String? {
         i.flatMap { screens.indices.contains($0) ? screens[$0].name : nil }
     }
 
-    static func step(for slot: SlotInput, screens: [Screen], policy: SpacesPolicy) -> Step {
+    static func step(for slot: SlotInput, screens: [Screen], mode: Mode) -> Step {
+        let policy: SpacesPolicy
+        let slotSpace: Int?
+        switch mode {
+        case .multiDesktop(let chosen):
+            policy = chosen
+            slotSpace = slot.space
+        case .oneScreen:
+            policy = .oneScreen(slot.newWindow)
+            slotSpace = nil
+        }
         let target = screens.indices.contains(slot.screen) ? screens[slot.screen] : nil
         let showing = target?.currentSpace
-        let wantedSpace = slot.space ?? showing
-        let needsSwitch = slot.space != nil && slot.space != showing
+        let wantedSpace = slotSpace ?? showing
+        let needsSwitch = slotSpace != nil && slotSpace != showing
         let to = Location(screen: target?.name, space: wantedSpace, frame: slot.rect)
         var step = Step(regionID: slot.regionID, regionName: slot.regionName, occupant: slot.occupant,
                         action: .cannot, from: nil, to: to, reason: "")
@@ -195,7 +262,7 @@ enum PlacementPlan {
             step.reason = "display not attached"
             return step
         }
-        let switchNote = needsSwitch ? "show desktop \(slot.space!) on \(target!.name), then " : ""
+        let switchNote = needsSwitch ? "show desktop \(slotSpace!) on \(target!.name), then " : ""
 
         guard let window = choose(slot.candidates, target: slot.screen, space: wantedSpace) else {
             // Nothing to reuse.
@@ -230,29 +297,31 @@ enum PlacementPlan {
             reachable = needsSwitch && onTarget && window.space != nil && window.space == wantedSpace
         }
         if reachable {
+            let unhide = window.hidden ? "unhide it and " : ""
             if needsSwitch {
                 step.action = .switchSpace
-                step.reason = switchNote + (onTarget || window.minimized || window.screen == nil
+                step.reason = switchNote + unhide + (onTarget || window.minimized || window.screen == nil
                     ? "place it" : "move it from \(name(screens, window.screen) ?? "?")")
             } else if window.minimized {
                 step.action = .resize
                 step.reason = "restore it from the Dock"
             } else if !onTarget {
                 step.action = .move
-                step.reason = "move it from \(name(screens, window.screen) ?? "another display")"
+                step.reason = unhide + "move it from \(name(screens, window.screen) ?? "another display")"
             } else if matches(window.frame, slot.rect) {
-                step.action = .stay
-                step.reason = "already in place"
+                step.action = window.hidden ? .resize : .stay
+                step.reason = window.hidden ? "unhide it, already in place" : "already in place"
             } else {
                 step.action = .resize
-                step.reason = "move/resize in place"
+                step.reason = unhide + "move/resize in place"
             }
             return step
         }
 
         // Its only window is on a desktop that is not showing.
-        let whereNow = "on desktop \(window.space.map(String.init) ?? "?")"
+        let desktop = "desktop \(window.space.map(String.init) ?? "?")"
             + (window.screen.flatMap { name(screens, $0) }.map { " of \($0)" } ?? "")
+        let whereNow = "on \(desktop)"
         func launchNew(_ why: String) -> Step {
             var s = step
             if slot.newWindow.canOpenAnother {
@@ -260,6 +329,10 @@ enum PlacementPlan {
                 s.newWindow = true
                 s.window = nil
                 s.reason = "\(why)open a new \(slot.occupant) window here; the one \(whereNow) stays"
+            } else if mode == .oneScreen {
+                let note = why.trimmingCharacters(in: CharacterSet(charactersIn: "; "))
+                s.action = .cannot
+                s.reason = "\(slot.occupant) has one window, on another desktop (\(desktop)\(note.isEmpty ? "" : "; \(note)"))"
             } else {
                 s.action = .cannot
                 s.reason = "\(slot.occupant) has one window, \(whereNow)\(why.isEmpty ? "" : " (\(why.trimmingCharacters(in: CharacterSet(charactersIn: "; "))))")"
@@ -276,6 +349,9 @@ enum PlacementPlan {
         case .bring:
             guard let space = window.space, let from = window.screen else {
                 return launchNew("its desktop is unknown; ")
+            }
+            guard screens[from].canSwitch(to: space) else {
+                return launchNew("MacHUD cannot switch desktops there: \(Spaces.SwitchError.shortcutDisabled.message); ")
             }
             if from != slot.screen {
                 step.action = .switchSpace

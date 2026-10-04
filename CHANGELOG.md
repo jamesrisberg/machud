@@ -7,6 +7,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 ## [Unreleased]
 
 ### Added
+- A **Multi-desktop loadouts** switch under Experimental in MacHUD's settings, off by default
+  (`machud settings set experimental.multiDesktopLoadouts=true` from a script). It takes effect at once.
 - **Save Diagnostics** in the MacHUD menu's Advanced submenu, and `machud diagnose` for scripts and agents (the MCP tool
   `machud_diagnose`): when something on the HUD vanishes (the voice orb, the tool dock, a widget), it saves
   a file with where every MacHUD window really is, according to macOS and to the app, next to the displays,
@@ -50,8 +52,53 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - The setup guide's cards use the classic frosted material, since the guide already blurs the
   desktop behind them.
 - The radial menu is drawn dark in light mode too, so its white labels stay readable.
+- From scripts too: while **Multi-desktop loadouts** is off, `machud loadouts` leaves out the
+  loadouts that span several desktops or displays (and says how many), and `machud apply` refuses
+  one by name, saying how to turn the setting on, before anything moves, as does `machud loadouts
+  startup`. The startup loadout and the re-apply when displays change skip one too, with a toast.
+- `machud capture name=…` saves the display under the pointer as it looks on the desktop showing.
+  Capturing every screen (`screens=all`), walking desktops (`desktops=`), filling a layout per
+  display (`screens=<layout>@<display>`) and `machud spaces action=switch` are experimental: while
+  **Multi-desktop loadouts** is off they answer with an error saying how to turn it on.
+- While **Multi-desktop loadouts** is off, an app in the loadout whose only window is on another
+  desktop gets a new window on this one when it can open one. An app with a single window
+  (Messages, Signal, Slack…) has its window fetched: MacHUD shows that desktop, brings the window
+  over and switches back, the one time an apply switches desktops with the setting off. When it
+  cannot (one display, the switch fails), the window is left where it is and the toast names the
+  app. Every display is switched back to the desktop it showed whatever goes wrong; if one cannot
+  be, the toast says which desktop it was left on and the rest of that screen is not arranged. Windows on another display are still moved over, and minimised ones restored.
+  `spaces.policy` in layouts.json applies only with the setting on.
+- An app can open another window when its menus have a **New Window** item (or "New Finder
+  Window", Mail's "New Viewer Window" and the like), which MacHUD presses, not when it merely has
+  ⌘N: applying a loadout no longer makes a new note in Notes or a new message in Mail when it
+  wants another of their windows. Menu titles are read in English; with macOS in another
+  language such apps count as single-window.
+- Arc opens a new window on its own desktop, not the one you are on, so an Arc window (or a page
+  in Arc) on another desktop is fetched like a single-window app's instead of leaving a blank
+  Arc window behind. When a window MacHUD asked for opens on another desktop anyway, it is left
+  there and the toast says so.
+- A hidden app (⌘H) in a loadout is shown again where it is and placed; it is never taken for
+  an app on another desktop.
+- A web page whose window is on another desktop gets a new window on this one, as the plan says,
+  instead of being reported placed while nothing appeared.
+- The MCP tools tell an agent that a loadout is one screen: `apply_loadout` arranges the display
+  the pointer is on, switching desktops only to fetch a single-window app, `capture_loadout`
+  saves the screen the user is looking at, and `list_loadouts` (and `machud_status`) count the
+  loadouts held back as experimental instead of listing them.
 
 ### Fixed
+- One loadout is applied at a time. Asking for another while one is being applied (a hotkey, the
+  menu, a script, the voice agent, the startup loadout or a display change) says "<name> is
+  still being applied" instead of running both, which could leave a desktop switched. A HUD
+  part whose app never answers no longer keeps the apply going: it is given 30 seconds.
+- MacHUD no longer freezes while macOS asks whether it may control System Events (which it uses
+  to switch desktops when the plain keystroke is ignored), and never asks that in the middle of
+  applying a loadout: without that permission the switch fails at once and says how to allow it
+  (`machud permissions request=1`). The keystroke is sent in the background.
+- While MacHUD waits for a new window, a popup or tooltip the app shows no longer ends the wait
+  with "opened its new window on another desktop".
+- `machud apply loadout=… screen=<display>` with a display that is not attached says so instead
+  of arranging the screen under the pointer.
 - With multi-desktop loadouts on, the wheel says how many desktops a captured multi-desktop
   loadout covers (it said none).
 - After the first capture, onboarding points to the menu item that edits it (Loadouts › its name ›

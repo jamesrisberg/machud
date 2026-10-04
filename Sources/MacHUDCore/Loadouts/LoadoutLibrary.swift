@@ -16,12 +16,15 @@ enum LoadoutEditError: Error, Equatable, CustomStringConvertible {
     case noSuchLoadout(String)
     case nameTaken(String)
     case emptyName
+    /// The loadout is held back while multi-desktop loadouts are off; the foundation's sentence.
+    case heldBack(String)
 
     var description: String {
         switch self {
         case .noSuchLoadout(let name): return "no loadout named \(name)"
         case .nameTaken(let name): return "a loadout named \(name) already exists"
         case .emptyName: return "a loadout needs a name"
+        case .heldBack(let refusal): return refusal
         }
     }
 }
@@ -77,7 +80,12 @@ extension Config {
         case .delete(let name): return try delete(name)
         case .startup(let name):
             if let name, !name.isEmpty {
-                guard loadout(named: name) != nil else { throw LoadoutEditError.noSuchLoadout(name) }
+                guard let loadout = loadout(named: name) else { throw LoadoutEditError.noSuchLoadout(name) }
+                // It would only be refused at launch. Renaming, copying and deleting a held-back
+                // loadout stay allowed: they are explicit and refuse nothing later.
+                if let refusal = ExperimentalLoadouts.refusal(for: loadout, in: self) {
+                    throw LoadoutEditError.heldBack(refusal)
+                }
                 startupLoadout = name
                 return LoadoutEditResult(loadout: name)
             }
@@ -235,7 +243,8 @@ final class LoadoutLibrary {
 
     static let actions = ["list", "rename", "duplicate", "delete", "startup"]
 
-    /// `loadouts [list]|rename name= to=|duplicate name= [to=]|delete name=|startup [name=]`.
+    /// `loadouts [list]|rename name= to=|duplicate name= [to=]|delete name=|startup [name=]`. The
+    /// list holds the loadouts on offer (`ExperimentalLoadouts.offered`) and counts the rest.
     func handle(_ args: [String: String]) -> [String: Any] {
         // `machud loadouts delete name=X` arrives as `_: delete, delete: 1, name: X`.
         let action = args["action"] ?? args["_"] ?? Self.actions.first { args[$0] == "1" } ?? "list"
@@ -243,8 +252,15 @@ final class LoadoutLibrary {
         let edit: LoadoutEdit
         switch action {
         case "list":
-            return ["ok": true, "startup": store.config.startupLoadout ?? "",
-                    "loadouts": store.loadouts.map(Self.json)]
+            let config = store.config
+            var reply: [String: Any] = ["ok": true, "startup": config.startupLoadout ?? "",
+                                        "loadouts": ExperimentalLoadouts.offered(in: config).map(Self.json)]
+            let held = ExperimentalLoadouts.heldBack(in: config)
+            if let note = ExperimentalLoadouts.heldBackNote(count: held) {
+                reply["heldBack"] = held
+                reply["heldBackNote"] = note
+            }
+            return reply
         case "rename":
             guard let name, let to = args["to"] else { return ["ok": false, "error": "loadouts rename needs name= and to="] }
             edit = .rename(name, to: to)

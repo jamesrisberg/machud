@@ -236,7 +236,7 @@ final class SettingsFormTests: XCTestCase {
         XCTAssertEqual(values["gap"] as? Int, 6)
         XCTAssertEqual(values["trigger"] as? String, "option")
         let form = SettingsForm.build(schema: MacHUDSettings.schema, values: values)
-        XCTAssertEqual(form.sections.map(\.title), ["Snapping", "Layout", "Parking", "Tool Dock", "Hotkeys", "Menu Bar"])
+        XCTAssertEqual(form.sections.map(\.title), ["Snapping", "Layout", "Parking", "Tool Dock", "Hotkeys", "Menu Bar", "Experimental"])
         XCTAssertTrue(form.rows.allSatisfy { !$0.isDefault }, "MacHUD reports every key in its schema")
 
         let parsed = try! MacHUDSettings.schema.validate(["gap": "12", "trigger": "command", "browser": " "])

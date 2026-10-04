@@ -43,6 +43,14 @@ enum ExperimentalLoadouts {
     }
 
     static let howToTurnOn = "Turn on \(settingTitle) under Experimental in MacHUD's settings to use it."
+
+    /// What to say about `count` loadouts held back while the feature is off; nil for none.
+    static func heldBackNote(count: Int) -> String? {
+        guard count > 0 else { return nil }
+        let one = count == 1
+        return "\(count) loadout\(one ? " is" : "s are") hidden: \(one ? "it spans" : "they span") several desktops or "
+            + "displays. Turn on \(settingTitle) under Experimental in MacHUD's settings to use \(one ? "it" : "them")."
+    }
 }
 
 extension Config {

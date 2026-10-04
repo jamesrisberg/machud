@@ -7,18 +7,25 @@ struct WindowLocator {
     let screens: [NSScreen]
     let monitors: [Spaces.Monitor]
     let entries: [AllSpacesWindows.Entry]
+    /// The Mission Control shortcuts, read once.
+    let hotkeys: [String: Any]
 
     init() {
         screens = NSScreen.screens
         monitors = Spaces.monitors()
         entries = AllSpacesWindows.list()
+        hotkeys = Spaces.readDomain("com.apple.symbolichotkeys") ?? [:]
     }
 
     var planScreens: [PlacementPlan.Screen] {
         screens.map { screen in
             let monitor = Spaces.monitor(for: screen, in: monitors)
-            return PlacementPlan.Screen(name: screen.localizedName, frame: screen.frame,
-                                        currentSpace: monitor?.currentIndex, spaces: monitor?.count ?? 1)
+            var plan = PlacementPlan.Screen(name: screen.localizedName, frame: screen.frame,
+                                            currentSpace: monitor?.currentIndex, spaces: monitor?.count ?? 1)
+            plan.switchable = PlacementPlan.Screen.switchable(current: plan.currentSpace, count: plan.spaces) {
+                Spaces.shortcut(from: hotkeys, key: $0)
+            }
+            return plan
         }
     }
 
@@ -48,12 +55,22 @@ struct WindowLocator {
         return (screen, Spaces.monitor(for: screens[screen], in: monitors)?.currentIndex)
     }
 
+    /// Whether a window counts as on a desktop showing now: on screen, or, for a hidden (⌘H)
+    /// app, on the desktop its display shows (or one that cannot be told), since hiding takes a
+    /// window off screen without moving it. Minimized windows are not.
+    nonisolated static func isShowing(onScreen: Bool, minimized: Bool, appHidden: Bool, space: Int?, showingSpace: Int?) -> Bool {
+        guard !minimized else { return false }
+        if onScreen { return true }
+        return appHidden && (space == nil || space == showingSpace)
+    }
+
     /// An app's usable windows on every desktop, front to back, as the planner sees them.
     /// Uses the same rules as `WindowMatch.choose`: placeable, standard ones preferred,
     /// `titleMatch` honoured.
     func candidates(pids: [pid_t], titleMatch: String?) -> [PlacementPlan.Candidate] {
         var out: [(order: Int, candidate: PlacementPlan.Candidate, standard: Bool)] = []
         for pid in pids {
+            let appHidden = NSRunningApplication(processIdentifier: pid)?.isHidden == true
             let mine = entries.enumerated().filter { $0.element.pid == pid }
             let wanted = Set(mine.map(\.element.number))
             for (window, number) in AllSpacesWindows.axWindows(pid: pid, wanted: wanted) {
@@ -64,13 +81,17 @@ struct WindowLocator {
                 guard let frame = entry?.element.frame ?? window.cocoaFrame else { continue }
                 let minimized = window.isMinimized
                 // A window accessibility lists without a number is on this desktop.
-                let visible = !minimized && (entry?.element.onScreen ?? true)
-                let place: (screen: Int?, space: Int?) = number.map { location(number: $0, frame: frame, onScreen: visible) }
+                let onScreen = !minimized && (entry?.element.onScreen ?? true)
+                var place: (screen: Int?, space: Int?) = number.map { location(number: $0, frame: frame, onScreen: onScreen) }
                     ?? (screenIndex(containing: frame), nil)
+                let showingSpace = place.screen.flatMap { Spaces.monitor(for: screens[$0], in: monitors)?.currentIndex }
+                let visible = Self.isShowing(onScreen: onScreen, minimized: minimized, appHidden: appHidden,
+                                             space: place.space, showingSpace: showingSpace)
+                if visible, !onScreen { place.space = showingSpace }
                 out.append((entry?.offset ?? Int.max,
                             PlacementPlan.Candidate(number: number ?? 0, title: title, frame: frame,
                                                     screen: place.screen, space: place.space,
-                                                    visible: visible, minimized: minimized),
+                                                    visible: visible, minimized: minimized, hidden: appHidden),
                             window.isStandard))
             }
         }
@@ -82,13 +103,20 @@ struct WindowLocator {
 extension LoadoutEngine {
     // MARK: - Planning
 
+    /// How the planner treats other desktops: `spaces.policy` is read only while multi-desktop
+    /// loadouts are on; off, only a single-window app's window is fetched from another desktop
+    /// (`PlacementPlan.Mode.oneScreen`).
+    var planMode: PlacementPlan.Mode {
+        store.config.multiDesktopLoadouts ? .multiDesktop(store.spacesPolicy) : .oneScreen
+    }
+
     /// Decide every slot of `groups` (see `PlacementPlan`), store the step on its job and
     /// return the steps in apply order. Reads windows, never moves one.
     @discardableResult
     func attachPlan(to groups: [ResolvedGroup]) -> [PlacementPlan.Step] {
         let locator = WindowLocator()
         let screens = locator.planScreens
-        let policy = store.spacesPolicy
+        let mode = planMode
         var claimed: Set<Int> = []
         var steps: [PlacementPlan.Step] = []
         for group in groups {
@@ -96,7 +124,7 @@ extension LoadoutEngine {
             for job in group.jobs {
                 var input = slotInput(job, screen: screenIndex, space: group.space, locator: locator)
                 input.candidates.removeAll { $0.number != 0 && claimed.contains($0.number) }
-                let step = PlacementPlan.step(for: input, screens: screens, policy: policy)
+                let step = PlacementPlan.step(for: input, screens: screens, mode: mode)
                 if let n = step.window, n != 0 { claimed.insert(n) }
                 job.step = step
                 steps.append(step)
@@ -121,17 +149,15 @@ extension LoadoutEngine {
             input.running = !running.isEmpty
             input.installed = input.running || NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) != nil
             input.candidates = locator.candidates(pids: running.map(\.processIdentifier), titleMatch: titleMatch)
-            // Only worth the menu walk when the window is out of reach.
-            let menu = running.first.map { app in
-                input.candidates.contains { $0.visible || $0.minimized } ? true
-                    : AXWindow.newWindowItem(pid: app.processIdentifier) != nil
-            } ?? false
-            input.newWindow = NewWindowClass.of(bundleID: bundleID, hasNewWindowMenu: menu)
+            // Only worth the menu walk when the window is out of reach; in reach it is not read.
+            if let app = running.first, !input.candidates.contains(where: { $0.visible || $0.minimized }) {
+                input.newWindow = NewWindowClass.of(bundleID: bundleID, pid: app.processIdentifier)
+            }
         case .web(let url, let host):
             input.kind = .web
             input.running = true
-            input.newWindow = .browser
-            let window: AXWindow? = host == .builtin ? nil : browsers.window(url: url)
+            input.newWindow = NewWindowClass.forWeb(host: host, configuredBrowser: store.config.browser)
+            let window: AXWindow? = host == .builtin ? nil : browsers.reusable(url: url, newWindowOnly: false, onScreen: [])?.window
             if let window, let frame = window.cocoaFrame {
                 let number = window.windowNumber ?? 0
                 let visible = WindowList.onScreen().contains { $0.number == number }
@@ -159,7 +185,8 @@ extension LoadoutEngine {
     /// `apply loadout=X plan=1`: what apply would do, slot by slot, without doing it.
     func planJSON(_ loadout: Loadout, screen: NSScreen? = nil) -> [String: Any] {
         let (steps, report) = plan(loadout, screen: screen)
-        var d: [String: Any] = ["ok": true, "loadout": loadout.name, "policy": store.spacesPolicy.rawValue,
+        if report.refused != nil { return report.json }
+        var d: [String: Any] = ["ok": true, "loadout": loadout.name, "policy": planMode.name,
                                 "plan": steps.map(\.json)]
         if loadout.hud != nil { d["hud"] = true }
         if !report.failed.isEmpty { d["failed"] = report.failed }
@@ -167,9 +194,14 @@ extension LoadoutEngine {
         return d
     }
 
-    /// The same plan as values, for the preview overlay.
+    /// The same plan as values, for the preview overlay. Refused, like apply, for a loadout
+    /// that spans desktops or displays while that is off.
     func plan(_ loadout: Loadout, screen: NSScreen? = nil) -> (steps: [PlacementPlan.Step], report: ApplyReport) {
         var report = ApplyReport(loadout: loadout.name)
+        if let refusal = ExperimentalLoadouts.refusal(for: loadout, in: store.config) {
+            report.refused = refusal
+            return ([], report)
+        }
         // A HUD-only loadout has no layout and no windows to place.
         guard !loadout.allSlots.isEmpty || loadout.hud == nil else { return ([], report) }
         let groups = resolveGroups(loadout, screen: screen, report: &report)
@@ -178,8 +210,15 @@ extension LoadoutEngine {
 
     // MARK: - Carrying out the plan
 
+    /// How long the fetches of one group may take, all told: each switches desktops there and
+    /// back, one keystroke per desktop when "Switch to Desktop N" is off. A fetch is never cut
+    /// short (that would leave a desktop switched); the next one does not start after this.
+    static let fetchBudget: TimeInterval = 30
+
     /// Before a group's slots are resolved: fail the slots the plan leaves out, pin the
-    /// chosen windows, and fetch windows from hidden desktops one at a time.
+    /// chosen windows, and fetch windows from hidden desktops one at a time, within
+    /// `fetchBudget`. When a display cannot be put back on its desktop the group's other
+    /// slots are not placed (they would land on the wrong desktop) and each says why.
     func prepare(_ group: ResolvedGroup, report: ApplyReport, completion: @escaping (ApplyReport) -> Void) {
         var report = report
         var fetches: [SlotJob] = []
@@ -195,99 +234,113 @@ extension LoadoutEngine {
                 if step.bring != nil { fetches.append(job) }
             }
         }
+        let deadline = Date().addingTimeInterval(Self.fetchBudget)
         func next() {
             guard !fetches.isEmpty else { completion(report); return }
             let job = fetches.removeFirst()
-            bring(job, into: group.screen) { failure in
-                MainActor.assumeIsolated {
-                    if let failure { self.bringFailed(job, failure, report: &report) }
+            guard Date() < deadline else {
+                bringFailed(job, "no time was left to fetch it", report: &report)
+                next()
+                return
+            }
+            bring(job, into: group.screen) { outcome in
+                switch outcome {
+                case .fetched:
                     next()
+                case .failed(let reason):
+                    self.bringFailed(job, reason, report: &report)
+                    next()
+                case .leftOnAnotherDesktop(let reason):
+                    NSLog("MacHUD: fetching %@ left a display on another desktop: %@", job.occupant.label, reason)
+                    self.cannot(job, "could not bring it from its desktop: \(reason)", report: &report)
+                    for other in group.jobs where !other.done {
+                        self.cannot(other, "not placed: fetching \(job.occupant.label) could not put every display back (\(reason))",
+                                    report: &report)
+                    }
+                    completion(report)
                 }
             }
         }
         next()
     }
 
-    /// Fetching failed: open a new window instead when the app can, else report it.
+    /// Fail a slot and say why, in its plan step too.
+    private func cannot(_ job: SlotJob, _ reason: String, report: inout ApplyReport) {
+        job.done = true
+        report.failed[job.regionID] = "cannot: \(reason)"
+        if let index = report.steps.firstIndex(where: { $0.regionID == job.regionID }) {
+            report.steps[index].action = .cannot
+            report.steps[index].reason = reason
+        }
+    }
+
+    /// Fetching failed with every display put back: open a new window instead when the app
+    /// can, else report it.
     private func bringFailed(_ job: SlotJob, _ failure: String, report: inout ApplyReport) {
         NSLog("MacHUD: could not bring %@: %@", job.occupant.label, failure)
         var canOpen = false
         if case .app(let bundleID, _) = job.occupant,
            let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first {
-            canOpen = NewWindowClass.of(bundleID: bundleID,
-                                        hasNewWindowMenu: AXWindow.newWindowItem(pid: app.processIdentifier) != nil).canOpenAnother
+            canOpen = NewWindowClass.of(bundleID: bundleID, pid: app.processIdentifier).canOpenAnother
         }
-        let index = report.steps.firstIndex { $0.regionID == job.regionID }
-        if canOpen {
-            job.preferredWindow = nil
-            job.newWindowOnly = true
-            if let index {
-                report.steps[index].action = .launch
-                report.steps[index].reason = "could not bring it (\(failure)); opened a new window here"
-            }
-        } else {
-            job.done = true
-            report.failed[job.regionID] = "cannot: could not bring it from its desktop (\(failure))"
-            if let index {
-                report.steps[index].action = .cannot
-                report.steps[index].reason = "could not bring it from its desktop (\(failure))"
-            }
+        guard canOpen else {
+            cannot(job, "could not bring it from its desktop (\(failure))", report: &report)
+            return
+        }
+        job.preferredWindow = nil
+        job.newWindowOnly = true
+        if let index = report.steps.firstIndex(where: { $0.regionID == job.regionID }) {
+            report.steps[index].action = .launch
+            report.steps[index].reason = "could not bring it (\(failure)); opened a new window here"
         }
     }
 
-    /// Fetch a window from a desktop that is not showing. On another display: show its
-    /// desktop there, move it into the region (it joins the target display's showing
-    /// desktop), switch that display back. On the target display itself: the same, but
-    /// parked on another display while this one switches back, then moved home. macOS 26
-    /// ignores the private move-to-space call, so a display is the only way across.
-    func bring(_ job: SlotJob, into target: NSScreen, completion: @escaping (String?) -> Void) {
-        guard let number = job.preferredWindow, number != 0 else { completion("no window number"); return }
+    /// Fetch a window from a desktop that is not showing (`DesktopFetch`). On another display:
+    /// show its desktop there, move it into the region (it joins the target display's showing
+    /// desktop), switch that display back. On the target display itself: the same, but parked
+    /// on another display while this one switches back, then moved home. macOS 26 ignores the
+    /// private move-to-space call, so a display is the only way across.
+    func bring(_ job: SlotJob, into target: NSScreen, completion: @escaping (DesktopFetch.Outcome) -> Void) {
+        guard let number = job.preferredWindow, number != 0 else { completion(.failed("no window number")); return }
         let locator = WindowLocator()
         guard let entry = locator.entries.first(where: { $0.number == number }) else {
-            completion("window \(number) is gone"); return
+            completion(.failed("window \(number) is gone")); return
         }
-        if entry.onScreen { completion(nil); return }
+        if entry.onScreen { completion(.fetched); return }
         let place = locator.location(number: number, frame: entry.frame, onScreen: false)
-        guard let from = place.screen, let space = place.space else { completion("its desktop is unknown"); return }
-        let home = locator.screens[from]
-        let via = home == target ? locator.screens.first { $0 != target } : nil
-        if home == target, via == nil { completion("only one display"); return }
-        let origin = Spaces.monitor(for: home, in: locator.monitors)?.currentIndex
+        guard let from = place.screen, let space = place.space else { completion(.failed("its desktop is unknown")); return }
+        let screens = locator.screens
+        let home = screens[from]
+        var via: CGRect?
+        if home == target {
+            guard let other = screens.first(where: { $0 != target }) else { completion(.failed("only one display")); return }
+            let rect = job.rect
+            let size = CGSize(width: min(rect.width, other.visibleFrame.width), height: min(rect.height, other.visibleFrame.height))
+            via = CGRect(x: other.visibleFrame.midX - size.width / 2, y: other.visibleFrame.midY - size.height / 2,
+                         width: size.width, height: size.height)
+        }
         let pid = entry.pid
-        let rect = job.rect
-
-        func ax() -> AXWindow? {
-            AllSpacesWindows.axWindows(pid: pid, wanted: [number]).first { $0.number == number }?.window
-        }
-        func after(_ seconds: Double, _ body: @escaping () -> Void) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { MainActor.assumeIsolated { body() } }
-        }
-        func finish() {
-            after(0.3) {
-                let shown = WindowList.onScreen().contains { $0.number == number }
-                completion(shown ? nil : "it stayed on desktop \(space)")
-            }
-        }
-
-        Spaces.switchTo(space, on: home) { result in
-            if case .failure(let error) = result { completion(error.reason); return }
-            guard let window = ax() else { completion("accessibility cannot reach it"); return }
-            if window.isMinimized { window.isMinimized = false }
-            if let via {
-                let size = CGSize(width: min(rect.width, via.visibleFrame.width), height: min(rect.height, via.visibleFrame.height))
-                window.setCocoaFrame(CGRect(x: via.visibleFrame.midX - size.width / 2, y: via.visibleFrame.midY - size.height / 2,
-                                            width: size.width, height: size.height))
-            } else {
-                window.setCocoaFrame(rect)
-            }
-            after(0.3) {
-                guard let origin else { finish(); return }
-                Spaces.switchTo(origin, on: home) { _ in
-                    if via != nil { ax()?.setCocoaFrame(rect) }
-                    finish()
+        let world = DesktopFetch.World(
+            showing: {
+                let monitors = Spaces.monitors()
+                return screens.map { Spaces.monitor(for: $0, in: monitors)?.currentIndex }
+            },
+            displayName: { screens.indices.contains($0) ? screens[$0].localizedName : "display \($0 + 1)" },
+            switchTo: { desktop, display, done in Spaces.switchTo(desktop, on: screens[display], completion: done) },
+            reach: {
+                guard let window = AllSpacesWindows.axWindows(pid: pid, wanted: [number]).first(where: { $0.number == number })?.window
+                else { return nil }
+                return { frame in
+                    if window.isMinimized { window.isMinimized = false }
+                    window.setCocoaFrame(frame)
                 }
-            }
-        }
+            },
+            isOnScreen: { WindowList.onScreen().contains { $0.number == number } },
+            after: { seconds, body in
+                DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { MainActor.assumeIsolated { body() } }
+            })
+        DesktopFetch.run(DesktopFetch.Request(home: from, desktop: space, target: job.rect, via: via),
+                         world: world, completion: completion)
     }
 
     /// The window the plan chose, when accessibility can reach it here.
@@ -302,7 +355,7 @@ extension LoadoutEngine {
     }
 
     /// `launchNew`: ask the running app for another window without activating it (a browser
-    /// by Apple event, anything else through its ⌘N menu item) and adopt the window it opens.
+    /// by Apple event, anything else through its New Window menu item) and adopt the window it opens.
     func resolveNewWindow(_ job: SlotJob, bundleID: String, running: [NSRunningApplication]) -> Resolution {
         guard let app = running.first else { return .failed("\(job.occupant.label) is not running") }
         if !job.askedForWindow {
@@ -310,19 +363,22 @@ extension LoadoutEngine {
             job.baseline = NewWindow.baseline(bundleID: bundleID)
             job.askedAt = Date()
             let asked: Bool
-            if NewWindowClass.browsers.contains(bundleID), bundleID != "org.mozilla.firefox" {
+            switch NewWindowClass.of(bundleID: bundleID, pid: app.processIdentifier) {
+            case .browser where bundleID != "org.mozilla.firefox":
                 let verb = bundleID == "com.apple.Safari" ? "make new document" : "make new window"
                 asked = (try? AppleScriptRunner.run("tell application id \(AppleScriptRunner.quote(bundleID)) to \(verb)",
                                                     timeout: 4).get()) != nil
-            } else {
-                asked = AXWindow.openNewWindow(pid: app.processIdentifier)
+            case .browser, .menu:
+                asked = NewWindowMenu.press(pid: app.processIdentifier)
+            case .single:
+                asked = false
             }
             return asked ? .waiting : .failed("cannot: \(job.occupant.label) would not open a new window without coming forward")
         }
         if let new = NewWindow.since(job.baseline, bundleID: bundleID) { return .ready(.ax(new.window)) }
         if Date().timeIntervalSince(job.askedAt ?? Date()) > 3,
            NewWindow.isOnAnotherDesktop(job.baseline, bundleID: bundleID) {
-            return .failed("\(job.occupant.label) opened its new window on another desktop")
+            return .failed("\(job.occupant.label) opened its new window on another desktop; it was left there")
         }
         return .waiting
     }
@@ -380,9 +436,21 @@ extension LoadoutEngine.ApplyReport {
         }
     }
 
+    /// The placement deadline passed with the slot unplaced: why, when it is known (the step
+    /// becomes `cannot`), else "timed out".
+    mutating func giveUp(_ regionID: String, stalled: String?) {
+        guard let stalled else { failed[regionID] = "timed out"; return }
+        failed[regionID] = "cannot: \(stalled)"
+        if let index = steps.firstIndex(where: { $0.regionID == regionID }) {
+            steps[index].action = .cannot
+            steps[index].reason = stalled
+        }
+    }
+
     /// Toast lines: every slot that did something other than a plain in-place fit, and
-    /// every failure.
+    /// every failure; for a refused loadout, why.
     func detailLines(labels: (String) -> String) -> [String] {
+        if let refused { return [refused] }
         var lines: [String] = []
         var covered = Set<String>()
         for step in steps {
