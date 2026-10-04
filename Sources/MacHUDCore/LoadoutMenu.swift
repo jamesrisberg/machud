@@ -87,7 +87,7 @@ final class LoadoutMenu {
     /// windows and the frontmost app are known here; the focused window's label takes
     /// Accessibility calls, which a hung app answers only at its timeout, so it is read on a
     /// queue of its own and the wheel's hint changes when it comes.
-    private func readParkTargets(_ answer: @escaping @MainActor (RadialMenu.Wedge.ParkTargets) -> Void) {
+    private func readParkTargets(_ answer: @escaping @MainActor @Sendable (RadialMenu.Wedge.ParkTargets) -> Void) {
         let parked = engine.parking.parked.map(\.record.label)
         guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != getpid() else {
             answer(.init(focused: nil, parked: parked))

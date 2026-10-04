@@ -274,7 +274,7 @@ final class RadialMenu {
     /// Reads the park wedge's targets and calls back with them on the main thread
     /// (`asksForParkTargets`). It must not wait for the answer on the main thread: the
     /// Accessibility calls behind it can take a hung app's timeout.
-    var readParkTargets: ((@escaping @MainActor (Wedge.ParkTargets) -> Void) -> Void)?
+    var readParkTargets: ((@escaping @MainActor @Sendable (Wedge.ParkTargets) -> Void) -> Void)?
     /// Counts the wheel's openings: an answer about the park wedge from an earlier one is not used.
     private var opening = 0
     /// A read of the park wedge's targets has been asked for and not answered.
