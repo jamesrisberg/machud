@@ -86,6 +86,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   to switch desktops when the plain keystroke is ignored), and never asks that in the middle of
   applying a loadout: without that permission the switch fails at once and says how to allow it
   (`machud permissions request=1`). The keystroke is sent in the background.
+- While MacHUD waits for a new window, a popup or tooltip the app shows no longer ends the wait
+  with "opened its new window on another desktop".
 - `machud apply loadout=… screen=<display>` with a display that is not attached says so instead
   of arranging the screen under the pointer.
 - With multi-desktop loadouts on, the wheel says how many desktops a captured multi-desktop

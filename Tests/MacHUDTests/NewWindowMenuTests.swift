@@ -115,3 +115,19 @@ final class NewWindowMenuTests: XCTestCase {
         XCTAssertEqual(NewWindowClass.of(bundleID: "com.tinyspeck.slackmacgap", hasNewWindowMenu: true), .menu)
     }
 }
+
+/// "Opened its new window on another desktop" counts normal windows only: a popup or tooltip of
+/// another layer is not a window opened elsewhere (`AllSpacesWindows.list` holds normal ones).
+final class NewWindowElsewhereTests: XCTestCase {
+    private func entry(_ number: Int, onScreen: Bool) -> AllSpacesWindows.Entry {
+        AllSpacesWindows.Entry(number: number, pid: 1, frame: CGRect(x: 0, y: 0, width: 400, height: 300), onScreen: onScreen)
+    }
+
+    func testOnlyANewNormalWindowOffScreenCounts() {
+        XCTAssertTrue(NewWindow.openedElsewhere([1], windows: [entry(1, onScreen: true), entry(7, onScreen: false)]))
+        XCTAssertFalse(NewWindow.openedElsewhere([1, 7], windows: [entry(1, onScreen: true), entry(7, onScreen: false)]))
+        XCTAssertFalse(NewWindow.openedElsewhere([1], windows: [entry(1, onScreen: false), entry(7, onScreen: true)]),
+                       "a new window on a desktop showing is not elsewhere")
+        XCTAssertFalse(NewWindow.openedElsewhere([1], windows: []))
+    }
+}

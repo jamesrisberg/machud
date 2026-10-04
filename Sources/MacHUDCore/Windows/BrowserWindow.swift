@@ -178,11 +178,19 @@ enum NewWindow {
         baseline(bundleID: bundleID).contains(number)
     }
 
-    /// True when the browser did open a window but on another desktop — Arc puts a
-    /// new window wherever its own window already is. Accessibility cannot reach a
-    /// window on another desktop, so there is nothing to place until it is switched to.
+    /// True when the app did open a normal window, but on a desktop that is not showing:
+    /// Accessibility cannot reach it there, so there is nothing to place. A popup or tooltip
+    /// (another window layer) does not count.
     static func isOnAnotherDesktop(_ known: Set<Int>, bundleID: String) -> Bool {
-        !baseline(bundleID: bundleID).subtracting(known).isEmpty
+        let pids = Set(NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .filter { !$0.isTerminated }.map(\.processIdentifier))
+        return openedElsewhere(known, windows: AllSpacesWindows.list().filter { pids.contains($0.pid) })
+    }
+
+    /// Whether `windows` (normal windows, as `AllSpacesWindows.list` gives them) hold one that
+    /// is not in `known` and not on a desktop showing.
+    static func openedElsewhere(_ known: Set<Int>, windows: [AllSpacesWindows.Entry]) -> Bool {
+        windows.contains { !known.contains($0.number) && !$0.onScreen }
     }
 
     private static func numbers(bundleID: String, options: CGWindowListOption) -> Set<Int> {
