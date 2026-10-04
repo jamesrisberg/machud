@@ -1,6 +1,6 @@
 ---
 name: machud
-description: Control the user's MacHUD desktop from the shell — inspect window layouts, apply, preview or capture loadouts (which apps/pages go in which screen region, plus the HUD setup), move windows into regions, drive the MacHUD tool dock (position, summon/dismiss sibling apps, drop files on them), place and arrange desktop widgets, park windows behind orbs, manage the menu bar, and open panels and the shared settings window. Use whenever the user asks to arrange windows, set up or switch a workspace, or move/configure the tool dock, desktop widgets or sibling HUD apps.
+description: Control the user's MacHUD desktop from the shell — inspect window layouts, apply, preview or capture loadouts (one screen: which apps/pages go in which region of a display, plus the HUD setup), move windows into regions, drive the MacHUD tool dock (position, summon/dismiss sibling apps, drop files on them), place and arrange desktop widgets, park windows behind orbs, manage the menu bar, and open panels and the shared settings window. Use whenever the user asks to arrange windows, set up or switch a workspace, or move/configure the tool dock, desktop widgets or sibling HUD apps.
 ---
 
 # MacHUD control skill
@@ -22,7 +22,7 @@ machud ping || machud --launch      # is it running?
 machud permissions                  # accessibility + automation status; add request=1 to prompt
 machud help                         # command list from the running app
 machud layouts                      # regions with ids and geometry
-machud loadouts                     # saved loadouts (including HUD-only ones)
+machud loadouts                     # saved loadouts (HUD-only ones included; held-back multi-desktop ones are counted in heldBack)
 machud status                       # what is in each region right now
 machud windows                      # every on-screen window with CGWindow numbers
 machud diagnose                     # snapshot of where every MacHUD window really is: path + what looks wrong
@@ -36,29 +36,33 @@ Coordinates are Cocoa points (origin bottom-left).
 
 ## Arrange windows
 
+A loadout is one screen: capture saves the display under the pointer, on the desktop showing;
+apply arranges the display under the pointer, on the desktop showing. Set a screen up, capture
+it, then apply it on any other desktop or display. Loadouts that span several desktops or
+displays are experimental and off by default (see Multi-desktop loadouts below).
+
 - Put one window somewhere: `machud place window=<n> region=<id>`.
 - **Plan before applying**: `machud apply loadout="Work" plan=1` is a dry run returning
   `plan[]` of `{slot, region, occupant, action, from?, to, reason, window?}` (`stay`,
   `resize`, `move`, `switchSpace`, `launch`, `leave`, `cannot`); nothing moves. Read it
-  before applying. `machud preview loadout="Work"` draws the same plan over every display
+  before applying. `machud preview loadout="Work"` draws the same plan on screen
   for the user (`action=apply|cancel` answers it).
-- Apply a saved workspace: `machud apply loadout="Work"`; add `clear=1` to minimise
-  everything else first. The reply's `slots[]` carries each step's `result`.
-- Save the current arrangement: `machud capture name="Work"` derives a layout from the
-  windows themselves (one region per window) plus the loadout that fills it. Add
-  `layout=<name>` to only record what sits in an existing layout's regions.
+- Apply a saved workspace: `machud apply loadout="Work"` arranges the screen under the pointer
+  (`screen=<display>` picks another); add `clear=1` to minimise the other windows on that screen
+  first. The reply's `slots[]` carries each step's `result`. A window on another display is
+  moved over, a minimised one restored, a hidden app unhidden. An app whose only window is on
+  another desktop gets a new window here when it has a New Window menu item; one without
+  (Messages, Signal) and Arc are fetched, which shows their desktop, brings the window over and
+  switches back (the one time an apply switches desktops), or left and named when that cannot
+  be done. Apply never closes a window and runs one at a time (a second is refused).
+- Save the current screen: `machud capture name="Work"` derives a layout from the windows on
+  the display under the pointer (`screen=<display>` picks another), one region per window, plus
+  the loadout that fills it. Add `layout=<name>` to only record what sits in an existing
+  layout's regions. The tool dock and panels are saved only with `hud=1` or `hud=only`.
 - Clear the desk: `machud clear` (every desktop; sibling MacHUD apps and hidden apps are
   left alone); undo with `machud restore`.
 - Switch which layout Shift-drag snapping uses: `machud select-layout name=<name>`.
-- Several displays: `machud status screen=builtin`. `machud capture name="Studio"
-  screens=all` derives one layout per display (`Studio · <display>`) into one loadout.
-  Add `desktops=1,2` (or `desktops=main:1,2;builtin:1`) to walk desktops too. **Walking
-  desktops is visible to the user: keep it short and only when asked.**
-  `screens=Thirds@main,Full@builtin` is the fill-only form. Slots may carry `"space": N`.
-  `machud spaces` shows desktop shortcuts; `machud spaces action=switch n=2` switches.
-- A loadout captured on a now-unplugged display still applies: it is redirected to its
-  `fallback`, else the main display. `apply`/`status` report `redirected[]`;
-  `reason: needsDesktops` means the user must add desktops in Mission Control.
+- Another display: `machud status screen=builtin`; `machud screens` lists them.
 - Open the visual editor for the user: `machud edit` (`loadout=<name>` on that loadout,
   `new=1` on a blank layout). Manage saved loadouts: `machud loadouts rename name=A to=B`,
   `duplicate name=A [to=]`, `delete name=A` (also removes the hidden layouts captured for it),
@@ -66,11 +70,35 @@ Coordinates are Cocoa points (origin bottom-left).
   (`machud settings-window show tab=loadouts`) shows them all with previews.
 
 To build a loadout by hand, edit `~/.config/machud/layouts.json` (`loadouts[]` with
-`slots[] {regionID, occupant}`, optional `screens[]`, `whenScreenMissing: desktop|skip`,
-optional `hud`; occupant kinds: `app` `{bundleID, titleMatch?}`, `web` `{url, host:
-arc|safari|chromeApp|builtin}`, `panel` `{id}` where `id` may be a sibling's
+`slots[] {regionID, occupant}`, optional `hud`; occupant kinds: `app` `{bundleID, titleMatch?}`,
+`web` `{url, host: arc|safari|chromeApp|builtin}`, `panel` `{id}` where `id` may be a sibling's
 `<bundle id>/<panel>`), then `machud reload`. Displays change ⇒ the active loadout is
 re-applied on its own.
+
+## Multi-desktop loadouts (experimental)
+
+Loadouts that span several desktops or displays are off by default. The setting is
+`experimental.multiDesktopLoadouts` (**Multi-desktop loadouts** under Experimental in MacHUD's
+settings window): `machud settings set experimental.multiDesktopLoadouts=true`, in effect at
+once. It is the user's setting: ask before changing it. It turns on:
+
+- `machud capture name="Studio" screens=all`: one layout per display (`Studio · <display>`)
+  into one loadout. Add `desktops=1,2` (or `desktops=main:1,2;builtin:1`) to walk desktops too.
+  **Walking desktops is visible to the user: keep it short and only when asked.**
+  `screens=Thirds@main,Full@builtin` is the fill-only form.
+- Slots that carry `"space": N`, and `screens[]` with `whenScreenMissing: desktop|skip` in a
+  loadout written by hand. A loadout captured on a now-unplugged display still applies: it is
+  redirected to its `fallback`, else the main display. `apply`/`status` report `redirected[]`;
+  `reason: needsDesktops` means the user must add desktops in Mission Control.
+- `machud spaces action=switch n=2`. (`machud spaces` alone reports the desktops and shortcuts
+  and is never refused.)
+- `spaces.policy` in layouts.json (`bring`, `launchNew`, `leave`): what apply does with a
+  window that is only on a desktop that is not showing.
+
+With it off, such loadouts are held back: `machud loadouts` leaves them out and counts them in
+`heldBack` (with `heldBackNote`); `apply` (and `plan=1`), `preview`, `edit` and `loadouts
+startup` by name answer `ok: false`; `screens=all`, `desktops=`, `screens=<layout>@<ref>` and
+`spaces action=switch` are refused. Show the `error`, which names the setting.
 
 ## HUD loadouts
 
@@ -164,8 +192,9 @@ machud orb show|hide                      # orbs are hidden while the tool dock 
   The socket's `subscribe` command (not the CLI) streams `state` events.
 - Wheel (⌃⌥Space, setting `hotkeys.loadoutMenu`): `machud radial action=show|select|commit|cancel|hide
   index=<n> ring=inner|middle|outer`; `machud menu` describes the wedges (a loadout:
-  Preview / Apply / Clear this screen + Apply; capture: this screen / all screens / draw a
-  new layout; park: park front window / restore parked).
+  Preview / Apply / Clear this screen + Apply; capture: this screen / draw a new layout, with
+  all screens between them while multi-desktop loadouts are on; park: park front window /
+  restore parked).
 - Menu bar hiding (off until enabled): `machud menubar state|collapse|expand|toggle|peek|enable|disable`.
 - MacHUD's settings: `machud settings get`, `machud settings set menuBar.enabled=1`,
   `machud settings schema`.
@@ -187,6 +216,8 @@ MACHUD_SOCKET=/tmp/machud-test.sock machud ping
 MACHUD_SOCKET=/tmp/machud-test.sock machud quit
 ```
 
+With only `MACHUD_SOCKET` the copy's config lives beside the socket, in
+`<socket path without extension>-config/layouts.json`, never in `~/.config/machud`.
 `MACHUD_APP` points the CLI at a specific binary; `MACHUD_DOCKS_FILE` overrides where the
 dock publishes.
 
