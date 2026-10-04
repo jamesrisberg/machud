@@ -127,7 +127,7 @@ final class OneScreenApplyTests: XCTestCase {
             let args = form.merging(["name": "Studio"]) { a, _ in a }
             // Only reach the verb once the rule says it refuses: a capture that went ahead would
             // read the windows on this Mac.
-            guard let expected = MultiDesktopVerbs.refusal(capture: args, in: engine.store.config) else {
+            guard let expected = captureRefusal(args, in: engine.store.config) else {
                 XCTFail("\(args) is not refused"); continue
             }
             var reply: [String: Any]?
@@ -215,9 +215,26 @@ final class OneScreenApplyTests: XCTestCase {
     }
 }
 
+/// `capture`'s refusal, read the way the verb reads it.
+@MainActor
+func captureRefusal(_ args: [String: String], in config: Config) -> String? {
+    MultiDesktopVerbs.refusal(capture: CaptureForm(args), name: args["name"] ?? "", in: config)
+}
+
 /// The socket forms that exist only for spanning loadouts.
 @MainActor
 final class MultiDesktopVerbTests: XCTestCase {
+    func testTheCaptureFormIsReadOnce() {
+        XCTAssertEqual(CaptureForm(["name": "X"]), .derive)
+        XCTAssertEqual(CaptureForm(["name": "X", "screen": "main", "hud": "1"]), .derive)
+        XCTAssertEqual(CaptureForm(["name": "X", "layout": "Main"]), .fill(layout: "Main"))
+        XCTAssertEqual(CaptureForm(["name": "X", "hud": "ONLY", "screens": "all"]), .hudOnly)
+        XCTAssertEqual(CaptureForm(["name": "X", "screens": "*"]), .everyScreen(desktops: nil))
+        XCTAssertEqual(CaptureForm(["name": "X", "screens": "all", "desktops": "1,2"]), .everyScreen(desktops: "1,2"))
+        XCTAssertEqual(CaptureForm(["name": "X", "desktops": "1", "layout": "Main"]), .walk(desktops: "1"))
+        XCTAssertEqual(CaptureForm(["name": "X", "screens": "Main@main", "desktops": "1"]), .perDisplay("Main@main"))
+    }
+
     private let off = Config.defaults
     private var on: Config {
         var c = Config.defaults
@@ -235,9 +252,9 @@ final class MultiDesktopVerbTests: XCTestCase {
             (["name": "X", "screens": "Main@main,Side@builtin"], "Capturing a layout per display"),
         ]
         for (args, action) in refused {
-            let reason = try XCTUnwrap(MultiDesktopVerbs.refusal(capture: args, in: off), "\(args)")
+            let reason = try XCTUnwrap(captureRefusal(args, in: off), "\(args)")
             XCTAssertEqual(reason, ExperimentalLoadouts.refusal(forAction: action, in: off), "\(args)")
-            XCTAssertNil(MultiDesktopVerbs.refusal(capture: args, in: on), "\(args) with the setting on")
+            XCTAssertNil(captureRefusal(args, in: on), "\(args) with the setting on")
         }
     }
 
@@ -245,7 +262,7 @@ final class MultiDesktopVerbTests: XCTestCase {
         for args in [["name": "X"], ["name": "X", "screen": "builtin"], ["name": "X", "layout": "Main"],
                      ["name": "X", "hud": "only"], ["name": "X", "hud": "1"],
                      ["name": "X", "hud": "only", "screens": "all"]] {
-            XCTAssertNil(MultiDesktopVerbs.refusal(capture: args, in: off), "\(args)")
+            XCTAssertNil(captureRefusal(args, in: off), "\(args)")
         }
     }
 
@@ -258,17 +275,17 @@ final class MultiDesktopVerbTests: XCTestCase {
             let expected = try XCTUnwrap(ExperimentalLoadouts.refusal(forName: name, in: config))
             for form in forms {
                 let args = form.merging(["name": name]) { a, _ in a }
-                XCTAssertEqual(MultiDesktopVerbs.refusal(capture: args, in: config), expected, "\(args)")
+                XCTAssertEqual(captureRefusal(args, in: config), expected, "\(args)")
             }
         }
         for form in forms {
-            XCTAssertNil(MultiDesktopVerbs.refusal(capture: form.merging(["name": "Desk"]) { a, _ in a }, in: config),
+            XCTAssertNil(captureRefusal(form.merging(["name": "Desk"]) { a, _ in a }, in: config),
                          "an offered loadout is recaptured as always: \(form)")
-            XCTAssertNil(MultiDesktopVerbs.refusal(capture: form.merging(["name": "New"]) { a, _ in a }, in: config))
+            XCTAssertNil(captureRefusal(form.merging(["name": "New"]) { a, _ in a }, in: config))
         }
         var on = config
         on.experimental = Experimental(multiDesktopLoadouts: true)
-        XCTAssertNil(MultiDesktopVerbs.refusal(capture: ["name": "Studio"], in: on))
+        XCTAssertNil(captureRefusal(["name": "Studio"], in: on))
     }
 
     func testSwitchingDesktopsIsRefusedButReadingThemIsNot() throws {
