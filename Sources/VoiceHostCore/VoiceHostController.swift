@@ -170,6 +170,12 @@ public final class VoiceHostController: VoiceHostActing {
             if case .key = trigger { return true }
             return false
         }
+
+        /// Started by the wake word: when the brain cannot take it, it is dropped, not typed.
+        var fromWake: Bool {
+            if case .wake = trigger { return true }
+            return false
+        }
     }
 
     private struct Turn {
@@ -1046,13 +1052,17 @@ public final class VoiceHostController: VoiceHostActing {
 
     /// Words the brain cannot take now. The wake word's are dropped: whoever spoke may not have
     /// been talking to this Mac, so they are typed nowhere. The fn key's, the orb's and the
-    /// socket's are typed at the cursor, where the user is. The notice shows on the orb only for
-    /// the latest take; a newer one recording or being transcribed keeps the orb.
+    /// socket's are typed at the cursor, where the user is. A take the host has no record of is
+    /// dropped too, since it may have been the wake word's (and has no journal line to write). The
+    /// notice shows on the orb only for the latest take; a newer one recording or being
+    /// transcribed keeps the orb.
     private func notTaken(_ text: String, pasted: String, dropped: String, isLatest: Bool, ended: Take?) {
-        guard let ended, case .wake = ended.trigger else {
-            return paste(text, notice: pasted, isLatest: isLatest, ended: ended)
+        if let ended, !ended.fromWake { return paste(text, notice: pasted, isLatest: isLatest, ended: ended) }
+        if let ended {
+            journal(ended, mode: .agent, outcome: .dropped, reason: dropped, characters: text.count)
+        } else {
+            log("take dropped (\(dropped)), \(text.count) characters: a take this host has no record of")
         }
-        journal(ended, mode: .agent, outcome: .dropped, reason: dropped, characters: text.count)
         if isLatest { fail(dropped) }
     }
 
@@ -1156,9 +1166,9 @@ public final class VoiceHostController: VoiceHostActing {
         if let lastSnapshot, lastSnapshot.requestId == requestId { handle(lastSnapshot) }
     }
 
-    private func paste(_ text: String, notice: String, isLatest: Bool, ended: Take?) {
+    private func paste(_ text: String, notice: String, isLatest: Bool, ended: Take) {
         dictation.insert(text)
-        if let ended { journal(ended, mode: .agent, outcome: .typed, reason: notice, characters: text.count) }
+        journal(ended, mode: .agent, outcome: .typed, reason: notice, characters: text.count)
         if isLatest { fail(notice) }
     }
 

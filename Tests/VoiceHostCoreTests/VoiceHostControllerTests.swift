@@ -1606,6 +1606,22 @@ final class VoiceHostControllerTests: XCTestCase {
         XCTAssertEqual(controller.state.phase, .listening(.agent), "the newer take's, not the notice")
     }
 
+    /// Words for the agent from a take the host has no record of are dropped, not typed, when the
+    /// agent cannot take them: what started it is unknown, so it may have been the wake word.
+    func testAnAgentTakeOfUnknownOriginIsDroppedNotTyped() {
+        let controller = makeController()
+        brain.push(status: "running", requestId: "other")
+        dictation.finish("from nowhere", take: UUID(), at: .caller)
+        XCTAssertTrue(dictation.inserted.isEmpty, "nothing is typed")
+        XCTAssertTrue(brain.submitted.isEmpty)
+        XCTAssertTrue(journal.records.isEmpty, "there is no take to journal")
+        XCTAssertEqual(lines("take dropped"), [
+            "take dropped (Heard you, but the agent is still working), 12 characters: a take this host has no record of",
+        ])
+        XCTAssertFalse(logged.contains { $0.contains("nowhere") }, "never the words")
+        withExtendedLifetime(controller) {}
+    }
+
     func testTakesThrownAwayAreJournaledWithWhy() async {
         let controller = makeController()
         // Nothing heard by the endpointer.

@@ -951,7 +951,9 @@ take then, with the notice as `reason`, such as `The agent is still working — 
 `dropped` (an agent take the wake word started that the brain could not take then: the brain off,
 a problem it has, or the agent still working; it is typed nowhere, the orb shows the notice for
 3 s and the line has it as `reason`: `Heard you, but the brain is off`, `Heard you, but the agent
-cannot take it: <the brain's problem>`, `Heard you, but the agent is still working`),
+cannot take it: <the brain's problem>`, `Heard you, but the agent is still working`; agent words
+from a take the host has no record of are dropped the same way and only logged, since it may have
+been the wake word's),
 `nothingHeard` (no speech, or the words came out empty), `refused` (it never recorded, or the
 brain refused the turn: `The brain did not take the turn (409)`, the companion's status code,
 never its own words), `cancelled` (thrown away, or still in flight when the voice host quit: `The
