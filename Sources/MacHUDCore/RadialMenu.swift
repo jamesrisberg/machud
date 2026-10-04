@@ -295,9 +295,16 @@ final class RadialMenu {
     private var screenFrame: CGRect = .zero
     private var pointerOffset: CGPoint = .zero   // relative to the wheel's centre
     private var keyboardIndex: Int?
-    /// The pointer has moved since the wheel opened: until it has, it is taken to be at the
-    /// centre, so nothing is lit and releasing cancels, wherever it really is.
+    /// The pointer has gone `pointerTravel` from where the first report after the wheel opened
+    /// found it: until it has, it is taken to be at the centre, so nothing is lit and releasing
+    /// cancels, wherever it really is. Counting from the first report rather than from the
+    /// centre covers a pointer that moving did not stick to (a hovering pen, a remotely driven
+    /// pointer), whose next report puts it back where it was.
     private var pointerHasMoved = false
+    /// Where the first pointer report after the wheel opened found it.
+    private var firstReport: CGPoint?
+    /// How far the pointer goes from its first report before the wheel follows it.
+    static let pointerTravel: CGFloat = 6
 
     /// Moves the pointer to a point in display coordinates (y down from the primary display's
     /// top), without a pause before it moves again. Tests record it instead.
@@ -369,6 +376,7 @@ final class RadialMenu {
         screenFrame = display.frame
         pointerOffset = .zero
         pointerHasMoved = false
+        firstReport = nil
         keyboardIndex = nil
         selection = .cancel
         wheel.selection = .cancel
@@ -540,10 +548,15 @@ final class RadialMenu {
     }
 
     /// A mouse-moved or dragged event: the pointer is at `location` (screen coordinates),
-    /// having moved by `delta`. An event that did not move it changes nothing until it has.
+    /// having moved by `delta`. Nothing changes until the pointer has gone `pointerTravel` from
+    /// where the first report found it.
     func pointerMoved(to location: CGPoint, delta: CGVector) {
-        guard pointerHasMoved || delta.dx != 0 || delta.dy != 0 else { return }
-        pointerHasMoved = true
+        if !pointerHasMoved {
+            guard delta.dx != 0 || delta.dy != 0 else { return }
+            guard let first = firstReport else { firstReport = location; return }
+            guard hypot(location.x - first.x, location.y - first.y) >= Self.pointerTravel else { return }
+            pointerHasMoved = true
+        }
         let o = CGPoint(x: location.x - center.x, y: location.y - center.y)
         if RadialGeometry.radius(of: o) >= geometry.deadZone { keyboardIndex = nil }
         pointerOffset = o

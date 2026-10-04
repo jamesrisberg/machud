@@ -57,6 +57,12 @@ final class RadialOpeningTests: XCTestCase {
                     XCTAssertEqual(menu.selection, .cancel, "\(what), after a modifier change")
                     menu.pointerMoved(to: pointer, delta: .zero)
                     XCTAssertEqual(menu.selection, .cancel, "\(what), after an event that did not move")
+                    // A pen or a remotely driven pointer reports where it really is, away from
+                    // the centre the pointer was moved to, with a delta: still nothing.
+                    menu.pointerMoved(to: CGPoint(x: pointer.x + 2, y: pointer.y - 1), delta: CGVector(dx: 2, dy: 1))
+                    XCTAssertEqual(menu.selection, .cancel, "\(what), after a first event that moved")
+                    menu.pointerMoved(to: CGPoint(x: pointer.x + 6, y: pointer.y + 1), delta: CGVector(dx: 4, dy: -2))
+                    XCTAssertEqual(menu.selection, .cancel, "\(what), within a few points of the first event")
                     XCTAssertEqual(menu.releaseOutcome, .cancelled, what)
                     if hypot(menu.center.x - pointer.x, menu.center.y - pointer.y) > 0.5 {
                         XCTAssertEqual(warps, [RadialMenu.displayPoint(menu.center, primaryHeight: display.primaryHeight)], what)
@@ -130,9 +136,36 @@ final class RadialOpeningTests: XCTestCase {
         let r = (band.r0 + band.r1) / 2
         let a = g.centerAngle(of: 2)
         let target = CGPoint(x: menu.center.x + r * CGFloat(sin(a)), y: menu.center.y + r * CGFloat(cos(a)))
+        menu.pointerMoved(to: CGPoint(x: menu.center.x + 1, y: menu.center.y), delta: CGVector(dx: 1, dy: 0))
+        XCTAssertEqual(menu.selection, .cancel)
         menu.pointerMoved(to: target, delta: CGVector(dx: 3, dy: 0))
         XCTAssertEqual(menu.selection, .wedge(index: 2, ring: .middle))
         XCTAssertEqual(menu.releaseOutcome, RadialMenu.outcome(of: wedges[2].kind, ring: .middle))
+    }
+
+    /// Where the pointer's first report after the wheel opens is far from the centre (a
+    /// hovering pen, a remotely driven pointer: moving the pointer did not stick), nothing
+    /// lights there; once the pointer has gone on a few points from that first report, the
+    /// wheel lights what is under it.
+    func testAFirstReportAwayFromTheCentreLightsNothingUntilThePointerGoesOn() {
+        let menu = menu()
+        let display = Self.displays[1]
+        let wedges = RadialLayoutTests.wedges(8, RadialLayoutTests.short)
+        menu.prepare(wedges: wedges, at: CGPoint(x: display.frame.minX + 3, y: display.frame.minY + 3), on: display, movesPointer: true)
+        let g = menu.geometry
+        let band = g.band(.outer, of: 1)
+        let r = (band.r0 + band.r1) / 2
+        let a = g.centerAngle(of: 1)
+        let pen = CGPoint(x: menu.center.x + r * CGFloat(sin(a)), y: menu.center.y + r * CGFloat(cos(a)))
+        menu.pointerMoved(to: pen, delta: CGVector(dx: 140, dy: -90))
+        XCTAssertEqual(menu.selection, .cancel, "the first report, far from the centre")
+        XCTAssertEqual(menu.releaseOutcome, .cancelled)
+        menu.pointerMoved(to: CGPoint(x: pen.x + 3, y: pen.y + 3), delta: CGVector(dx: 3, dy: 3))
+        XCTAssertEqual(menu.selection, .cancel, "a few points on")
+        let on = CGPoint(x: pen.x + 6 * CGFloat(sin(a)), y: pen.y + 6 * CGFloat(cos(a)))
+        menu.pointerMoved(to: on, delta: CGVector(dx: 3, dy: 3))
+        XCTAssertEqual(menu.selection, g.selection(at: CGPoint(x: on.x - menu.center.x, y: on.y - menu.center.y)))
+        XCTAssertEqual(menu.selection, .wedge(index: 1, ring: .outer), "past the threshold it lights what is under the pointer")
     }
 
     /// The keyboard works with no pointer movement: a digit picks a wedge's inner ring, Shift
