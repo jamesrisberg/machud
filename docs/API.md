@@ -143,7 +143,10 @@ An assignment whose display is not attached is not lost. `whenScreenMissing`
 
 Desktop switching drives the Mission Control shortcuts ("Switch to Desktop N",
 else "Move left/right a space"); if both are disabled the slot fails with
-`spacesShortcutDisabled`. An existing window on a desktop that is not showing is
+`spacesShortcutDisabled`. When the system ignores the typed keystroke, System Events types
+it, only if MacHUD may already control System Events (see `permissions`): MacHUD never asks
+in the middle of an apply, and fails with `automationNotAsked` (or `automationDenied`)
+instead. A switch waits for System Events to finish typing before anything else switches. An existing window on a desktop that is not showing is
 handled by `spaces.policy` (next section).
 
 ## Placement plan

@@ -73,6 +73,10 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   loadouts held back as experimental instead of listing them.
 
 ### Fixed
+- MacHUD no longer freezes while macOS asks whether it may control System Events (which it uses
+  to switch desktops when the plain keystroke is ignored), and never asks that in the middle of
+  applying a loadout: without that permission the switch fails at once and says how to allow it
+  (`machud permissions request=1`). The keystroke is sent in the background.
 - `machud apply loadout=… screen=<display>` with a display that is not attached says so instead
   of arranging the screen under the pointer.
 - With multi-desktop loadouts on, the wheel says how many desktops a captured multi-desktop

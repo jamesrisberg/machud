@@ -54,6 +54,9 @@ enum Spaces {
         case didNotSwitch(to: Int)
         case automationDenied
         case keystrokeFailed
+        case keystrokeTimedOut
+        case automationNotAsked
+        case automationUnknown
 
         var reason: String {
             switch self {
@@ -63,6 +66,9 @@ enum Spaces {
             case .didNotSwitch: return "spaceDidNotSwitch"
             case .automationDenied: return "automationDenied"
             case .keystrokeFailed: return "keystrokeFailed"
+            case .keystrokeTimedOut: return "keystrokeTimedOut"
+            case .automationNotAsked: return "automationNotAsked"
+            case .automationUnknown: return "automationUnknown"
             }
         }
 
@@ -79,6 +85,13 @@ enum Spaces {
                 return "the system did not switch to desktop \(n)"
             case .keystrokeFailed:
                 return "System Events would not type the shortcut"
+            case .keystrokeTimedOut:
+                return "System Events did not type the shortcut in time"
+            case .automationNotAsked:
+                return "MacHUD needs permission to control System Events to switch desktops: run `machud permissions "
+                    + "request=1` (or the onboarding's Permissions step) and allow it"
+            case .automationUnknown:
+                return "MacHUD could not tell whether it may control System Events, so it did not switch desktops"
             case .automationDenied:
                 return "allow MacHUD to control System Events in System Settings › Privacy & Security › Automation"
             }
@@ -226,20 +239,66 @@ enum Spaces {
         return "tell application \"System Events\" to key code \(shortcut.keyCode)\(using)"
     }
 
-    /// True unless the Apple event was refused; -1743 is "not authorised to send".
-    @discardableResult
-    static func type(_ shortcut: Shortcut, with typist: Typist) -> Result<Void, SwitchError> {
+    /// How long System Events has to answer the keystroke (the script's own `with timeout`).
+    static let systemEventsTimeout: TimeInterval = 5
+
+    /// Whether MacHUD may control System Events, asked without prompting. System Events is
+    /// started (in the background) when it is not running, since macOS can only tell for a
+    /// running app.
+    @MainActor
+    static func systemEventsConsent(_ answer: @escaping (Permissions.Status) -> Void) {
+        let id = "com.apple.systemevents"
+        let status = Permissions.automation(id)
+        guard status == .notRunning, let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) else {
+            answer(status); return
+        }
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = false
+        NSWorkspace.shared.openApplication(at: url, configuration: config) { _, _ in
+            DispatchQueue.main.async { MainActor.assumeIsolated { answer(Permissions.automation(id)) } }
+        }
+    }
+
+    /// Type `shortcut`. Through System Events only when MacHUD may already control it: macOS is
+    /// never asked in the middle of an apply, and a keystroke is never queued behind its question
+    /// (it would be typed whenever that is answered, after the switch back). The script runs off
+    /// the main thread (`AppleScriptRunner`), inside its own `with timeout`, and `completion` is
+    /// called, on the main thread, only once it has finished, so whatever switches next comes
+    /// after any keystroke it typed.
+    @MainActor
+    static func type(_ shortcut: Shortcut, with typist: Typist,
+                     consent: @escaping (@escaping (Permissions.Status) -> Void) -> Void = Spaces.systemEventsConsent,
+                     run: @escaping (String, @escaping (Result<String, AppleScriptRunner.Failure>) -> Void) -> Void
+                         = AppleScriptRunner.run,
+                     completion: @escaping (Result<Void, SwitchError>) -> Void) {
         switch typist {
         case .cgEvent:
             post(shortcut)
-            return .success(())
+            completion(.success(()))
         case .systemEvents:
-            var error: NSDictionary?
-            NSAppleScript(source: systemEventsScript(for: shortcut))?.executeAndReturnError(&error)
-            guard let error else { return .success(()) }
-            let code = (error[NSAppleScript.errorNumber] as? NSNumber)?.intValue ?? 0
-            NSLog("MacHUD: System Events keystroke failed: %@", "\(error)")
-            return .failure(code == -1743 ? .automationDenied : .keystrokeFailed)
+            consent { status in
+                switch status {
+                case .granted:
+                    break
+                case .notAsked:
+                    completion(.failure(.automationNotAsked)); return
+                case .denied:
+                    completion(.failure(.automationDenied)); return
+                case .notRunning, .unknown:
+                    completion(.failure(.automationUnknown)); return
+                }
+                run(AppleScriptRunner.withTimeout(Int(systemEventsTimeout), systemEventsScript(for: shortcut))) { result in
+                    MainActor.assumeIsolated {
+                        if case .failure(let failure) = result { NSLog("MacHUD: System Events keystroke failed: %@", failure.reason) }
+                        switch result {
+                        case .success: completion(.success(()))
+                        case .failure(.automationDenied): completion(.failure(.automationDenied))
+                        case .failure(.timedOut): completion(.failure(.keystrokeTimedOut))
+                        case .failure(.failed): completion(.failure(.keystrokeFailed))
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -274,13 +333,15 @@ enum Spaces {
             completion(.success(target))
         case .success(.direct(let shortcut)), .success(.steps(let shortcut, _)):
             guard budget > 0 else { completion(.failure(.didNotSwitch(to: target))); return }
-            if case .failure(let error) = type(shortcut, with: typist) { completion(.failure(error)); return }
-            waitForChange {
-                guard Self.monitor(for: screen)?.currentIndex != current else {
-                    completion(.failure(.didNotSwitch(to: target)))
-                    return
+            type(shortcut, with: typist) { typed in
+                if case .failure(let error) = typed { completion(.failure(error)); return }
+                waitForChange {
+                    guard Self.monitor(for: screen)?.currentIndex != current else {
+                        completion(.failure(.didNotSwitch(to: target)))
+                        return
+                    }
+                    perform(target, on: screen, with: typist, budget: budget - 1, completion: completion)
                 }
-                perform(target, on: screen, with: typist, budget: budget - 1, completion: completion)
             }
         }
     }

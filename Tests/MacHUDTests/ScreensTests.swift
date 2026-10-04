@@ -320,6 +320,67 @@ final class SpacesKeystrokeTests: XCTestCase {
     }
 }
 
+/// System Events types the keystroke off the main thread, only when MacHUD may already control
+/// it (macOS is never asked in the middle of an apply), and the switch waits for the script to
+/// finish, however long it takes: a keystroke typed late must not land after the switch back.
+@MainActor
+final class SpacesSystemEventsTypistTests: XCTestCase {
+    private let shortcut = Spaces.Shortcut(enabled: true, keyCode: 124, modifiers: 8_650_752)
+    private typealias Run = (String, @escaping (Result<String, AppleScriptRunner.Failure>) -> Void) -> Void
+
+    private func type(consent: Permissions.Status = .granted, run: @escaping Run,
+                      wait: TimeInterval = 3) -> (result: Result<Void, Spaces.SwitchError>?, calls: Int) {
+        var result: Result<Void, Spaces.SwitchError>?
+        var calls = 0
+        Spaces.type(shortcut, with: .systemEvents, consent: { $0(consent) }, run: run) { result = $0; calls += 1 }
+        _ = spin(until: { result != nil }, timeout: wait)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        return (result, calls)
+    }
+
+    func testTheKeystrokeIsSentAsAScriptWithItsOwnTimeout() {
+        var sent: String?
+        let typed = type { source, done in sent = source; done(.success("")) }
+        guard case .success = typed.result else { return XCTFail("\(String(describing: typed.result))") }
+        XCTAssertEqual(typed.calls, 1)
+        XCTAssertTrue(sent?.contains("tell application \"System Events\" to key code 124 using {control down}") == true)
+        XCTAssertTrue(sent?.hasPrefix("with timeout of") == true, sent ?? "")
+    }
+
+    func testWithoutConsentNothingIsQueuedAndMacOSIsNotAsked() {
+        for (consent, expected) in [(Permissions.Status.notAsked, Spaces.SwitchError.automationNotAsked),
+                                    (.denied, .automationDenied), (.notRunning, .automationUnknown),
+                                    (.unknown, .automationUnknown)] {
+            var ran = false
+            let typed = type(consent: consent) { _, done in ran = true; done(.success("")) }
+            XCTAssertFalse(ran, "\(consent): no script")
+            guard case .failure(let error) = typed.result else { return XCTFail("\(consent): expected a failure") }
+            XCTAssertEqual(error.reason, expected.reason, "\(consent)")
+        }
+        XCTAssertTrue(Spaces.SwitchError.automationNotAsked.message.contains("machud permissions request=1"))
+    }
+
+    func testTheSwitchWaitsForALateKeystroke() {
+        // System Events answers well after the old 5 s limit would have given up (scaled down here).
+        let started = Date()
+        let typed = type(run: { _, done in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { done(.success("")) }
+        })
+        guard case .success = typed.result else { return XCTFail("\(String(describing: typed.result))") }
+        XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(started), 0.8, "answered when the script finished, not before")
+        XCTAssertEqual(typed.calls, 1)
+    }
+
+    func testAScriptThatFailsSaysWhy() {
+        guard case .failure(.automationDenied) = type(run: { _, done in done(.failure(.automationDenied)) }).result else {
+            return XCTFail("expected automationDenied")
+        }
+        guard case .failure(.keystrokeFailed) = type(run: { _, done in done(.failure(.failed("nope"))) }).result else {
+            return XCTFail("expected keystrokeFailed")
+        }
+    }
+}
+
 final class DesktopWalkTests: XCTestCase {
     private let screens = [
         ScreenDescriptor(name: "DELL S2722QC", isMain: true, isBuiltin: false),
