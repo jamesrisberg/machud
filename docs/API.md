@@ -1085,7 +1085,7 @@ are in [MCP.md](MCP.md).
 ## Files
 
 - `~/.config/machud/layouts.json` — layouts, loadouts, hotkeys, trigger, grid, browser, apps, menuBar, toolDock, spaces, widgets. Hot-reloaded
-  on save (atomic or in place).
+  on save (atomic or in place). An isolated copy keeps its own (see Running several instances).
   `spaces`: `{"policy": "bring"}` (or `launchNew`, `leave`): what apply does with a window on a desktop that is not
   showing while multi-desktop loadouts are on (see Placement plan).
   `menuBar`: `{"enabled": false, "autoCollapseSeconds": 10, "hotkey": {"key": "b", "modifiers": ["control", "option"]}, "consumeSiblings": true}`,
@@ -1127,9 +1127,11 @@ are in [MCP.md](MCP.md).
 Set `MACHUD_SOCKET`, `MACHUD_CONFIG` and `MACHUD_NO_HOTKEYS=1` to run an
 isolated copy (used for tests) alongside the real one. An isolated copy does not
 watch window drags (the real one already snaps them); `MACHUD_DRAG=1` turns its
-drag snapping back on. Its tool dock publishes to
-`docks.json` beside `MACHUD_CONFIG` (or `MACHUD_DOCKS_FILE`), not the shared file, and its
-`host.json` there too (else `<MACHUD_SOCKET>.host.json`, or `MACHUD_HOST_FILE`), so it never hides
+drag snapping back on. Its config is the file `MACHUD_CONFIG` names; with only `MACHUD_SOCKET` it is
+`<MACHUD_SOCKET without its extension>-config/layouts.json`, so an isolated copy never reads or saves
+`~/.config/machud`. Its `state/` folder is beside the config. Its tool dock publishes to
+`docks.json` beside the config (or `MACHUD_DOCKS_FILE`), not the shared file, and its
+`host.json` there too (or `MACHUD_HOST_FILE`), so it never hides
 the real siblings' icons. Its `diagnose` snapshots go to a `diagnostics` folder beside `MACHUD_CONFIG` (else
 beside the socket), not to `~/Library/Logs/MacHUD`.
 Its voice host listens on `$MACHUD_VOICE_SOCKET`, else `<MACHUD_SOCKET>-voice.sock` (else
