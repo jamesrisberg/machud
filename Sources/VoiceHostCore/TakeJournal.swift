@@ -10,6 +10,9 @@ public struct VoiceTakeRecord: Codable, Equatable, Sendable {
         /// Typed at the cursor: a dictation, or an agent take the brain could not take then
         /// (`reason` says why).
         case typed
+        /// Neither sent nor typed: an agent take the wake word started, which the brain could not
+        /// take then (`reason` says why).
+        case dropped
         /// Thrown away: no speech was heard, or the words came out empty.
         case nothingHeard
         /// Never recorded (the host or the dictation refused it), or the brain refused the turn;
@@ -32,7 +35,7 @@ public struct VoiceTakeRecord: Codable, Equatable, Sendable {
     public var end: VoiceTakeEnd.Reason?
     public var outcome: Outcome
     public var reason: String?
-    /// How many characters were sent or typed; nil when nothing was.
+    /// How many characters were sent, typed or dropped; nil when there were none.
     public var characters: Int?
 
     public init(date: String, trigger: VoiceTakeTrigger, mode: VoiceMode, seconds: TimeInterval? = nil,

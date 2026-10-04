@@ -1310,8 +1310,9 @@ final class VoiceHostControllerTests: XCTestCase {
         withExtendedLifetime(controller) {}
     }
 
-    /// An agent take that finishes while the agent works is typed at the cursor; the journal says so and why.
-    func testAWakeTakeThatFinishesWhileTheAgentWorksIsJournaledAsTyped() async throws {
+    /// A take the wake word started that finishes while the agent works is dropped, not typed
+    /// anywhere: the orb says so and the journal records it with the count, never the words.
+    func testAWakeTakeThatFinishesWhileTheAgentWorksIsDroppedNotTyped() async throws {
         var settings = VoiceHostSettings()
         settings.voice.wakeWordEnabled = true
         let controller = makeController(settings)
@@ -1320,14 +1321,81 @@ final class VoiceHostControllerTests: XCTestCase {
         brain.push(status: "running", requestId: "other")
         dictation.finish("seventy seconds of an audiobook")
         await settled(controller)
-        XCTAssertEqual(dictation.inserted, ["seventy seconds of an audiobook"])
+        XCTAssertTrue(dictation.inserted.isEmpty, "nothing is typed")
+        XCTAssertTrue(brain.submitted.isEmpty)
+        XCTAssertEqual(VoiceHostController.wakeDroppedBusy, "Heard you, but the agent is still working")
+        XCTAssertEqual(controller.state.phase, .failed(VoiceHostController.wakeDroppedBusy))
         let record = try XCTUnwrap(journal.records.last)
-        XCTAssertEqual(record.outcome, .typed)
-        XCTAssertEqual(record.reason, VoiceHostController.agentBusyPasted)
+        XCTAssertEqual(record.outcome, .dropped)
+        XCTAssertEqual(record.reason, VoiceHostController.wakeDroppedBusy)
         XCTAssertEqual(record.mode, .agent)
         XCTAssertEqual(record.characters, 31)
         XCTAssertEqual(record.trigger, .wake(score: 0.973, phrase: "Hey Jarvis", frames: 2, peak: 0.973, confirmed: true,
                                              confirmMs: 0))
+        XCTAssertEqual(lines("take dropped").count, 1)
+        XCTAssertFalse(logged.contains { $0.contains("audiobook") }, "never the words")
+        clock.advance(to: VoiceHostController.failureDisplay)
+        XCTAssertEqual(controller.state.phase, .idle)
+    }
+
+    func testAWakeTakeThatFinishesWhileTheBrainIsOffOrBlockedIsDropped() async {
+        var settings = VoiceHostSettings()
+        settings.voice.wakeWordEnabled = true
+        let controller = makeController(settings)
+        wake.detect()
+        controller.perform(.stop)
+        var off = settings
+        off.brainEnabled = false
+        controller.apply(off)
+        dictation.finish("remember milk")
+        XCTAssertTrue(dictation.inserted.isEmpty)
+        XCTAssertEqual(controller.state.phase, .failed(VoiceHostController.wakeDroppedBrainOff))
+        XCTAssertEqual(VoiceHostController.wakeDroppedBrainOff, "Heard you, but the brain is off")
+        XCTAssertEqual(journal.records.last?.outcome, .dropped)
+
+        controller.apply(settings)
+        wake.detect()
+        controller.perform(.stop)
+        brain.onHealthChanged?(.unavailable(Self.noWorkspace))
+        dictation.finish("remember eggs")
+        await settled(controller)
+        XCTAssertTrue(dictation.inserted.isEmpty)
+        XCTAssertTrue(brain.submitted.isEmpty)
+        let blocked = "Heard you, but the agent cannot take it: Choose a workspace folder for the agent"
+        XCTAssertEqual(VoiceHostController.wakeDropped(Self.noWorkspace), blocked)
+        XCTAssertEqual(controller.state.phase, .failed(blocked))
+        XCTAssertEqual(journal.records.map(\.outcome), [.dropped, .dropped])
+        XCTAssertEqual(journal.records.last?.reason, blocked)
+    }
+
+    /// The fn key's agent gesture, the orb and the socket's `ask` keep typing an agent take the
+    /// brain cannot take at the cursor, saying so.
+    func testTakesNotStartedByTheWakeWordAreStillTypedWhenTheAgentCannotTakeThem() async {
+        let controller = makeController()
+        /// Starts a take while the agent is free; it finishes once the agent is busy.
+        func take(_ words: String, _ start: () -> Void) {
+            brain.push(status: "idle", requestId: "other")
+            start()
+            brain.push(status: "running", requestId: "other")
+            dictation.finish(words)
+        }
+        take("from a script") {
+            controller.perform(.start(.agent), trigger: .socket(action: "ask"))
+            controller.perform(.stop)
+        }
+        take("from the orb") {
+            controller.perform(.orbClicked)
+            controller.perform(.stop)
+        }
+        take("from the key") {
+            keys.send(.begin(.alternate))
+            keys.send(.end)
+        }
+        await settled(controller)
+        XCTAssertEqual(dictation.inserted, ["from a script", "from the orb", "from the key"])
+        XCTAssertEqual(journal.records.map(\.outcome), [.typed, .typed, .typed])
+        XCTAssertEqual(Set(journal.records.compactMap(\.reason)), [VoiceHostController.agentBusyPasted])
+        XCTAssertEqual(controller.state.phase, .failed(VoiceHostController.agentBusyPasted))
     }
 
     func testTakesThrownAwayAreJournaledWithWhy() async {

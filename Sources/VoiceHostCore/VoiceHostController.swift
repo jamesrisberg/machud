@@ -21,8 +21,9 @@ import VoiceKit
 ///
 /// One turn at a time: the companion refuses a second one, so while the brain works an agent
 /// take is refused, and a take moved to the agent then (or while the brain is off) is typed at
-/// the cursor instead. A typed turn (`send(typed:)`) goes to the same session and is refused the
-/// same way, with the reason returned to the sender rather than shown under the orb.
+/// the cursor instead, unless the wake word started it: that one is dropped, typed nowhere. A
+/// typed turn (`send(typed:)`) goes to the same session and is refused the same way, with the
+/// reason returned to the sender rather than shown under the orb.
 ///
 /// Every turn, spoken or typed, and every snapshot also go to `conversation`, which the
 /// presenter draws when the card is pinned or expanded (`state.cardMode`) and which is kept in
@@ -76,6 +77,8 @@ public final class VoiceHostController: VoiceHostActing {
     static let brainOffPasted = "The brain is off — pasted instead"
     static let agentBusy = "The agent is still working"
     static let agentBusyPasted = "The agent is still working — pasted instead"
+    static let wakeDroppedBrainOff = "Heard you, but the brain is off"
+    static let wakeDroppedBusy = "Heard you, but the agent is still working"
     static let voiceOff = "Voice is off"
     static let voiceMuted = "Voice is muted"
     static let wakeOff = "The wake word is off"
@@ -966,8 +969,8 @@ public final class VoiceHostController: VoiceHostActing {
 
     // MARK: - Brain turns
 
-    /// An agent take's words: to the brain, or typed at the cursor when it cannot take them now.
-    /// `ended` is the take they came from, for the journal.
+    /// An agent take's words: to the brain, or, when it cannot take them now, typed at the cursor
+    /// or dropped (`notTaken`). `ended` is the take they came from, for the journal.
     private func submit(_ text: String, isLatest: Bool, ended: Take?) {
         let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else {
@@ -976,10 +979,25 @@ public final class VoiceHostController: VoiceHostActing {
             return
         }
         // The brain went off, or another turn started, while this take was recording.
-        guard brainEnabled, let brain else { return paste(prompt, notice: Self.brainOffPasted, ended: ended) }
-        if let problem = blockingBrainProblem { return paste(prompt, notice: Self.pasted(problem), ended: ended) }
-        guard !agentBusy else { return paste(prompt, notice: Self.agentBusyPasted, ended: ended) }
+        guard brainEnabled, let brain else {
+            return notTaken(prompt, pasted: Self.brainOffPasted, dropped: Self.wakeDroppedBrainOff, ended: ended)
+        }
+        if let problem = blockingBrainProblem {
+            return notTaken(prompt, pasted: Self.pasted(problem), dropped: Self.wakeDropped(problem), ended: ended)
+        }
+        guard !agentBusy else {
+            return notTaken(prompt, pasted: Self.agentBusyPasted, dropped: Self.wakeDroppedBusy, ended: ended)
+        }
         begin(prompt, source: .voice, isLatest: isLatest, brain: brain, ended: ended)
+    }
+
+    /// Words the brain cannot take now. The wake word's are dropped: whoever spoke may not have
+    /// been talking to this Mac, so they are typed nowhere. The fn key's, the orb's and the
+    /// socket's are typed at the cursor, where the user is.
+    private func notTaken(_ text: String, pasted: String, dropped: String, ended: Take?) {
+        guard let ended, case .wake = ended.trigger else { return paste(text, notice: pasted, ended: ended) }
+        journal(ended, mode: .agent, outcome: .dropped, reason: dropped, characters: text.count)
+        fail(dropped)
     }
 
     /// Sends `text` to the agent as a typed turn, to the same session as voice. Nil once it is
@@ -1557,8 +1575,17 @@ public final class VoiceHostController: VoiceHostActing {
     }
 
     static func pasted(_ problem: String) -> String {
-        let reason = problem.hasSuffix(".") ? String(problem.dropLast()) : problem
-        return "\(reason) — pasted instead"
+        "\(sentence(problem)) — pasted instead"
+    }
+
+    /// The orb's notice for a wake take dropped because of the brain's `problem`.
+    static func wakeDropped(_ problem: String) -> String {
+        "Heard you, but the agent cannot take it: \(sentence(problem))"
+    }
+
+    /// `problem` without its full stop, to go inside a notice.
+    private static func sentence(_ problem: String) -> String {
+        problem.hasSuffix(".") ? String(problem.dropLast()) : problem
     }
 
     // MARK: - Sessions

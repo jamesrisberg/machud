@@ -943,13 +943,19 @@ A line is `{date, trigger, mode, seconds?, end?, outcome, reason?, characters?}`
 take started (ISO 8601, as above), `mode` where its words were meant to go (`agent` or
 `dictation`), `seconds` and `end` how long it recorded and why it stopped (`reason` above), and
 `outcome` what became of it: `sent` (the brain took it as a turn), `typed` (typed at the cursor: a
-dictation, or an agent take the brain could not take then, with the notice as `reason`, such as
-`The agent is still working — pasted instead`), `nothingHeard` (no speech, or the words came out
-empty), `refused` (it never recorded, or the brain refused the turn: `The brain did not take the
-turn (409)`, the companion's status code, never its own words), `cancelled` (thrown away, or still
-in flight when the voice host quit: `The voice host quit`; a turn the brain had not taken by then
-counts as in flight) or `failed` (the dictation failed; `reason`). `characters` counts what was
-sent or typed; the words themselves are never kept.
+dictation, or an agent take started by the fn key, the orb or the socket that the brain could not
+take then, with the notice as `reason`, such as `The agent is still working — pasted instead`),
+`dropped` (an agent take the wake word started that the brain could not take then: the brain off,
+a problem it has, or the agent still working; it is typed nowhere, the orb shows the notice for
+3 s and the line has it as `reason`: `Heard you, but the brain is off`, `Heard you, but the agent
+cannot take it: <the brain's problem>`, `Heard you, but the agent is still working`),
+`nothingHeard` (no speech, or the words came out empty), `refused` (it never recorded, or the
+brain refused the turn: `The brain did not take the turn (409)`, the companion's status code,
+never its own words), `cancelled` (thrown away, or still in flight when the voice host quit: `The
+voice host quit`; a turn the brain had not taken by then counts as in flight) or `failed` (the
+dictation failed; `reason`). `characters` counts what was sent, typed or dropped; the words
+themselves are never kept. A dropped take's words still reach the text feed with
+`feedTranscripts`, as every finished take's do.
 
 A take the host refuses before it records is a line too, with no `seconds` or `end`: voice off,
 muted (the socket's `ask` and `dictate`), the brain off or unable to take a turn, the agent still
