@@ -10,13 +10,16 @@ apps that make up the rest of the HUD:
 
 - **Snap**: hold **Shift** while dragging any window and it snaps into the region
   under the cursor. **Tab** mid-drag bounces between layouts, **Esc** cancels.
-- **Loadouts**: which window goes where. A loadout owns a layout (its regions,
-  drawn in a full-screen visual editor or captured from your windows) and what lives
-  in each region (an app, a web page in an Arc, Safari, Chrome app-mode or built-in
-  window, or a sibling app's panel). Apply one and every window is found (on any
-  display or desktop), launched if needed and placed. **Preview** first to see what
-  apply would do. A loadout can also hold the HUD itself: the tool dock and every
-  sibling's panels.
+- **Loadouts**: which window goes where, on one screen. Capture saves the display under the
+  pointer as it looks on the desktop showing; apply makes the display under the pointer, on
+  the desktop showing, look like a saved loadout, on any desktop or display. A loadout owns a
+  layout (its regions, drawn in a full-screen visual editor or captured from your windows)
+  and what lives in each region (an app, a web page in an Arc, Safari, Chrome app-mode or
+  built-in window, or a sibling app's panel). Apply finds each window, launches the app if
+  needed and places it. **Preview** first to see what apply would do. A loadout can also hold
+  the HUD itself: the tool dock and every sibling's panels. Loadouts that span several
+  desktops or displays are [experimental](#multi-desktop-loadouts-experimental) and off by
+  default.
 - **Radial wheel**: hold **⌃⌥Space**, drag toward a loadout, release. Three rings: preview,
   apply, clear this screen and apply.
 - **Tool dock**: a Dock-like strip of the sibling apps (**⌃⌥D**).
@@ -73,7 +76,7 @@ permissions request=1` shows every missing prompt (Accessibility and Automation)
 | --- | --- |
 | Shift while dragging a window | Snap it into the region under the cursor |
 | Tab / Esc mid-drag | Next layout / cancel the snap |
-| ⌃⌥Space (hold) | Radial wheel: drag to a loadout, release. Inner ring previews, middle ring applies, outer ring clears this screen first; **P** previews the highlighted loadout too. Capture (this screen / all displays / draw a new layout), Park (park the front window / restore parked) and, when an app serves widgets, Widgets (reveal / edit). The hotkey is a setting |
+| ⌃⌥Space (hold) | Radial wheel: drag to a loadout, release. Inner ring previews, middle ring applies, outer ring clears this screen first; **P** previews the highlighted loadout too. Capture (this screen, or draw a new layout), Park (park the front window / restore parked) and, when an app serves widgets, Widgets (reveal / edit). The hotkey is a setting |
 | ⌃⌥D | Show / hide the tool dock |
 | ⌃⌥W | Raise the desktop widgets above your windows; again or Esc lowers them |
 | ⌃⌥B | Collapse / expand the menu bar (when menu bar management is on) |
@@ -92,8 +95,10 @@ Each loadout can also have its own hotkey. All hotkeys live in `layouts.json`.
 - Menu bar icon, top to bottom: snapping and the trigger key (Shift / Option / Control /
   Command / Always), Launch at Login, Permissions, Settings…; the Menu Bar manager;
   **Loadouts** (each with Preview…, Apply, Clear This Screen + Apply, Edit Layout…, Apply
-  at Startup and Delete; then Capture Windows as Loadout…, Save Dock and Panels as HUD
-  Loadout…, Draw a New Layout…, the Snap Layout ⇧-drag uses, and Restore Cleared Windows);
+  at Startup and Delete…; then Capture This Screen as Loadout…, Save Dock and Panels as HUD
+  Loadout…, Draw a New Layout…, Snap Layout (the layout ⇧-drag uses, with Edit Snap
+  Layout…) and Restore Cleared Windows; a dimmed line says how many multi-desktop loadouts
+  are hidden, when some are);
   the Tool Dock, **Widgets** (Reveal, Edit Widgets…, Add Widget, and each widget's Settings…,
   Float Above Windows and Remove), then **Apps** (Launch All Apps and Quit All Apps, plus Relaunch Outdated Apps
   while an app runs an older build than its bundle on disk, then each app with Show, its own menu,
@@ -101,8 +106,8 @@ Each loadout can also have its own hotkey. All hotkeys live in `layouts.json`.
   (a snapshot of where MacHUD's windows really are, for when one vanishes; also `machud diagnose`).
 - Capturing asks for the loadout's name, whether to also keep its layout on its own (for
   ⇧-drag and other loadouts, under its own name) or only for this loadout, and whether to
-  save the tool dock and the apps' panels with it. Windows MacHUD has parked are captured
-  as parked slots and park again on apply.
+  save the tool dock and the apps' panels with it (unticked until you tick it). Windows
+  MacHUD has parked are captured as parked slots and park again on apply.
 
 ### Tool dock
 
@@ -162,7 +167,10 @@ dev servers that are up. MacHUD places them and remembers where. widgetHUD serve
 
 ### Loadouts
 
-A loadout names a layout and assigns an occupant per region:
+A loadout is one screen. Capture saves the display under the pointer, on the desktop showing;
+apply arranges the display under the pointer, on the desktop showing. Set a screen up the way
+you want it, capture it, then go to any other desktop or display and apply it there. A
+loadout names a layout and assigns an occupant per region:
 
 ```json
 { "name": "Work", "layout": "Thirds", "slots": [
@@ -172,28 +180,81 @@ A loadout names a layout and assigns an occupant per region:
 ]}
 ```
 
-The easy way: arrange windows, then **Capture…** from the wheel, the menu bar,
-or `machud capture name=Work`. Capture derives the layout from the windows
+**Capture**: arrange the windows on the screen you are looking at, then **Capture This Screen
+as Loadout…** from the menu bar, **Capture…** on the wheel, or `machud capture name=Work`
+(`screen=<display>` picks another display). Capture derives the layout from the windows
 themselves (one region per window at its exact frame, overlapping windows kept
 overlapping and in stacking order)
-and the loadout that fills it, under one name. Move windows and recapture to
+and the loadout that fills it, under one name. The tool dock and the apps' panels are saved
+only when asked (the sheet's HUD box, or `hud=1`). Move windows and recapture to
 update it, or refine regions and occupants in the editor. Sibling apps' panels
 are windows too: ⇧-drag them into regions or capture them like anything else.
-Apply from
-the wheel, the menu bar, a per-loadout hotkey, or `machud apply loadout=Work`.
-`clear=1` first minimises the other windows on each screen the loadout covers (on the
-desktops it visits); `machud restore` or Loadouts › Restore Cleared Windows undoes that.
+
+**Apply** from the wheel, the menu bar, a per-loadout hotkey, or `machud apply loadout=Work`
+(`screen=<display>` picks another display). It does not matter which desktop the windows were
+on when you captured. What apply does with each slot's window:
+
+- **On this screen's desktop**: moved and resized into its region (or left, when it is there).
+- **Visible on another display**: moved over. **Minimized**: restored. **In a hidden app**
+  (⌘H): the app is unhidden where it is and the window placed.
+- **Only on another desktop**: an app with a New Window menu item gets a new window here and
+  the other one stays where it is. An app without one (Messages and Signal, for instance), and
+  Arc, whose new windows open on their own desktop, is fetched instead: MacHUD shows the
+  window's desktop, brings the window over and switches back, the one time an apply switches
+  desktops. If that cannot be done (one display, the Mission Control shortcuts that reach its
+  desktop are off, the switch fails) the window is left where it is, its slot reports why and
+  the toast names the app.
+- **No window**: the app is launched, or asked for a window.
+
+Apply never closes a window. One loadout is applied at a time: a second apply while one runs is
+refused ("<name> is still being applied"). `clear=1` (the wheel's outer ring, the menu's
+**Clear This Screen + Apply**) first minimises the other windows showing on that screen and
+closes the web windows MacHUD opened that the loadout does not want; `machud restore` or
+Loadouts › Restore Cleared Windows brings the minimised ones back.
 
 **Preview** (a loadout's Preview…, the wheel's inner ring, or `machud
 apply loadout=Work plan=1` for the JSON) shows every region coloured by what
-apply will do: green placed/moved, blue launched, orange a desktop switch, red
-cannot (with the reason). Regions on the desktops that are showing can be dragged and
+apply will do: green placed/moved, blue launched, orange a desktop switch (a window fetched
+from another desktop), red cannot (with the reason). Regions can be dragged and
 resized right there (snapping to the layout grid); Apply saves the changes into the
-loadout's layout and applies, Edit Layout… opens the full editor. Slots bound to other
-desktops appear small in an "Other desktops" mini-map by the controls. A window already
-open on another display is moved; one on a desktop that is not showing is fetched, given
-a new window, or left, per `"spaces": {"policy": "bring" | "launchNew" | "leave"}`.
+loadout's layout and applies, Edit Layout… opens the full editor.
 `docs/PLACEMENT.md` spells out the rules.
+
+### Multi-desktop loadouts (experimental)
+
+Loadouts that arrange several displays at once, or several desktops, are experimental and
+off by default. The setting is **Multi-desktop loadouts**, `experimental.multiDesktopLoadouts`:
+in MacHUD's settings window (status menu › Settings…, the MacHUD tab, the Experimental
+section), or `machud settings set experimental.multiDesktopLoadouts=true`. It takes effect at
+once and needs no relaunch. It turns on:
+
+- Loadouts that span displays or desktops: per-display assignments (`screens[]`) and slots
+  bound to a desktop (`"space": N`), with `whenScreenMissing` for a display that is not
+  attached (see docs/API.md).
+- Capturing every screen: the menu item reads **Capture Windows as Loadout…** and takes every
+  display when more than one has windows, the wheel's capture wedge gains **Capture all
+  screens as a loadout**, and `machud capture name=Studio screens=all` does the same. Walking
+  desktops while capturing: the capture sheet's "Also walk desktops 1…N" box and
+  `desktops=1,2`. Filling one layout per display: `screens=<layout>@<display>,…`.
+- Slots bound to a desktop: apply switches to that desktop, places the slot's window there and
+  switches back. The Loadouts settings tab draws such a loadout one desktop at a time, with
+  its desktop strip and "Showing desktop", and the preview shows a small "Other desktops"
+  map.
+- `spaces.policy` in layouts.json, `"bring"` (the default), `"launchNew"` or `"leave"`: what
+  apply does with a window that is only on a desktop that is not showing. With the setting
+  off it is not read, and apply decides by the app instead (see Apply above).
+- `machud spaces action=switch n=2`: switch a display to a desktop.
+- `experimental.spacesPrivateAPI` in layouts.json: for such an apply, try SkyLight's private
+  move-to-desktop call for a window on another desktop.
+
+With the setting off, a loadout that spans displays or desktops is held back: it is not listed
+in the menu, the wheel, the Loadouts tab or `machud loadouts` (which counts the hidden ones as
+`heldBack`), its hotkey is not registered, and applying, previewing, editing or setting it as the startup
+loadout by name is refused with a message that names the setting. The startup loadout and the
+re-apply after a display change skip one and say so in a toast. A capture or HUD save will not
+reuse a hidden loadout's name. Nothing is converted or deleted: turn the setting on and they
+are back. Capturing every screen, walking desktops and `spaces action=switch` answer with an
+error that names the setting.
 
 ### Layouts and the visual editor
 
@@ -343,10 +404,13 @@ One JSON object per line in, one out: `{"command": "ping", "args": {}}` →
 - The **settings window** (status menu › Settings…, or `machud settings-window show`)
   has a tab for MacHUD, a Loadouts tab, Voice and Brain tabs for the voice host, and one
   per discovered sibling, rendered from each app's settings schema.
-- The **Loadouts** tab lists every loadout; selecting one previews it per display and
-  desktop (its apps, parked windows and HUD part), with Apply, Preview, Edit Layout, Rename,
-  Duplicate, Apply at Startup, Delete and New. The same edits from the shell: `machud
-  loadouts rename name=Work to=Studio`, `duplicate`, `delete`, `startup`.
+- The **Loadouts** tab lists the loadouts on offer; selecting one draws it on one screen (its
+  apps, parked windows and HUD part), with Apply, Preview, Edit Layout, Rename, Duplicate,
+  Apply at Startup, Delete and New (**Capture This Screen as Loadout…** or **Draw a New
+  Layout…**). A dimmed note says how many multi-desktop loadouts are hidden, when some are.
+  The same edits from the shell: `machud loadouts rename name=Work to=Studio`, `duplicate`,
+  `delete`, `startup`. With multi-desktop loadouts on, the tab lists every loadout and draws
+  one per display and desktop.
 - Voice settings live with the voice host: the Voice and Brain tabs, or `machud voice
   settings get` and `machud voice settings set voice.speakReplies=true`. The Voice tab's
   Hands-free section sets when a take started by the orb or the wake word is sent: after a
@@ -355,9 +419,11 @@ One JSON object per line in, one out: `{"command": "ping", "args": {}}` →
 - MacHUD's own settings over the socket: `machud settings get`, `machud settings set
   gap=12 trigger=option`, `machud settings schema`. Keys: `enabled`, `trigger`
   (shift/option/control/command/always), `gap`, `browser`, `orbsHidden`,
-  `menuBar.enabled`, `menuBar.autoCollapseSeconds`, `toolDock.*`.
+  `menuBar.enabled`, `menuBar.autoCollapseSeconds`, `toolDock.*`,
+  `experimental.multiDesktopLoadouts` (see
+  [Multi-desktop loadouts](#multi-desktop-loadouts-experimental)).
 - Files: `~/.config/machud/layouts.json` (layouts, loadouts, hotkeys, `apps`,
-  `toolDock`, `menuBar`, `spaces`, `startupLoadout`; hot-reloaded) and
+  `toolDock`, `menuBar`, `spaces`, `experimental`, `startupLoadout`; hot-reloaded) and
   `~/.config/machud/state/`. See [docs/API.md#files](docs/API.md#files).
 
 ## Build from source
