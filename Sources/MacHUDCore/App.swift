@@ -165,9 +165,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let widgets, !widgets.servingApps.isEmpty else { return nil }
             return .init(revealed: widgets.revealed, editing: widgets.editing)
         }
-        loadoutMenu.onWidgets = { [weak widgets] edit in
+        loadoutMenu.onWidgets = { [weak widgets] edit, on in
             guard let widgets else { return }
-            if edit { widgets.setEditing(!widgets.editing) } else { widgets.setRevealed(!widgets.revealed) }
+            if edit { widgets.setEditing(on) } else { widgets.setRevealed(on) }
         }
         installLoadoutsTab(loadoutMenu)
         scheduleStartupLoadout()

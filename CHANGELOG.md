@@ -74,7 +74,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   line, then shrinking, rather than being cut off), with its apps' icons on wheels of up to eight
   slices. Each slice's buttons line up from the centre out toward its name: Preview, Apply and
   Clear + Apply; This screen and Draw layout for Capture; Park and Restore; Reveal (Lower while
-  the widgets are up) and Edit (Done while you are editing them) for Widgets. The button under the
+  the widgets are up) and Edit (Done while you are editing them) for Widgets; letting go does
+  what the button said, even if the widgets changed while the wheel was open. The button under the
   pointer grows and glows, its slice's name lights up and the other slices fade back a little.
   The line under the wheel says only what letting go does, such as "Apply Code", "Park Safari ·
   Docs", "Focus a window to park" or "Finish editing widgets", and is never cut off; Park's names

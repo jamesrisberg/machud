@@ -73,9 +73,10 @@ final class LoadoutMenu {
 
     /// What the widgets are doing (revealed, being edited), read as the wheel opens; nil while
     /// no app serves widgets, when the wheel has no Widgets wedge. `onWidgets` is what its rings
-    /// do: toggle revealing (false) or editing (true).
+    /// do: set revealing (`edit` false) or editing (`edit` true) to `on`, the state the button
+    /// showed.
     var widgetsState: (() -> RadialMenu.Wedge.WidgetsState?)?
-    var onWidgets: ((Bool) -> Void)?
+    var onWidgets: ((_ edit: Bool, _ on: Bool) -> Void)?
 
     /// What the park wedge acts on, read as the wheel opens and again as the park wedge becomes
     /// highlighted: the focused window and the parked ones.
@@ -106,7 +107,7 @@ final class LoadoutMenu {
         radial.show(wedges: wedges(), at: point)
     }
 
-    private func handle(_ outcome: RadialMenu.Outcome) {
+    func handle(_ outcome: RadialMenu.Outcome) {
         switch outcome {
         case .cancelled:
             NSLog("MacHUD: loadout wheel cancelled")
@@ -114,8 +115,8 @@ final class LoadoutMenu {
             captureCurrent(allScreens: allScreens)
         case .drawLayout:
             DispatchQueue.main.async { self.openNewLayout?() }
-        case .widgets(let edit):
-            DispatchQueue.main.async { self.onWidgets?(edit) }
+        case .widgets(let edit, let on):
+            DispatchQueue.main.async { self.onWidgets?(edit, on) }
         case .park(let restore):
             guard requireAccessibility(for: "park windows") else { return }
             if restore {

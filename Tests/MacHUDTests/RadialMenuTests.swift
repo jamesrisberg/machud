@@ -181,11 +181,27 @@ final class RadialGeometryTests: XCTestCase {
         XCTAssertEqual(RadialMenu.outcome(of: park, ring: .inner), .park(restore: false))
         XCTAssertEqual(RadialMenu.outcome(of: park, ring: .middle), .park(restore: true))
         XCTAssertEqual(RadialMenu.outcome(of: .park(.init()), ring: .middle), .park(restore: true))
-        XCTAssertEqual(RadialMenu.outcome(of: .widgets(.init()), ring: .inner), .widgets(edit: false))
-        XCTAssertEqual(RadialMenu.outcome(of: .widgets(.init()), ring: .outer), .widgets(edit: true))
+        XCTAssertEqual(RadialMenu.outcome(of: .widgets(.init()), ring: .inner), .widgets(edit: false, on: true))
+        XCTAssertEqual(RadialMenu.outcome(of: .widgets(.init()), ring: .outer), .widgets(edit: true, on: true))
         let busy = RadialMenu.Wedge.Kind.widgets(.init(revealed: true, editing: true))
-        XCTAssertEqual(RadialMenu.outcome(of: busy, ring: .inner), .widgets(edit: false))
-        XCTAssertEqual(RadialMenu.outcome(of: busy, ring: .middle), .widgets(edit: true))
+        XCTAssertEqual(RadialMenu.outcome(of: busy, ring: .inner), .widgets(edit: false, on: false))
+        XCTAssertEqual(RadialMenu.outcome(of: busy, ring: .middle), .widgets(edit: true, on: false))
+    }
+
+    /// The widgets wedge's release does what its button says, whatever the widgets do by then:
+    /// Reveal reveals, Lower lowers, Edit starts editing, Done finishes; the target is the one
+    /// shown, not a toggle of the state at release.
+    @MainActor
+    func testTheWidgetsWedgeDoesWhatItsButtonSays() {
+        for revealed in [false, true] {
+            for editing in [false, true] {
+                let kind = RadialMenu.Wedge.Kind.widgets(.init(revealed: revealed, editing: editing))
+                let inner = RadialMenu.outcome(of: kind, ring: .inner)
+                let outer = RadialMenu.outcome(of: kind, ring: .middle)
+                XCTAssertEqual(inner, .widgets(edit: false, on: RadialMenu.ringLabel(.inner, for: kind) == "Reveal"))
+                XCTAssertEqual(outer, .widgets(edit: true, on: RadialMenu.ringLabel(.middle, for: kind) == "Edit"))
+            }
+        }
     }
 
     /// The line under the wheel says what releasing does, and nothing else: no section name,

@@ -164,9 +164,10 @@ final class RadialMenu {
         /// The park wedge's inner ring: park the focused window. Its outer ring: bring
         /// every parked window back.
         case park(restore: Bool)
-        /// The widgets wedge's inner ring: reveal or lower the widgets. Its outer ring: start or
-        /// finish editing them.
-        case widgets(edit: Bool)
+        /// The widgets wedge's inner ring: reveal the widgets (`on`) or lower them. Its outer
+        /// ring: start editing them (`on`) or finish. `on` is the state the button showed, read
+        /// as the wheel opened: the app sets it rather than toggling the state it finds then.
+        case widgets(edit: Bool, on: Bool)
     }
 
     /// Which buttons show while the pointer is not on their wedge: every wedge's, faint
@@ -239,8 +240,8 @@ final class RadialMenu {
         case (.capture, _): return .drawLayout
         case (.park, .inner): return .park(restore: false)
         case (.park, _): return .park(restore: true)
-        case (.widgets, .inner): return .widgets(edit: false)
-        case (.widgets, _): return .widgets(edit: true)
+        case (.widgets(let state), .inner): return .widgets(edit: false, on: !state.revealed)
+        case (.widgets(let state), _): return .widgets(edit: true, on: !state.editing)
         case (.loadout(let name), .inner): return .preview(loadout: name)
         case (.loadout(let name), .middle): return .apply(loadout: name, clear: false)
         case (.loadout(let name), .outer): return .apply(loadout: name, clear: true)
