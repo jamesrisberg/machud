@@ -501,10 +501,12 @@ the host's `voice.json` sits beside it and never in `~/.config/machud`. An isola
 
 Setting `MACHUD_SOCKET` or `MACHUD_CONFIG` marks the instance isolated: it does not serve
 the contract socket or show permission prompts, and it acts on windows and apps only when
-asked (no startup loadout, no re-apply on display changes, no `autoLaunch`). What it is
-asked to do still happens for real: `apply`, `capture`, `clear`, `park` and the rest move
-the user's own windows through Accessibility. Never `pkill MacHUD`: that
-kills the real one; quit an isolated copy through its own socket.
+asked (no startup loadout, no re-apply on display changes, no `autoLaunch`). Its
+`machud diagnose` snapshots go to a `diagnostics` folder beside the `MACHUD_CONFIG` file or,
+with only `MACHUD_SOCKET`, to `<socket path without extension>-diagnostics`, never to
+`~/Library/Logs/MacHUD`. What it is asked to do still happens for real: `apply`, `capture`,
+`clear`, `park` and the rest move the user's own windows through Accessibility. Never
+`pkill MacHUD`: that kills the real one; quit an isolated copy through its own socket.
 
 ## Architecture
 
