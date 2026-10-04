@@ -352,13 +352,13 @@ final class ApplyReportSlotsTests: XCTestCase {
 
     @MainActor
     func testLoadoutWedgeReportsItsRings() {
-        let wedges = [RadialMenu.Wedge(title: "Work", kind: .loadout("Work")), RadialMenu.Wedge(title: "Park", kind: .park)]
+        let wedges = [RadialMenu.Wedge(name: "Work", kind: .loadout("Work")), RadialMenu.Wedge(name: "Park", kind: .park(.init()))]
         let g = RadialGeometry(count: 2, ringCounts: wedges.map { RadialMenu.ringCount(for: $0.kind) })
         let json = RadialMenu.json(wedges: wedges, geometry: g)
         let out = json["wedges"] as? [[String: Any]]
         XCTAssertEqual(out?[0]["kind"] as? String, "loadout")
-        XCTAssertEqual(out?[0]["rings"] as? [String], ["Preview", "Apply", "Clear this screen + Apply"])
-        XCTAssertEqual(out?[1]["rings"] as? [String], ["Park front window", "Restore parked"])
+        XCTAssertEqual(out?[0]["rings"] as? [String], ["Preview", "Apply", "Clear + Apply"])
+        XCTAssertEqual(out?[1]["rings"] as? [String], ["Park", "Restore"])
     }
 }
 

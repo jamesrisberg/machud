@@ -69,6 +69,17 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - The setup guide's cards use the classic frosted material, since the guide already blurs the
   desktop behind them.
 - The radial menu is drawn dark in light mode too, so its white labels stay readable.
+- The loadout wheel reads clearly. Each loadout's name sits whole on a band around the outside
+  of the wheel (shrinking, or wrapping to a second line, rather than being cut off) and lights up
+  while the pointer is on any of its buttons. Every ring is a labelled button: Preview, Apply and
+  Clear + Apply walk outward toward the name; Capture has This screen and Draw layout; Park has
+  Park and Restore; Widgets has Reveal and Edit. Names and labels follow the curve of their
+  slice, so the ones at the bottom are upside-down. The line under the wheel says only what
+  letting go does, such as "Apply Code", "Park Safari · Docs", "Focus a window to park" or
+  "Reveal widgets", and is never cut off. A wheel of more than eight wedges grows a little so
+  every label still fits; app icons are shown under the names up to eight wedges.
+- `machud menu` gives each wedge's `name` and, beside its ring labels, the `hints` each ring
+  shows under the wheel; the selection carries its `hint` too.
 - From scripts too: while **Multi-desktop loadouts** is off, `machud loadouts` leaves out the
   loadouts that span several desktops or displays (and says how many), and `machud apply` refuses
   one by name, saying how to turn the setting on, before anything moves, as does `machud loadouts

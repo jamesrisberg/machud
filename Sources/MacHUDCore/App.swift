@@ -162,10 +162,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         loadoutMenu.library = library
         loadoutMenu.hasWidgets = { [weak widgets] in !(widgets?.servingApps.isEmpty ?? true) }
-        loadoutMenu.widgetsSubtitle = { [weak widgets] in
-            let n = widgets?.records.count ?? 0
-            return n == 0 ? "none placed" : "\(n) placed"
-        }
         loadoutMenu.onWidgets = { [weak widgets] edit in
             guard let widgets else { return }
             if edit { widgets.setEditing(!widgets.editing) } else { widgets.setRevealed(!widgets.revealed) }

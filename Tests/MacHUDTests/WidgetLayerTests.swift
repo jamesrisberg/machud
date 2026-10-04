@@ -480,8 +480,10 @@ final class WidgetLayerTests: XCTestCase {
 
     func testTheWheelHasATwoRingWidgetsWedge() {
         XCTAssertEqual(RadialMenu.ringCount(for: .widgets), 2)
-        XCTAssertEqual(RadialMenu.ringLabel(.inner, for: .widgets), "Reveal widgets")
-        XCTAssertEqual(RadialMenu.ringLabel(.middle, for: .widgets), "Edit widgets")
+        XCTAssertEqual(RadialMenu.ringLabel(.inner, for: .widgets), "Reveal")
+        XCTAssertEqual(RadialMenu.ringLabel(.middle, for: .widgets), "Edit")
+        XCTAssertEqual(RadialMenu.hint(.inner, for: .widgets), "Reveal widgets")
+        XCTAssertEqual(RadialMenu.hint(.middle, for: .widgets), "Edit widgets")
         XCTAssertEqual(Hotkeys.defaults.widgetsReveal, HotKey(key: "w", modifiers: ["control", "option"]))
         XCTAssertNil(Hotkeys(loadoutMenu: nil, dock: nil, widgets: HotKey(key: "", modifiers: [])).widgetsReveal)
     }

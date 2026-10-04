@@ -81,18 +81,44 @@ final class LoadoutMenuTests: XCTestCase {
     func testWithMultiDesktopLoadoutsOffTheWheelOffersOneScreenLoadoutsAndOneCapture() throws {
         let (menu, _, _) = try make(multiDesktop: false)
         let wedges = menu.wedges()
-        XCTAssertEqual(wedges.map(\.title), ["Code", "Reading", "My HUD", "Capture…", "Park"])
-        XCTAssertEqual(wedges.prefix(3).map(\.subtitle), ["3 windows", "1 window", "0 windows · HUD"])
+        XCTAssertEqual(wedges.map(\.name), ["Code", "Reading", "My HUD", "Capture", "Park"])
         XCTAssertEqual(wedges[3].kind, .capture(offersAllScreens: false))
-        XCTAssertFalse(wedges.contains { $0.subtitle.contains("desktop") })
     }
 
     func testWithMultiDesktopLoadoutsOnTheWheelIsAsBefore() throws {
         let (menu, _, _) = try make(multiDesktop: true)
         let wedges = menu.wedges()
-        XCTAssertEqual(wedges.map(\.title), ["Desk", "Code", "Reading", "My HUD", "Capture…", "Park"])
-        XCTAssertEqual(wedges[0].subtitle, "6 windows · 2 desktops · HUD")
+        XCTAssertEqual(wedges.map(\.name), ["Desk", "Code", "Reading", "My HUD", "Capture", "Park"])
         XCTAssertEqual(wedges[4].kind, .capture(offersAllScreens: true))
+    }
+
+    /// A loadout wedge's hints name the loadout and nothing else.
+    func testALoadoutWedgesHintsNameTheLoadout() throws {
+        let (menu, _, _) = try make(multiDesktop: false)
+        let code = try XCTUnwrap(menu.wedges().first)
+        XCTAssertEqual(RadialGeometry.Ring.allCases.map { RadialMenu.hint($0, for: code.kind) },
+                       ["Preview Code", "Apply Code", "Clear this screen and apply Code"])
+    }
+
+    /// The park wedge reads the focused window and the parked ones as the wheel opens.
+    func testTheParkWedgeKnowsTheFocusedAndTheParkedWindows() throws {
+        let (menu, _, _) = try make(multiDesktop: false)
+        menu.parkTargets = { .init(focused: "Notes · Groceries", parked: ["Mail · Inbox", "Terminal"]) }
+        let park = try XCTUnwrap(menu.wedges().last)
+        XCTAssertEqual(park.name, "Park")
+        XCTAssertEqual(park.kind, .park(.init(focused: "Notes · Groceries", parked: ["Mail · Inbox", "Terminal"])))
+        XCTAssertEqual([RadialMenu.hint(.inner, for: park.kind), RadialMenu.hint(.middle, for: park.kind)],
+                       ["Park Notes · Groceries", "Restore 2 parked windows"])
+        menu.parkTargets = { .init() }
+        XCTAssertEqual(menu.wedges().last?.kind, .park(.init()))
+    }
+
+    func testTheWidgetsWedgeIsNamedWidgets() throws {
+        let (menu, _, _) = try make(multiDesktop: false)
+        menu.hasWidgets = { true }
+        let widgets = try XCTUnwrap(menu.wedges().last)
+        XCTAssertEqual(widgets.name, "Widgets")
+        XCTAssertEqual(widgets.kind, .widgets)
     }
 
     // MARK: - Hotkeys and the default loadout
