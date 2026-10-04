@@ -45,6 +45,7 @@ enum Env {
     }
     /// Watch window drags for snapping. An isolated instance (`MACHUD_NO_HOTKEYS`) leaves
     /// global drags to the real one unless `MACHUD_DRAG=1`: two instances watching the
-    /// same drag both react to it (an empty test config used to open its editor).
+    /// same drag both react to it (an instance with an empty test config would offer to open
+    /// its editor).
     static var dragMonitor: Bool { !noHotkeys || value("DRAG") != nil }
 }

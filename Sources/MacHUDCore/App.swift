@@ -528,8 +528,8 @@ extension AppDelegate {
     }
 
     /// The set of attached displays changed: pin by-name references to the displays now
-    /// present, then put the active loadout back where it belongs (not in an isolated
-    /// instance; see `Env.autoApply`).
+    /// present, then re-apply the active loadout on the screen under the pointer (not in an
+    /// isolated instance; see `Env.autoApply`).
     fileprivate func displaysChanged() {
         toolDock.refresh()
         widgets.configChanged()

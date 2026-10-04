@@ -25,8 +25,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - The agent no longer starts listening when something in the room only sounds like the wake word.
   Once the wake word fires, the speech model checks on your Mac that “Hey Jarvis” was really said
   (about a tenth of a second) before the orb listens or a reply being spoken stops. When it was
-  not, nothing appears, nothing is sent or said, and only a line in `machud voice takes` records
-  it, never the words. If the phrase cannot be checked (no speech model, it is still loading
+  not, nothing appears, nothing is sent or said, and only a line in `machud voice takes` and the
+  system log records it, never the words. If the phrase cannot be checked (no speech model, it is still loading
   just after launch, or the last take is still being transcribed), the Voice settings say why
   under the wake word. **Confirm the wake phrase
   before listening** in the Voice settings (`voice.wakeConfirm`) turns this off.
@@ -64,6 +64,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - The capture sheet's "Include the tool dock and the apps' panels (the HUD)" box starts unticked.
 - The Loadouts settings tab draws a one-screen loadout on one screen, without naming a display,
   since it goes on whichever screen you apply it to.
+- Panels, the tool dock and widgets have a frosted backdrop: the window server's own blur of
+  what is behind them, under a tint, with the same border and sheen as before.
 - The layout editor's and the loadout preview's floating panels use the classic frosted material,
   so the desktop behind their dimmed screen stays sharp.
 - The setup guide's cards use the classic frosted material, since the guide already blurs the
@@ -170,6 +172,9 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - A glitched microphone level reading can no longer freeze the voice orb's listening pulse.
 - A glitched microphone level reading no longer makes `machud voice state` answer with an empty
   state, or throws off when a hands-free take ends: the reading is ignored.
+- The tool dock no longer shows white splotches while you switch desktops.
+- Panels, widgets and the tool dock are already blurred when a desktop switch lands, instead of
+  showing opaque for a moment first.
 
 ## [0.3.1] - 2026-10-02
 

@@ -206,7 +206,7 @@ applies to whichever you are on. What apply does with each slot's window:
   the toast names the app.
 - **No window**: the app is launched, or asked for a window.
 
-Apply never closes a window. One loadout is applied at a time: a second apply while one runs is
+Without `clear=1`, apply never closes a window. One loadout is applied at a time: a second apply while one runs is
 refused ("<name> is still being applied"). `clear=1` (the wheel's outer ring, the menu's
 **Clear This Screen + Apply**) first minimises the other windows showing on that screen and
 closes the web windows MacHUD opened that the loadout does not want; `machud restore` or
@@ -485,7 +485,7 @@ MACHUD_SOCKET=/tmp/machud-try.sock scripts/machud quit
 | `MACHUD_VOICE_NO_SPEECH` | `1`: the voice host's replies and `say` make no sound |
 | `MACHUD_VOICE_MODELS_DIR` | Where the voice host keeps downloaded models (default `~/Library/Application Support/MacHUD/Voice/Models`) |
 | `MACHUD_VOICE_HISTORY_DIR` | MacHUD's own dictation history folder (default `~/Library/Application Support/MacHUD/Voice/History`) |
-| `MACHUD_VOICE_CONVERSATION_FILE` | Where the voice host keeps the conversation with the agent (default `~/Library/Application Support/MacHUD/Voice/conversation.json`), with the take journal beside it (`takes.jsonl`, or `<name>-takes.jsonl` beside `<name>-conversation.json`) |
+| `MACHUD_VOICE_CONVERSATION_FILE` | Where the voice host keeps the conversation with the agent (default `~/Library/Application Support/MacHUD/Voice/conversation.json`), with the take journal beside it (`takes.jsonl`, or `<name>-takes.jsonl` beside `<name>-conversation.json`, or `<file name without its extension>-takes.jsonl` beside a conversation file with any other name) |
 | `SPEAKFREE_CONFIG_DIR` | SpeakFree's config folder the voice host reads (`saveRecordings`) and shares history into (default `~/.config/speakfree`) |
 | `MACHUD_VOICE_KEYCHAIN_SERVICE` | The Keychain service the voice host keeps the Grok key under |
 | `MACHUD_VOICE_LIVE` | `1`: an isolated copy runs its voice host with the microphone, brain, orb, sound and the real models folder |
@@ -501,10 +501,12 @@ the host's `voice.json` sits beside it and never in `~/.config/machud`. An isola
 
 Setting `MACHUD_SOCKET` or `MACHUD_CONFIG` marks the instance isolated: it does not serve
 the contract socket or show permission prompts, and it acts on windows and apps only when
-asked (no startup loadout, no re-apply on display changes, no `autoLaunch`). What it is
-asked to do still happens for real: `apply`, `capture`, `clear`, `park` and the rest move
-the user's own windows through Accessibility. Never `pkill MacHUD`: that
-kills the real one; quit an isolated copy through its own socket.
+asked (no startup loadout, no re-apply on display changes, no `autoLaunch`). Its
+`machud diagnose` snapshots go to a `diagnostics` folder beside the `MACHUD_CONFIG` file or,
+with only `MACHUD_SOCKET`, to `<socket path without extension>-diagnostics`, never to
+`~/Library/Logs/MacHUD`. What it is asked to do still happens for real: `apply`, `capture`,
+`clear`, `park` and the rest move the user's own windows through Accessibility. Never
+`pkill MacHUD`: that kills the real one; quit an isolated copy through its own socket.
 
 ## Architecture
 

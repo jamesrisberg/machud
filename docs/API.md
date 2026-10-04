@@ -121,7 +121,7 @@ window at all is asked to reopen, which shows a document app's window. Titles ar
 English: under another system language no item matches, so the app counts as single-window and
 its window is fetched. Apps without one (Messages, Signal, Notes, …) and Arc are single-window.
 A new window MacHUD asked for that opens on another desktop all the same is left there (MacHUD
-never closes a window), and the slot says so.
+leaves it open), and the slot says so.
 
 An app whose windows are all on other desktops and that would not open a window without being
 brought forward is not brought forward (that would show its desktop): its New Window item is
@@ -980,7 +980,8 @@ moved it to the other target).
 
 Every take is journaled once it is known what became of it, one JSON object per line, in
 `takes.jsonl` beside the conversation file (`~/Library/Application Support/MacHUD/Voice/takes.jsonl`,
-or `<name>-takes.jsonl` beside a `$MACHUD_VOICE_CONVERSATION_FILE` named `<name>-conversation.json`),
+or `<name>-takes.jsonl` beside a `$MACHUD_VOICE_CONVERSATION_FILE` named `<name>-conversation.json`,
+or `<file name without its extension>-takes.jsonl` beside one with any other name),
 whether or not the brain can run. The newest 1,000 lines are kept, readable by the user only; a
 file there that is not a journal (not text, or no line in it is a take) is never written over:
 the next take moves it aside as `takes.jsonl.unreadable-<yyyyMMddTHHmmss>` and starts a new one.
@@ -1046,8 +1047,8 @@ stopped (an audio device change it could not recover from); turning the wake wor
 briefly under the orb too. A listener that could not start or stopped by itself because of its
 audio (the input device changed, the microphone was refused or stopped, detection fell behind) is
 started again 2 s later, then 10 s after that, then every 60 s, while the wake word is still
-wanted and no take is recording; the step starts over at 2 s only after the listener has listened
-for 60 s before failing again. A phrase without a model or a model that will not load is not
+wanted and no take is recording; the step starts over at 2 s after the listener has listened
+for 60 s before failing again, or when the voice settings change. A phrase without a model or a model that will not load is not
 retried on a timer: it waits until the model changes (is downloaded or installed) or the voice
 settings change. `wakeProblem` gives the reason it stopped until it listens again, also through a
 take (during it and after, while the listener starts again) and after a mute (absent while muted,
@@ -1149,7 +1150,7 @@ own are named only when a window has no identifier.
   the run loop turns, so a mismatch is read again about 0.3 s later and reported only if it still holds (the
   reply takes that long only then);
 - a family window on some desktops of its display but not the one showing: when it is on two or more of them
-  (an all-desktops window missing the showing one), or, above layer 0 and on a single desktop, when it is
+  (an all-desktops window missing the showing one), or, not at layer 0 and on a single desktop, when it is
   meant to be seen: a MacHUD window AppKit calls visible, a hover panel its app reports shown and not parked
   (the app's panel state MacHUD holds), or a desktop-level window of an app with a widget placed. A dormant
   panel, ordered out and merely remembering the desktop it was last shown on, is not an anomaly. Not

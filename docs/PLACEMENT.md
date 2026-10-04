@@ -132,7 +132,7 @@ keystroke, and every display is switched back to it whatever happens, a failed s
 switch that stops part-way included. A display that cannot be put back is reported ("left on
 desktop 2 of DELL"), the slot fails and the slots still to be placed on that screen are not
 placed. The fetches of one screen get 30 s together. A new window MacHUD asked for that opens
-on another desktop all the same is left there (apply never closes a window) and the slot says
+on another desktop all the same is left there (MacHUD leaves it open) and the slot says
 so. One loadout is applied at a time: a second apply is refused with "<name> is still being
 applied".
 
