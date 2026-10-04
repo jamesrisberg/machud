@@ -121,7 +121,7 @@ window at all is asked to reopen, which shows a document app's window. Titles ar
 English: under another system language no item matches, so the app counts as single-window and
 its window is fetched. Apps without one (Messages, Signal, Notes, …) and Arc are single-window.
 A new window MacHUD asked for that opens on another desktop all the same is left there (MacHUD
-never closes a window), and the slot says so.
+leaves it open), and the slot says so.
 
 An app whose windows are all on other desktops and that would not open a window without being
 brought forward is not brought forward (that would show its desktop): its New Window item is
