@@ -410,8 +410,8 @@ final class WakeWordTests: XCTestCase {
         XCTAssertFalse(controller.state.wakeListening, "paused while the take records")
 
         controller.perform(.stop)
-        XCTAssertEqual(controller.state.lastTakeEnd?.trigger, .wake(score: 0.95, phrase: "Hey Jarvis"),
-                       "the detection's score and phrase reach the take")
+        XCTAssertEqual(controller.state.lastTakeEnd?.trigger, .wake(score: 0.95, phrase: "Hey Jarvis", frames: 2, peak: 0.95),
+                       "the detection's score, phrase and run reach the take")
         dictation.finish("what time is it")
         await controller.pendingWork?.value
         await waitUntil { controller.state.wakeListening }

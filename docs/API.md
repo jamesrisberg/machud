@@ -906,8 +906,10 @@ quietMs?, floor?, threshold?, pause?, grace, trigger}`. `reason` is `pause`, `ma
 last speech; `floor` and `threshold` the levels at the end; `pause` the quiet the take needed
 (absent with `manual`) and `grace` whether it included the 1.5 s.
 
-`trigger` is what started a take: `{"source": "wake", "score": 0.973, "phrase": "Hey Jarvis"}`
-(the wake word, with the detection's score, 0 to 1, and the phrase), `{"source": "orb"}` (a click
+`trigger` is what started a take: `{"source": "wake", "score": 0.973, "phrase": "Hey Jarvis",
+"frames": 2, "peak": 0.991}` (the wake word: the score of the frame that completed the detection,
+0 to 1, the phrase, and the run it completed, `frames` in a row with `peak` the highest score
+among them; a line journaled before the run was recorded has neither), `{"source": "orb"}` (a click
 on the orb, or the orb pressed through accessibility), `{"source": "socket", "action": "ask"}`
 (`action name=ask`, `click` or `dictate`) or `{"source": "key", "gesture": "primary"|"alternate",
 "retargeted": false}` (the fn key: the gesture that began the take, and whether a later gesture

@@ -730,7 +730,7 @@ final class VoiceHostControllerTests: XCTestCase {
         let refused = try? XCTUnwrap(journal.records.last)
         XCTAssertEqual(refused?.outcome, .refused)
         XCTAssertEqual(refused?.reason, VoiceHostController.agentBusy)
-        XCTAssertEqual(refused?.trigger, .wake(score: 0.61, phrase: "Hey Jarvis"))
+        XCTAssertEqual(refused?.trigger, .wake(score: 0.61, phrase: "Hey Jarvis", frames: 2, peak: 0.61))
         XCTAssertNil(refused?.seconds, "it never recorded")
     }
 
@@ -973,7 +973,7 @@ final class VoiceHostControllerTests: XCTestCase {
         XCTAssertEqual(dictation.starts, [.caller])
         XCTAssertFalse(wake.listening)
         controller.perform(.stop)
-        XCTAssertEqual(controller.state.lastTakeEnd?.trigger, .wake(score: 0.973, phrase: "Hey Jarvis"))
+        XCTAssertEqual(controller.state.lastTakeEnd?.trigger, .wake(score: 0.973, phrase: "Hey Jarvis", frames: 2, peak: 0.973))
         dictation.finish("hello")
         await settled(controller)
         XCTAssertTrue(wake.listening)
@@ -1065,7 +1065,7 @@ final class VoiceHostControllerTests: XCTestCase {
 
         wake.detect(score: 0.912)
         controller.perform(.stop)
-        XCTAssertEqual(controller.state.lastTakeEnd?.trigger, .wake(score: 0.912, phrase: "Hey Jarvis"))
+        XCTAssertEqual(controller.state.lastTakeEnd?.trigger, .wake(score: 0.912, phrase: "Hey Jarvis", frames: 2, peak: 0.912))
         dictation.finish("")
 
         keys.send(.begin(.primary))
@@ -1079,11 +1079,11 @@ final class VoiceHostControllerTests: XCTestCase {
         await settled(controller)
 
         XCTAssertEqual(journal.records.map(\.trigger), [
-            .orb, .socket(action: "ask"), .wake(score: 0.912, phrase: "Hey Jarvis"),
+            .orb, .socket(action: "ask"), .wake(score: 0.912, phrase: "Hey Jarvis", frames: 2, peak: 0.912),
             .key(.primary, retargeted: false), .key(.primary, retargeted: true),
         ])
         XCTAssertEqual(journal.records.map(\.mode), [.agent, .agent, .agent, .dictation, .agent])
-        XCTAssertEqual(controller.state.lastTakeEnd?.trigger, .wake(score: 0.912, phrase: "Hey Jarvis"),
+        XCTAssertEqual(controller.state.lastTakeEnd?.trigger, .wake(score: 0.912, phrase: "Hey Jarvis", frames: 2, peak: 0.912),
                        "an fn take leaves the last hands-free take's ending")
     }
 
@@ -1132,7 +1132,7 @@ final class VoiceHostControllerTests: XCTestCase {
         XCTAssertEqual(record.reason, VoiceHostController.agentBusyPasted)
         XCTAssertEqual(record.mode, .agent)
         XCTAssertEqual(record.characters, 31)
-        XCTAssertEqual(record.trigger, .wake(score: 0.973, phrase: "Hey Jarvis"))
+        XCTAssertEqual(record.trigger, .wake(score: 0.973, phrase: "Hey Jarvis", frames: 2, peak: 0.973))
     }
 
     func testTakesThrownAwayAreJournaledWithWhy() async {
@@ -1222,8 +1222,8 @@ final class VoiceHostControllerTests: XCTestCase {
                        [VoiceHostController.voiceMuted, VoiceHostController.wakeOff, VoiceHostController.takeRecording,
                         VoiceHostController.otherWakePhrase])
         XCTAssertEqual(journal.records.filter { $0.outcome == .refused }.map(\.trigger),
-                       [.wake(score: 0.611, phrase: "Hey Jarvis"), .wake(score: 0.702, phrase: "Hey Jarvis"),
-                        .wake(score: 0.85, phrase: "Hey Jarvis"), .wake(score: 0.9, phrase: "Hey Computer")])
+                       [.wake(score: 0.611, phrase: "Hey Jarvis", frames: 2, peak: 0.611), .wake(score: 0.702, phrase: "Hey Jarvis", frames: 2, peak: 0.702),
+                        .wake(score: 0.85, phrase: "Hey Jarvis", frames: 2, peak: 0.85), .wake(score: 0.9, phrase: "Hey Computer", frames: 2, peak: 0.9)])
         XCTAssertEqual(lines("take refused").count, 4, "\(logged)")
         XCTAssertTrue(lines("take refused").first?.contains("score 0.611") == true, "\(logged)")
     }
@@ -1307,20 +1307,21 @@ final class VoiceHostControllerTests: XCTestCase {
         var settings = VoiceHostSettings()
         settings.voice.wakeWordEnabled = true
         let controller = makeController(settings)
-        wake.detect()
+        wake.detect(peak: 0.991)
         speak(from: 0, to: 1)
         dictation.partial("the secret plan")
         clock.now = 1
         controller.perform(.stop)
         dictation.finish("the secret plan")
         await settled(controller)
-        XCTAssertEqual(lines("take started"), [#"take started: wake word "Hey Jarvis" (score 0.973), agent, hands-free"#])
+        XCTAssertEqual(lines("take started"), [#"take started: wake word "Hey Jarvis" (score 0.973, 2 frames, peak 0.991), agent, hands-free"#])
         let ended = try XCTUnwrap(lines("take ended").first)
         XCTAssertTrue(ended.hasPrefix("take ended: stop"), ended)
         XCTAssertTrue(ended.contains("floor"), ended)
         XCTAssertTrue(ended.contains("threshold"), ended)
         XCTAssertEqual(lines("take sent"),
-                       [#"take sent, 15 characters: wake word "Hey Jarvis" (score 0.973), agent, take 1.0 s ended by stop"#])
+                       [#"take sent, 15 characters: wake word "Hey Jarvis" (score 0.973, 2 frames, peak 0.991), agent, "#
+                        + "take 1.0 s ended by stop"])
         XCTAssertFalse(logged.contains { $0.contains("secret") }, "\(logged)")
     }
 
@@ -1337,7 +1338,7 @@ final class VoiceHostControllerTests: XCTestCase {
         brain.push(status: "idle", output: "Nothing.")
         let row = try XCTUnwrap(controller.conversation.rows.first)
         XCTAssertEqual(row.kind, .user)
-        XCTAssertEqual(row.trigger, .wake(score: 0.973, phrase: "Hey Jarvis"))
+        XCTAssertEqual(row.trigger, .wake(score: 0.973, phrase: "Hey Jarvis", frames: 2, peak: 0.973))
         XCTAssertEqual(row.date, date(at: 7), "when the take started")
 
         clock.now = 30

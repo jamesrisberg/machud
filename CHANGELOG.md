@@ -16,8 +16,9 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   what the agent answered), and says what looks wrong. The menu item shows a toast and selects the file in
   Finder; the command prints the file's path and the list. Take it before you relaunch anything, since a
   relaunch clears what it records. Files go to `~/Library/Logs/MacHUD`; the newest 20 are kept.
-- Every voice take now says what started it: the wake word (with how sure it was), the orb, a
-  script's `action`, or the fn key. `machud voice takes` lists your recent takes, what started
+- Every voice take now says what started it: the wake word (with how sure it was, and for how
+  many 80 ms frames in a row), the orb, a script's `action`, or the fn key. `machud voice takes`
+  lists your recent takes, what started
   each, how long it recorded and what became of it (sent to the agent, typed at the cursor,
   thrown away, refused, cancelled or failed), counting characters and never keeping your words.
   A wake word heard while it could not start a take is listed too, with its score.

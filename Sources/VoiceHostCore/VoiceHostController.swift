@@ -1502,8 +1502,11 @@ public final class VoiceHostController: VoiceHostActing {
 }
 
 extension VoiceTakeTrigger {
-    /// A wake detection, its score kept to three decimals (the detector scores in `Float`).
+    /// A wake detection's score, phrase and run, the scores kept to three decimals (the detector
+    /// scores in `Float`). Its audio is not part of it.
     init(_ detection: WakeDetection) {
-        self = .wake(score: (detection.score * 1000).rounded() / 1000, phrase: detection.phrase)
+        func rounded(_ score: Double) -> Double { (score * 1000).rounded() / 1000 }
+        self = .wake(score: rounded(detection.score), phrase: detection.phrase, frames: detection.frames,
+                     peak: rounded(detection.peak))
     }
 }
