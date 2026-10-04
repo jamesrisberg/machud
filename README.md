@@ -485,7 +485,7 @@ MACHUD_SOCKET=/tmp/machud-try.sock scripts/machud quit
 | `MACHUD_VOICE_NO_SPEECH` | `1`: the voice host's replies and `say` make no sound |
 | `MACHUD_VOICE_MODELS_DIR` | Where the voice host keeps downloaded models (default `~/Library/Application Support/MacHUD/Voice/Models`) |
 | `MACHUD_VOICE_HISTORY_DIR` | MacHUD's own dictation history folder (default `~/Library/Application Support/MacHUD/Voice/History`) |
-| `MACHUD_VOICE_CONVERSATION_FILE` | Where the voice host keeps the conversation with the agent (default `~/Library/Application Support/MacHUD/Voice/conversation.json`), with the take journal beside it (`takes.jsonl`, or `<name>-takes.jsonl` beside `<name>-conversation.json`) |
+| `MACHUD_VOICE_CONVERSATION_FILE` | Where the voice host keeps the conversation with the agent (default `~/Library/Application Support/MacHUD/Voice/conversation.json`), with the take journal beside it (`takes.jsonl`, or `<name>-takes.jsonl` beside `<name>-conversation.json`, or `<file name without its extension>-takes.jsonl` beside a conversation file with any other name) |
 | `SPEAKFREE_CONFIG_DIR` | SpeakFree's config folder the voice host reads (`saveRecordings`) and shares history into (default `~/.config/speakfree`) |
 | `MACHUD_VOICE_KEYCHAIN_SERVICE` | The Keychain service the voice host keeps the Grok key under |
 | `MACHUD_VOICE_LIVE` | `1`: an isolated copy runs its voice host with the microphone, brain, orb, sound and the real models folder |
