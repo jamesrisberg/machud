@@ -69,8 +69,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - The setup guide's cards use the classic frosted material, since the guide already blurs the
   desktop behind them.
 - The radial menu is drawn dark in light mode too, so its white labels stay readable.
-- The loadout wheel is words on one soft, dark blur, with no tiles and no hard edges, and every
-  word reads upright. Each loadout's name sits whole around the outside (wrapping to a second
+- The loadout wheel is words on one soft, dark blur that fades out at its edge rather than
+  ending in a line, with no tiles and no hard edges, and every word reads upright. Each loadout's name sits whole around the outside (wrapping to a second
   line, then shrinking, rather than being cut off), with its apps' icons on wheels of up to eight
   slices. Each slice's buttons line up from the centre out toward its name: Preview, Apply and
   Clear + Apply; This screen and Draw layout for Capture; Park and Restore; Reveal (Lower while
@@ -80,7 +80,7 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   Docs", "Focus a window to park" or "Finish editing widgets", and is never cut off; Park's names
   the window letting go would park, even after a click under the wheel changed the focus. On a
   screen too small for it the wheel shrinks, keeping every word and that line on screen. With
-  Reduce transparency on, the blur is a plain dark disc.
+  Reduce transparency on, the blur gives way to a plain dark disc.
 - In the replies of `machud menu` and `machud radial`, each wedge's `title` is now `name` and its
   `subtitle` is gone, in `wedges[]` and in `selection`. Each wedge also lists the `hints` its rings
   show under the wheel, the selection carries the `hint` showing, `icons` counts the icons the

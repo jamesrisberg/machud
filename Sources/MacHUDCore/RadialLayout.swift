@@ -267,9 +267,9 @@ struct RadialLayout {
 
 /// The one soft region the wheel's words sit on: strongest in the middle, fading to nothing
 /// with no edge, reaching under every word and the hint. A pure function from the layout to an
-/// alpha in 0...1, used as the shape of the backdrop's blur (`maskImage`), as the tint the
-/// wheel draws (`tintImage`), and by the snapshots as the mask through which the blurred desktop
-/// shows.
+/// alpha in 0...1, used as the field the backdrop's blur shows through (`maskImage`), as the
+/// profile of the tint the wheel draws (`tintImage`), and by the snapshots as the mask through
+/// which the blurred desktop shows.
 ///
 /// It is a disc a little past the names' anchors united with a rounded box around each word
 /// that reaches outside it (the names, the hint's zone), joined smoothly, full inside and
@@ -313,9 +313,9 @@ struct RadialField {
         }
     }
 
-    /// The total darkness over the blur where the field is full: the backdrop's own tint and the
-    /// wheel's together, black. Where a word sits (the field at least `readable`) a white word
-    /// on a white desktop reads at better than 4.5 to 1.
+    /// The darkness of the wheel's tint over the backdrop where its profile is full: black at
+    /// this alpha. Where a word sits (the profile at least `readable`) a white word on a white
+    /// desktop reads at better than 4.5 to 1.
     static let darkness: CGFloat = 0.7
     /// The least strength of the field under any word.
     static let readable: CGFloat = 0.84
@@ -328,12 +328,6 @@ struct RadialField {
     static let discReach: CGFloat = 24
     /// Points per pixel of the mask and tint images: the field is smooth enough to be stretched.
     static let step: CGFloat = 4
-
-    /// The wheel's own tint where the field is `f`: over the backdrop's tint
-    /// (`RadialBackdrop.ownTint * f`), it makes the total darkness `darkness * f`.
-    static func tintAlpha(field f: CGFloat) -> CGFloat {
-        max(0, 1 - (1 - darkness * f) / (1 - RadialBackdrop.ownTint * f))
-    }
 
     let shape: Shape
     var reduced: Bool { shape.reduced }
@@ -373,9 +367,9 @@ struct RadialField {
         return min(a, b) - h * h * k / 4
     }
 
-    /// The mask (black, alpha the field) and the wheel's tint (black, alpha `tintAlpha`), one
-    /// pixel per `step` points, top row first, cropped from `room` to where the field is not 0
-    /// with two empty pixels around it; and the rectangle they cover.
+    /// The mask and the tint's profile (black, alpha the field), one pixel per `step` points, top
+    /// row first, cropped from `room` to where the field is not 0 with two empty pixels around
+    /// it; and the rectangle they cover.
     private static func images(over room: CGRect, alpha: (CGPoint) -> CGFloat) -> (CGRect, CGImage, CGImage) {
         let width = max(1, Int((room.width / step).rounded(.up)))
         let height = max(1, Int((room.height / step).rounded(.up)))
@@ -402,7 +396,7 @@ struct RadialField {
                 guard f > 0 else { continue }
                 let i = ((row - y0) * w + (column - x0)) * 4 + 3
                 mask[i] = UInt8((f * 255).rounded())
-                tint[i] = UInt8((tintAlpha(field: f) * 255).rounded())
+                tint[i] = UInt8((f * 255).rounded())
             }
         }
         let support = CGRect(x: room.minX + CGFloat(x0) * step, y: room.maxY - CGFloat(y1 + 1) * step,

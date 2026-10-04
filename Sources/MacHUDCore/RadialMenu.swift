@@ -441,7 +441,7 @@ final class RadialMenu {
         let local = CGRect(x: center.x - screenFrame.minX - canvas.center.x, y: center.y - screenFrame.minY - canvas.center.y,
                            width: canvas.size.width, height: canvas.size.height)
         backdrop.view.frame = local
-        backdrop.shape(to: field.maskImage)
+        tint.darkness = RadialBackdrop.darkness(for: backdrop.show(field: field.maskImage))
         tint.frame = local
         tint.image = field.tintImage
         wheel.frame = local
@@ -598,7 +598,7 @@ final class RadialMenu {
         w.isOpaque = false
         w.backgroundColor = .clear
         // The words are white on a dark field: dark in a light system appearance too, so the
-        // backdrop's tint (white in a light appearance) never sits under them.
+        // system's material the backdrop shows with Reduce transparency on is the dark one.
         w.appearance = NSAppearance(named: .darkAqua)
         w.hasShadow = false
         w.ignoresMouseEvents = true
@@ -609,7 +609,7 @@ final class RadialMenu {
         content.addSubview(backdrop.view)
         content.addSubview(tint)
         content.addSubview(wheel)
-        wheel.onShown = { [weak tint] shown in tint?.alphaValue = shown }
+        wheel.onShown = { [weak tint] shown in tint?.shown = shown }
         w.contentView = content
         window = w
         return w
@@ -646,38 +646,68 @@ final class RadialMenu {
 
 // MARK: - Backdrop
 
-/// What the wheel's tint and words sit on: the family's window blur, as HUDKit's backdrop puts
-/// it behind a window (`HUDGlassView`), cut to the field's mask. HUDKit lays its own tint over
-/// the blur, `ownTint` black times the mask in the dark appearance the wheel's window keeps;
-/// the wheel's tint (`RadialField.tintAlpha`) makes up the rest. With Reduce transparency on,
-/// HUDKit swaps the blur for its opaque classic material, cut to the same mask.
+/// What the wheel's tint and words sit on: HUDKit's soft backdrop (`HUDSoftBackdropView`), a
+/// blur of what is behind the window shown through the field, so its edge fades out instead of
+/// ending in a line. It draws no tint of its own: the wheel's tint is its own view
+/// (`RadialTintView`), as dark as `darkness(for:)` says for the way the backdrop draws. Nothing
+/// else in the wheel's window may be on the window server's blur (`HUDGlassView` with the window
+/// blur): that blur covers everything the window draws and would end in a line.
 @MainActor
 final class RadialBackdrop {
-    /// HUDKit's backdrop tint over the blur in a dark appearance (`HUDBackdropView.tintAlpha`).
-    nonisolated static let ownTint: CGFloat = 0.2
+    /// The tint's darkness with no backdrop at all, the words over the sharp desktop.
+    nonisolated static let darknessWithoutBackdrop: CGFloat = 0.85
 
-    private let glass = HUDGlassView(style: .plain)
-    var view: NSView { glass }
+    /// How dark the wheel's tint is where its profile is full, over a backdrop that draws by
+    /// `path`: `RadialField.darkness` over the blur, and over the system's material (opaque and
+    /// dark with Reduce transparency on; AppKit's own translucent material where the blur cannot
+    /// be made); `darknessWithoutBackdrop` with none, where sharp detail sits behind the words.
+    nonisolated static func darkness(for path: HUDSoftBackdropView.Path) -> CGFloat {
+        switch path {
+        case .blur, .systemMaterial: return RadialField.darkness
+        case .none: return darknessWithoutBackdrop
+        }
+    }
 
-    /// `mask`'s alpha shapes the blur, stretched over the view.
-    func shape(to mask: CGImage) {
-        glass.maskImage = NSImage(cgImage: mask, size: CGSize(width: mask.width, height: mask.height))
+    let view: HUDSoftBackdropView
+    private var shown: CGImage?
+
+    /// `view` stands in for the backdrop (tests); nil makes the family's.
+    init(view: HUDSoftBackdropView? = nil) {
+        self.view = view ?? HUDSoftBackdropView(frame: .zero)
+        self.view.tint = nil
+    }
+
+    var path: HUDSoftBackdropView.Path { view.path }
+
+    /// Shows the blur through `field`'s alpha, stretched over the view, and says how the
+    /// backdrop draws now. The same field again is left as it is: a new one has the backdrop
+    /// build its material again.
+    @discardableResult
+    func show(field: CGImage) -> HUDSoftBackdropView.Path {
+        if field !== shown {
+            shown = field
+            view.field = NSImage(cgImage: field, size: CGSize(width: field.width, height: field.height))
+        }
+        return view.path
     }
 }
 
-
 // MARK: - Drawing
 
-/// The wheel's tint: the field's tint image stretched over the canvas, composited by the GPU and
-/// drawn once per configuration, under the words.
+/// The wheel's tint: the field's tint profile (black, its alpha the profile) stretched over the
+/// canvas, composited by the GPU and drawn once per configuration, under the words. Its opacity
+/// is `darkness` times how far the wheel has faded in (`shown`).
 final class RadialTintView: NSView {
     var image: CGImage? { didSet { layer?.contents = image } }
+    var darkness = RadialField.darkness { didSet { alphaValue = darkness * shown } }
+    var shown: CGFloat = 1 { didSet { alphaValue = darkness * shown } }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
         layer?.contentsGravity = .resize
         layer?.magnificationFilter = .linear
+        alphaValue = darkness * shown
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }

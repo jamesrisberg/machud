@@ -4,18 +4,23 @@ import XCTest
 @testable import MacHUDCore
 
 final class RadialMenuWindowTests: XCTestCase {
-    /// The wheel's words are white, so its window is dark in a light system appearance too; the
-    /// backdrop takes the window's appearance, and the family's tint follows it (white at 20 %
-    /// in a light one, which would sit under white words). Building the window shows nothing.
+    /// The wheel's words are white, so its window is dark in a light system appearance too, and
+    /// so is the system's material the backdrop shows with Reduce transparency on. The backdrop
+    /// is HUDKit's soft backdrop, and nothing else in the window is on the window server's blur,
+    /// which would end in a line where the field fades out. Building the window shows nothing.
     @MainActor
-    func testTheWheelsWindowIsDarkWhateverTheSystemAppearance() throws {
+    func testTheWheelsWindowIsDarkAndHasOnlyTheSoftBackdrop() throws {
         let menu = RadialMenu()
         let window = menu.makeWindow()
         defer { window.close() }
         XCTAssertEqual(window.appearance?.name, .darkAqua)
         XCTAssertFalse(window.isVisible)
-        let backdrop = try XCTUnwrap(window.contentView?.subviews.first { $0 is HUDGlassView })
+        func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+        let all = try views(XCTUnwrap(window.contentView))
+        let backdrop = try XCTUnwrap(all.first { $0 is HUDSoftBackdropView })
         XCTAssertEqual(backdrop.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]), .darkAqua)
+        XCTAssertFalse(all.contains { $0 is HUDGlassView || $0 is HUDDockStripView }, "nothing on the window server's blur")
+        XCTAssertEqual(window.contentView?.subviews.first, backdrop, "the backdrop is under everything")
     }
 
     /// The wheel's view is the field's canvas: it holds every word, the hint's zone and the

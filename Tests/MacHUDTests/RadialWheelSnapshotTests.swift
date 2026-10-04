@@ -232,17 +232,17 @@ final class RadialWheelSnapshotTests: XCTestCase {
             // The classic material that HUDKit puts there under Reduce transparency: opaque, dark.
             context.setFillColor(NSColor(srgbRed: 0.16, green: 0.16, blue: 0.17, alpha: 1).cgColor)
             context.fill(bounds)
-        } else {
-            if let blurred = Self.blur(desktop, size: size) { context.draw(blurred, in: bounds) }
-            // The backdrop's own tint over its blur.
-            context.setFillColor(NSColor.black.withAlphaComponent(RadialBackdrop.ownTint).cgColor)
-            context.clip(to: canvas, mask: Self.grey(field.maskImage, binary: false)!)
-            context.fill(bounds)
+        } else if let blurred = Self.blur(desktop, size: size) {
+            context.draw(blurred, in: bounds)
         }
         context.restoreGState()
 
-        // The wheel's tint (its own view in the window), then its words.
+        // The wheel's tint (its own view in the window, as dark as the backdrop's path asks),
+        // then its words.
+        context.saveGState()
+        context.setAlpha(RadialBackdrop.darkness(for: shot.reduced ? .systemMaterial : .blur))
         context.draw(field.tintImage, in: canvas)
+        context.restoreGState()
         let view = RadialWheelView(frame: CGRect(origin: .zero, size: field.canvas.size))
         view.restingButtons = shot.resting
         view.configure(layout: placed.layout, field: field, wedges: shot.wedges)

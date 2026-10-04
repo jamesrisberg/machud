@@ -292,21 +292,21 @@ final class RadialLayoutTests: XCTestCase {
         let tint = NSBitmapImageRep(cgImage: field.tintImage)
         let scale = CGFloat(tint.pixelsWide) / field.support.width
         let middle = try XCTUnwrap(tint.colorAt(x: Int(-field.support.minX * scale), y: Int(field.support.maxY * scale)))
-        XCTAssertEqual(middle.alphaComponent, RadialField.tintAlpha(field: 1), accuracy: 0.01, "the wheel's centre")
-        XCTAssertGreaterThan(RadialField.tintAlpha(field: 1), RadialField.tintAlpha(field: 0.5))
+        XCTAssertEqual(middle.alphaComponent, 1, accuracy: 0.01, "the tint's profile is full in the wheel's centre")
     }
 
-    /// The total darkness over the blur (the backdrop's own tint and the wheel's) is the field's
-    /// strength times `RadialField.darkness`: white words read on a white desktop.
-    func testTheTintMakesWhiteWordsReadOnAWhiteDesktop() {
-        for f in stride(from: 0.0, through: 1.0, by: 0.05) {
-            let total = 1 - (1 - RadialBackdrop.ownTint * f) * (1 - RadialField.tintAlpha(field: f))
-            XCTAssertEqual(total, RadialField.darkness * f, accuracy: 0.0001)
+    /// The tint's image is its profile, black: its strength is the tint view's darkness
+    /// (`RadialBackdrop.darkness(for:)`), so the total darkness over the backdrop is that darkness
+    /// times the profile, with no tint from the backdrop itself.
+    func testTheTintImageIsTheProfileItsDarknessIsTheViews() throws {
+        let field = RadialField(layout: RadialLayout(wedges: Self.wedges(8, Self.long)), reduced: false)
+        let rep = NSBitmapImageRep(cgImage: field.tintImage)
+        let scale = CGFloat(rep.pixelsWide) / field.support.width
+        for p in [CGPoint(x: 0, y: 0), CGPoint(x: 120, y: -80), CGPoint(x: -200, y: 150), CGPoint(x: 0, y: -300)] {
+            let pixel = try XCTUnwrap(rep.colorAt(x: Int((p.x - field.support.minX) * scale), y: Int((field.support.maxY - p.y) * scale)))
+            XCTAssertEqual(pixel.alphaComponent, field.alpha(at: p), accuracy: 0.03, "\(p)")
+            XCTAssertEqual(pixel.redComponent + pixel.greenComponent + pixel.blueComponent, 0, accuracy: 0.01, "black")
         }
-        // White on white under the darkness where every word sits: at least 4.5 to 1.
-        let shade = 1 - RadialField.darkness * RadialField.readable
-        let luminance = shade <= 0.04045 ? shade / 12.92 : pow((shade + 0.055) / 1.055, 2.4)
-        XCTAssertGreaterThanOrEqual(1.05 / (luminance + 0.05), 4.5)
     }
 
     // MARK: The screen
