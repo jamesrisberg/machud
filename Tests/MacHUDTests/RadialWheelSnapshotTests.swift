@@ -62,6 +62,10 @@ final class RadialWheelSnapshotTests: XCTestCase {
 
     // MARK: The set
 
+    /// What is rendered without `MACHUD_WHEEL_SNAPSHOT_DIR`.
+    private static let checked: Set<String> = ["hover-08-side-outer-colourful", "system-material-reduce-transparency-08-bright",
+                                               "screen-1024x640-08-corner-bright"]
+
     private func shots() -> [Shot] {
         var out: [Shot] = []
         let desktops = Desktop.allCases
@@ -148,11 +152,17 @@ final class RadialWheelSnapshotTests: XCTestCase {
 
     func testSnapshotsOfTheWheel() throws {
         if let directory { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true) }
-        var pictures = try shots().map { shot in (shot.name, try XCTUnwrap(render(shot), shot.name)) }
-        // The two profiles alone at eight wedges, white where they are full.
-        let field = RadialField(layout: RadialLayout(wedges: Self.wedges(Self.long, loadouts: 5)), reduced: false)
-        pictures.append(("profile-blur-08", try XCTUnwrap(Self.profile(field.blurImage, size: field.support.size))))
-        pictures.append(("profile-tint-08", try XCTUnwrap(Self.profile(field.tintImage, size: field.support.size))))
+        // Without a folder to write to, a few pictures are rendered and checked: one of each way
+        // the harness composes (the blur, the system's material, a whole screen with its pointer).
+        let shots = directory == nil ? shots().filter { Self.checked.contains($0.name) } : shots()
+        var pictures = try shots.map { shot in (shot.name, try XCTUnwrap(render(shot), shot.name)) }
+        if directory != nil {
+            // The two profiles alone at eight wedges, white where they are full.
+            let field = RadialField(layout: RadialLayout(wedges: Self.wedges(Self.long, loadouts: 5)), reduced: false)
+            pictures.append(("profile-blur-08", try XCTUnwrap(Self.profile(field.blurImage, size: field.support.size))))
+            pictures.append(("profile-tint-08", try XCTUnwrap(Self.profile(field.tintImage, size: field.support.size))))
+        }
+        XCTAssertFalse(pictures.isEmpty)
         for (name, rep) in pictures {
             try assertNotBlank(rep, name)
             if let directory {
