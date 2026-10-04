@@ -1046,8 +1046,8 @@ stopped (an audio device change it could not recover from); turning the wake wor
 briefly under the orb too. A listener that could not start or stopped by itself because of its
 audio (the input device changed, the microphone was refused or stopped, detection fell behind) is
 started again 2 s later, then 10 s after that, then every 60 s, while the wake word is still
-wanted and no take is recording; the step starts over at 2 s only after the listener has listened
-for 60 s before failing again. A phrase without a model or a model that will not load is not
+wanted and no take is recording; the step starts over at 2 s after the listener has listened
+for 60 s before failing again, or when the voice settings change. A phrase without a model or a model that will not load is not
 retried on a timer: it waits until the model changes (is downloaded or installed) or the voice
 settings change. `wakeProblem` gives the reason it stopped until it listens again, also through a
 take (during it and after, while the listener starts again) and after a mute (absent while muted,
