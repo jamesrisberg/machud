@@ -1579,6 +1579,33 @@ final class VoiceHostControllerTests: XCTestCase {
         XCTAssertEqual(controller.state.phase, .failed(VoiceHostController.agentBusyPasted))
     }
 
+    /// A take that finishes while a newer one records keeps its notice off the orb: the phase is
+    /// the newer take's. Dropped (the wake word's) or typed (a script's), it is journaled all the same.
+    func testATakeTheAgentCannotTakeLeavesANewerTakeAlone() {
+        var settings = VoiceHostSettings()
+        settings.voice.wakeWordEnabled = true
+        let controller = makeController(settings)
+        wake.detect()
+        let woken = dictation.takeID
+        controller.perform(.stop)
+        controller.perform(.start(.agent), trigger: .socket(action: "ask"))
+        XCTAssertEqual(controller.state.phase, .listening(.agent))
+        brain.push(status: "running", requestId: "other")
+        dictation.finish("overheard", take: woken, at: .caller)
+        XCTAssertEqual(journal.records.map(\.outcome), [.dropped])
+        XCTAssertEqual(controller.state.phase, .listening(.agent), "the newer take's, not the notice")
+
+        let scripted = dictation.takeID
+        controller.perform(.stop)
+        brain.push(status: "idle", requestId: "other")
+        controller.perform(.start(.agent), trigger: .socket(action: "ask"))
+        brain.push(status: "running", requestId: "other")
+        dictation.finish("for later", take: scripted, at: .caller)
+        XCTAssertEqual(dictation.inserted, ["for later"])
+        XCTAssertEqual(journal.records.map(\.outcome), [.dropped, .typed])
+        XCTAssertEqual(controller.state.phase, .listening(.agent), "the newer take's, not the notice")
+    }
+
     func testTakesThrownAwayAreJournaledWithWhy() async {
         let controller = makeController()
         // Nothing heard by the endpointer.

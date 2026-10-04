@@ -1030,24 +1030,30 @@ public final class VoiceHostController: VoiceHostActing {
         }
         // The brain went off, or another turn started, while this take was recording.
         guard brainEnabled, let brain else {
-            return notTaken(prompt, pasted: Self.brainOffPasted, dropped: Self.wakeDroppedBrainOff, ended: ended)
+            return notTaken(prompt, pasted: Self.brainOffPasted, dropped: Self.wakeDroppedBrainOff, isLatest: isLatest,
+                            ended: ended)
         }
         if let problem = blockingBrainProblem {
-            return notTaken(prompt, pasted: Self.pasted(problem), dropped: Self.wakeDropped(problem), ended: ended)
+            return notTaken(prompt, pasted: Self.pasted(problem), dropped: Self.wakeDropped(problem), isLatest: isLatest,
+                            ended: ended)
         }
         guard !agentBusy else {
-            return notTaken(prompt, pasted: Self.agentBusyPasted, dropped: Self.wakeDroppedBusy, ended: ended)
+            return notTaken(prompt, pasted: Self.agentBusyPasted, dropped: Self.wakeDroppedBusy, isLatest: isLatest,
+                            ended: ended)
         }
         begin(prompt, source: .voice, isLatest: isLatest, brain: brain, ended: ended)
     }
 
     /// Words the brain cannot take now. The wake word's are dropped: whoever spoke may not have
     /// been talking to this Mac, so they are typed nowhere. The fn key's, the orb's and the
-    /// socket's are typed at the cursor, where the user is.
-    private func notTaken(_ text: String, pasted: String, dropped: String, ended: Take?) {
-        guard let ended, case .wake = ended.trigger else { return paste(text, notice: pasted, ended: ended) }
+    /// socket's are typed at the cursor, where the user is. The notice shows on the orb only for
+    /// the latest take; a newer one recording or being transcribed keeps the orb.
+    private func notTaken(_ text: String, pasted: String, dropped: String, isLatest: Bool, ended: Take?) {
+        guard let ended, case .wake = ended.trigger else {
+            return paste(text, notice: pasted, isLatest: isLatest, ended: ended)
+        }
         journal(ended, mode: .agent, outcome: .dropped, reason: dropped, characters: text.count)
-        fail(dropped)
+        if isLatest { fail(dropped) }
     }
 
     /// Sends `text` to the agent as a typed turn, to the same session as voice. Nil once it is
@@ -1150,10 +1156,10 @@ public final class VoiceHostController: VoiceHostActing {
         if let lastSnapshot, lastSnapshot.requestId == requestId { handle(lastSnapshot) }
     }
 
-    private func paste(_ text: String, notice: String, ended: Take?) {
+    private func paste(_ text: String, notice: String, isLatest: Bool, ended: Take?) {
         dictation.insert(text)
         if let ended { journal(ended, mode: .agent, outcome: .typed, reason: notice, characters: text.count) }
-        fail(notice)
+        if isLatest { fail(notice) }
     }
 
     private func handle(_ snapshot: AgentSessionSnapshot) {
