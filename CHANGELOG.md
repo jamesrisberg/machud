@@ -74,13 +74,16 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   line, then shrinking, rather than being cut off), with its apps' icons on wheels of up to eight
   slices. Each slice's buttons line up from the centre out toward its name: Preview, Apply and
   Clear + Apply; This screen and Draw layout for Capture; Park and Restore; Reveal (Lower while
-  the widgets are up) and Edit (Done while you are editing them) for Widgets. The button under the
+  the widgets are up) and Edit (Done while you are editing them) for Widgets; letting go does
+  what the button said, even if the widgets changed while the wheel was open. The button under the
   pointer grows and glows, its slice's name lights up and the other slices fade back a little.
   The line under the wheel says only what letting go does, such as "Apply Code", "Park Safari ·
   Docs", "Focus a window to park" or "Finish editing widgets", and is never cut off; Park's names
   the window letting go would park, even after a click under the wheel changed the focus. On a
-  screen too small for it the wheel shrinks, keeping every word and that line on screen. With
-  Reduce transparency on, the blur gives way to a plain dark disc.
+  screen too small for it the wheel shrinks, keeping every word and that line on screen. Where
+  the wheel cannot open around the pointer (near a screen's edge), the pointer moves to its
+  centre; nothing lights until you move it, so pressing and letting go without moving cancels.
+  With Reduce transparency on, the blur gives way to a plain dark disc.
 - In the replies of `machud menu` and `machud radial`, each wedge's `title` is now `name` and its
   `subtitle` is gone, in `wedges[]` and in `selection`. Each wedge also lists the `hints` its rings
   show under the wheel, the selection carries the `hint` showing, `icons` counts the icons the

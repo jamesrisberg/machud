@@ -129,6 +129,21 @@ final class LoadoutMenuTests: XCTestCase {
         XCTAssertEqual(menu.wedges().last?.kind, .widgets(.init(revealed: false, editing: true)))
     }
 
+    /// The widgets wedge's outcome reaches the app with the target it showed: the app sets that
+    /// state rather than toggling the one it finds.
+    func testTheWidgetsOutcomeCarriesItsTargetToTheApp() throws {
+        let (menu, _, _) = try make(multiDesktop: false)
+        var calls: [(edit: Bool, on: Bool)] = []
+        let done = expectation(description: "the widgets hook ran twice")
+        done.expectedFulfillmentCount = 2
+        menu.onWidgets = { edit, on in calls.append((edit, on)); done.fulfill() }
+        menu.handle(.widgets(edit: false, on: false))
+        menu.handle(.widgets(edit: true, on: true))
+        wait(for: [done], timeout: 2)
+        XCTAssertEqual(calls.map(\.edit), [false, true])
+        XCTAssertEqual(calls.map(\.on), [false, true])
+    }
+
     // MARK: - Hotkeys and the default loadout
 
     func testOnlyOfferedLoadoutsGetTheirHotkeys() throws {
