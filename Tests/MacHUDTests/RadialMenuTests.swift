@@ -181,8 +181,11 @@ final class RadialGeometryTests: XCTestCase {
         XCTAssertEqual(RadialMenu.outcome(of: park, ring: .inner), .park(restore: false))
         XCTAssertEqual(RadialMenu.outcome(of: park, ring: .middle), .park(restore: true))
         XCTAssertEqual(RadialMenu.outcome(of: .park(.init()), ring: .middle), .park(restore: true))
-        XCTAssertEqual(RadialMenu.outcome(of: .widgets, ring: .inner), .widgets(edit: false))
-        XCTAssertEqual(RadialMenu.outcome(of: .widgets, ring: .outer), .widgets(edit: true))
+        XCTAssertEqual(RadialMenu.outcome(of: .widgets(.init()), ring: .inner), .widgets(edit: false))
+        XCTAssertEqual(RadialMenu.outcome(of: .widgets(.init()), ring: .outer), .widgets(edit: true))
+        let busy = RadialMenu.Wedge.Kind.widgets(.init(revealed: true, editing: true))
+        XCTAssertEqual(RadialMenu.outcome(of: busy, ring: .inner), .widgets(edit: false))
+        XCTAssertEqual(RadialMenu.outcome(of: busy, ring: .middle), .widgets(edit: true))
     }
 
     /// The line under the wheel says what releasing does, and nothing else: no section name,
@@ -198,11 +201,11 @@ final class RadialGeometryTests: XCTestCase {
         XCTAssertEqual(RadialMenu.hint(.middle, for: everyScreen), "Capture every screen as a loadout")
         XCTAssertEqual(RadialMenu.hint(.outer, for: everyScreen), "Draw a new layout")
         XCTAssertEqual(RadialMenu.hint(.middle, for: .capture(offersAllScreens: false)), "Draw a new layout")
-        XCTAssertEqual(RadialMenu.hint(.inner, for: .widgets), "Reveal widgets")
-        XCTAssertEqual(RadialMenu.hint(.middle, for: .widgets), "Edit widgets")
+        XCTAssertEqual(RadialMenu.hint(.inner, for: .widgets(.init())), "Reveal widgets")
+        XCTAssertEqual(RadialMenu.hint(.middle, for: .widgets(.init())), "Edit widgets")
 
         let wedges = [RadialMenu.Wedge(name: "Code", kind: .loadout("Code")),
-                      RadialMenu.Wedge(name: "Widgets", kind: .widgets)]
+                      RadialMenu.Wedge(name: "Widgets", kind: .widgets(.init()))]
         XCTAssertEqual(RadialMenu.hint(for: .cancel, in: wedges), "Release on a button · centre cancels")
         XCTAssertEqual(RadialMenu.hint(for: .wedge(index: 0, ring: .middle), in: wedges), "Apply Code")
         XCTAssertEqual(RadialMenu.hint(for: .wedge(index: 1, ring: .middle), in: wedges), "Edit widgets")
@@ -234,6 +237,19 @@ final class RadialGeometryTests: XCTestCase {
         XCTAssertEqual(wedge?["name"] as? String, "Capture")
         XCTAssertEqual(wedge?["rings"] as? [String], ["This screen", "Draw layout"])
         XCTAssertEqual(wedge?["hints"] as? [String], ["Capture this screen as a loadout", "Draw a new layout"])
+    }
+
+    /// The widgets wedge says what its buttons will do now: Reveal or Lower, Edit or Done.
+    @MainActor
+    func testTheWidgetsWedgeSaysWhatItsButtonsWillDoNow() {
+        func labels(_ state: RadialMenu.Wedge.WidgetsState) -> [String] {
+            [RadialMenu.ringLabel(.inner, for: .widgets(state)), RadialMenu.ringLabel(.middle, for: .widgets(state)),
+             RadialMenu.hint(.inner, for: .widgets(state)), RadialMenu.hint(.middle, for: .widgets(state))]
+        }
+        XCTAssertEqual(labels(.init()), ["Reveal", "Edit", "Reveal widgets", "Edit widgets"])
+        XCTAssertEqual(labels(.init(revealed: true)), ["Lower", "Edit", "Lower widgets", "Edit widgets"])
+        XCTAssertEqual(labels(.init(editing: true)), ["Reveal", "Done", "Reveal widgets", "Finish editing widgets"])
+        XCTAssertEqual(RadialMenu.ringCount(for: .widgets(.init(revealed: true, editing: true))), 2)
     }
 
     /// `menu` lists each wedge's name, its rings' labels and the hint each ring shows, and the

@@ -113,12 +113,20 @@ final class LoadoutMenuTests: XCTestCase {
         XCTAssertEqual(menu.wedges().last?.kind, .park(.init()))
     }
 
-    func testTheWidgetsWedgeIsNamedWidgets() throws {
+    /// While any app serves widgets the wheel has a Widgets wedge, which reads the widgets'
+    /// state as the wheel opens: revealed or not, being edited or not.
+    func testTheWidgetsWedgeKnowsWhatTheWidgetsAreDoing() throws {
         let (menu, _, _) = try make(multiDesktop: false)
-        menu.hasWidgets = { true }
+        XCTAssertEqual(menu.wedges().last?.name, "Park", "no widgets wedge without a widgets hook")
+        menu.widgetsState = { nil }
+        XCTAssertEqual(menu.wedges().last?.name, "Park", "no widgets wedge while no app serves widgets")
+        menu.widgetsState = { .init(revealed: true, editing: false) }
         let widgets = try XCTUnwrap(menu.wedges().last)
         XCTAssertEqual(widgets.name, "Widgets")
-        XCTAssertEqual(widgets.kind, .widgets)
+        XCTAssertEqual(widgets.kind, .widgets(.init(revealed: true, editing: false)))
+        XCTAssertEqual(RadialMenu.ringLabel(.inner, for: widgets.kind), "Lower")
+        menu.widgetsState = { .init(revealed: false, editing: true) }
+        XCTAssertEqual(menu.wedges().last?.kind, .widgets(.init(revealed: false, editing: true)))
     }
 
     // MARK: - Hotkeys and the default loadout

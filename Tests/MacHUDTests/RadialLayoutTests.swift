@@ -19,7 +19,7 @@ final class RadialLayoutTests: XCTestCase {
         let image = NSImage(systemSymbolName: "app", accessibilityDescription: nil) ?? NSImage()
         var tools = [RadialMenu.Wedge(name: "Capture", icons: [image], kind: .capture(offersAllScreens: allScreens)),
                      RadialMenu.Wedge(name: "Park", icons: [image], kind: .park(.init()))]
-        if count > 3 { tools.append(RadialMenu.Wedge(name: "Widgets", icons: [image], kind: .widgets)) }
+        if count > 3 { tools.append(RadialMenu.Wedge(name: "Widgets", icons: [image], kind: .widgets(.init()))) }
         let loadouts = (0..<max(0, count - tools.count)).map { i in
             RadialMenu.Wedge(name: names[i % names.count], icons: Array(repeating: image, count: icons),
                              kind: .loadout(names[i % names.count]))

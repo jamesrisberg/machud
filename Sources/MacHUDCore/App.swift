@@ -161,7 +161,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.editor.open(loadout: name)
         }
         loadoutMenu.library = library
-        loadoutMenu.hasWidgets = { [weak widgets] in !(widgets?.servingApps.isEmpty ?? true) }
+        loadoutMenu.widgetsState = { [weak widgets] in
+            guard let widgets, !widgets.servingApps.isEmpty else { return nil }
+            return .init(revealed: widgets.revealed, editing: widgets.editing)
+        }
         loadoutMenu.onWidgets = { [weak widgets] edit in
             guard let widgets else { return }
             if edit { widgets.setEditing(!widgets.editing) } else { widgets.setRevealed(!widgets.revealed) }

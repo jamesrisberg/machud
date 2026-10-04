@@ -70,9 +70,10 @@ final class LoadoutMenu {
 
     // MARK: Wedges
 
-    /// Whether any app serves widgets (the wheel then has a Widgets wedge), and what its rings
-    /// do: reveal (false) or edit (true).
-    var hasWidgets: (() -> Bool)?
+    /// What the widgets are doing (revealed, being edited), read as the wheel opens; nil while
+    /// no app serves widgets, when the wheel has no Widgets wedge. `onWidgets` is what its rings
+    /// do: toggle revealing (false) or editing (true).
+    var widgetsState: (() -> RadialMenu.Wedge.WidgetsState?)?
     var onWidgets: ((Bool) -> Void)?
 
     /// What the park wedge acts on, read as the wheel opens: the focused window and the parked ones.
@@ -87,8 +88,8 @@ final class LoadoutMenu {
                              kind: .capture(offersAllScreens: store.config.multiDesktopLoadouts)),
             RadialMenu.Wedge(name: "Park", icons: symbol("rectangle.portrait.and.arrow.right"), kind: .park(parkTargets())),
         ]
-        if hasWidgets?() == true {
-            tools.append(RadialMenu.Wedge(name: "Widgets", icons: symbol("square.grid.2x2"), kind: .widgets))
+        if let state = widgetsState?() {
+            tools.append(RadialMenu.Wedge(name: "Widgets", icons: symbol("square.grid.2x2"), kind: .widgets(state)))
         }
         return offered.map {
             RadialMenu.Wedge(name: $0.name, icons: RadialMenu.icons(for: $0, panels: engine.panels),

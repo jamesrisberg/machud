@@ -34,14 +34,14 @@ final class RadialWheelSnapshotTests: XCTestCase {
     }
 
     /// `loadouts` loadout wedges named from `names`, then Capture, Park and (when `widgets`) Widgets.
-    private static func wedges(_ names: [String], loadouts: Int, widgets: Bool = true,
+    private static func wedges(_ names: [String], loadouts: Int, widgets: RadialMenu.Wedge.WidgetsState? = .init(),
                                allScreens: Bool = false, park: RadialMenu.Wedge.ParkTargets = .init()) -> [RadialMenu.Wedge] {
         var out = (0..<loadouts).map { i in
             RadialMenu.Wedge(name: names[i % names.count], icons: appIcons(2 + i % 4), kind: .loadout(names[i % names.count]))
         }
         out.append(RadialMenu.Wedge(name: "Capture", icons: symbol("camera.viewfinder"), kind: .capture(offersAllScreens: allScreens)))
         out.append(RadialMenu.Wedge(name: "Park", icons: symbol("rectangle.portrait.and.arrow.right"), kind: .park(park)))
-        if widgets { out.append(RadialMenu.Wedge(name: "Widgets", icons: symbol("square.grid.2x2"), kind: .widgets)) }
+        if let widgets { out.append(RadialMenu.Wedge(name: "Widgets", icons: symbol("square.grid.2x2"), kind: .widgets(widgets))) }
         return out
     }
 
@@ -67,7 +67,7 @@ final class RadialWheelSnapshotTests: XCTestCase {
         func desktop(_ n: Int) -> Desktop { desktops[n % desktops.count] }
 
         // At rest: 3, 6, 8 and 12 wedges, and long names at 6 and 12.
-        out.append(Shot(name: "rest-03-bright", wedges: Self.wedges(Self.short, loadouts: 1, widgets: false), selection: .cancel, desktop: .bright))
+        out.append(Shot(name: "rest-03-bright", wedges: Self.wedges(Self.short, loadouts: 1, widgets: nil), selection: .cancel, desktop: .bright))
         out.append(Shot(name: "rest-06-dark", wedges: Self.wedges(Self.short, loadouts: 3), selection: .cancel, desktop: .dark))
         out.append(Shot(name: "rest-08-colourful", wedges: Self.wedges(Self.short, loadouts: 5), selection: .cancel, desktop: .colourful))
         out.append(Shot(name: "rest-12-bright", wedges: Self.wedges(Self.short, loadouts: 9), selection: .cancel, desktop: .bright))
@@ -100,9 +100,13 @@ final class RadialWheelSnapshotTests: XCTestCase {
                             selection: .wedge(index: 4, ring: ring), desktop: desktop(k)))
         }
 
-        // Widgets: reveal and edit.
-        for (k, (label, ring)) in [("reveal", RadialGeometry.Ring.inner), ("edit", .middle)].enumerated() {
-            out.append(Shot(name: "widgets-\(label)-\(desktop(k + 1).rawValue)", wedges: Self.wedges(Self.long, loadouts: 3),
+        // Widgets: reveal, edit; and while revealed (Lower) and while editing (Done).
+        let widgets: [(String, RadialMenu.Wedge.WidgetsState, RadialGeometry.Ring)] = [
+            ("reveal", .init(), .inner), ("edit", .init(), .middle),
+            ("lower", .init(revealed: true), .inner), ("done", .init(editing: true), .middle),
+        ]
+        for (k, (label, state, ring)) in widgets.enumerated() {
+            out.append(Shot(name: "widgets-\(label)-\(desktop(k + 1).rawValue)", wedges: Self.wedges(Self.long, loadouts: 3, widgets: state),
                             selection: .wedge(index: 5, ring: ring), desktop: desktop(k + 1)))
         }
 

@@ -8,7 +8,7 @@ struct RadialGeometry: Equatable {
     /// The rings, inside out. What each one does depends on the wedge (`RadialMenu.ringLabel`):
     /// a loadout previews / applies / clears then applies; capture captures this screen / (with
     /// multi-desktop loadouts on) all screens / opens the editor on a new layout; park parks /
-    /// restores; widgets reveals / edits.
+    /// restores; widgets reveals or lowers / edits or finishes editing.
     enum Ring: String, Equatable, CaseIterable {
         case inner, middle, outer
         var position: Int { Self.allCases.firstIndex(of: self)! }
@@ -128,10 +128,18 @@ final class RadialMenu {
             var parked: [String] = []
         }
 
+        /// What the widgets wedge's rings toggle, read as the wheel opens.
+        struct WidgetsState: Equatable {
+            /// The widgets are raised above the windows: the inner ring lowers them.
+            var revealed = false
+            /// The widgets are being edited: the outer ring finishes.
+            var editing = false
+        }
+
         /// `capture`'s `offersAllScreens`: whether it has the ring that captures every display,
         /// which exists only while multi-desktop loadouts (experimental) are on.
         enum Kind: Equatable {
-            case loadout(String), capture(offersAllScreens: Bool), park(ParkTargets), widgets
+            case loadout(String), capture(offersAllScreens: Bool), park(ParkTargets), widgets(WidgetsState)
         }
         /// Shown outside the last ring: the loadout's name, or Capture, Park, Widgets.
         var name: String
@@ -155,7 +163,8 @@ final class RadialMenu {
         /// The park wedge's inner ring: park the focused window. Its outer ring: bring
         /// every parked window back.
         case park(restore: Bool)
-        /// The widgets wedge's inner ring: reveal (or lower) the widgets. Its outer ring: edit them.
+        /// The widgets wedge's inner ring: reveal or lower the widgets. Its outer ring: start or
+        /// finish editing them.
         case widgets(edit: Bool)
     }
 
@@ -184,8 +193,8 @@ final class RadialMenu {
         case (.capture, .middle), (.capture, .outer): return "Draw layout"
         case (.park, .inner): return "Park"
         case (.park, .middle), (.park, .outer): return "Restore"
-        case (.widgets, .inner): return "Reveal"
-        case (.widgets, .middle), (.widgets, .outer): return "Edit"
+        case (.widgets(let state), .inner): return state.revealed ? "Lower" : "Reveal"
+        case (.widgets(let state), .middle), (.widgets(let state), .outer): return state.editing ? "Done" : "Edit"
         }
     }
 
@@ -207,8 +216,9 @@ final class RadialMenu {
             case 1: return "Restore \(targets.parked[0])"
             case let n: return "Restore \(n) parked windows"
             }
-        case (.widgets, .inner): return "Reveal widgets"
-        case (.widgets, .middle), (.widgets, .outer): return "Edit widgets"
+        case (.widgets(let state), .inner): return state.revealed ? "Lower widgets" : "Reveal widgets"
+        case (.widgets(let state), .middle), (.widgets(let state), .outer):
+            return state.editing ? "Finish editing widgets" : "Edit widgets"
         }
     }
 
