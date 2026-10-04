@@ -446,10 +446,13 @@ final class RadialMenu {
 
     // MARK: Window
 
-    private func makeWindow() -> NSWindow {
+    func makeWindow() -> NSWindow {
         let w = NSWindow(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
         w.isOpaque = false
         w.backgroundColor = .clear
+        // The labels, strokes and fills are white: dark in a light system appearance too, so the
+        // glass's tint (white in a light appearance) never sits under them.
+        w.appearance = NSAppearance(named: .darkAqua)
         w.hasShadow = false
         w.ignoresMouseEvents = true
         w.level = .screenSaver
