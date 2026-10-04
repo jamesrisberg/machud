@@ -135,8 +135,11 @@ What it shows:
 
 - The recorded replies above do not include the tool dock steps; the tool dock bullet
   under "What it shows" describes them.
-  the `edge=`/`peek=` that MacHUD sends with `panel mode parked` (HUDKit's
-  `setPanelMode(_:mode:options:)`). Top-edge parking relies on `HUDPanelWindow` keeping
-  AppKit from clamping frames below the menu bar.
+  own panels honour the `edge=`/`peek=` that MacHUD sends with `panel mode parked`. HUDKit's
+  default `setPanelMode(_:mode:options:)` drops the options, so each app opts in by
+  implementing it. Archibald implements only `setPanelMode(_:mode:)`: it ignores `edge=` and
+  `peek=` and parks its orb at the edge it sits on, or at the nearest edge when the orb is
+  free-placed. widgetHUD has no panels to park. Top-edge parking relies on `HUDPanelWindow`
+  keeping AppKit from clamping frames below the menu bar.
 - A cooperative panel the user brings back through the app itself (its hotkey, `panel show`)
   stays in `park list` until it is re-parked, revealed or unparked.
