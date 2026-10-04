@@ -1,11 +1,12 @@
 import AppKit
 import CoreText
 
-/// Fits a short text into lines that each have a length budget: a name or a button label on
-/// the loadout wheel, or the hint under it. First the point size shrinks, down to the style's
-/// floor; then the text wraps at word boundaries, up to the style's line count, starting again
-/// from the preferred size; only then is the last line truncated with an ellipsis, after a whole
-/// word where one fits. Pure: it measures with CoreText (kerning kept) and draws nothing.
+/// Fits a short text into upright lines no wider than a width: a name or a button label on the
+/// loadout wheel, or the hint under it. First the text wraps at word boundaries at its preferred
+/// size, up to the style's line count; then it shrinks, down to the style's floor; only then is
+/// the last line cut with an ellipsis, after a whole word where one fits (letters only when not
+/// even the first word does). Every line it returns is at most the width it was given, whatever
+/// the text. Pure: it measures with CoreText (kerning kept) and draws nothing.
 struct TextFit: Equatable {
     struct Style: Equatable {
         var weight: NSFont.Weight
@@ -15,15 +16,25 @@ struct TextFit: Equatable {
 
         func font(_ size: CGFloat) -> NSFont { .systemFont(ofSize: size, weight: weight) }
 
-        /// A wedge's name, on the band outside its last ring.
-        static let name = Style(weight: .semibold, preferred: 13, floor: 10, maxLines: 2)
+        /// The same style with every size multiplied by `factor` (a wheel drawn smaller to fit
+        /// its screen).
+        func scaled(_ factor: CGFloat) -> Style {
+            Style(weight: weight, preferred: preferred * factor, floor: floor * factor, maxLines: maxLines)
+        }
+
+        /// A wedge's name, outside its last ring.
+        static let name = Style(weight: .semibold, preferred: 14, floor: 11, maxLines: 2)
         /// A ring's button label.
-        static let label = Style(weight: .semibold, preferred: 11, floor: 9, maxLines: 2)
+        static let label = Style(weight: .semibold, preferred: 12, floor: 10, maxLines: 1)
         /// The line under the wheel.
-        static let hint = Style(weight: .medium, preferred: 12, floor: 10, maxLines: 2)
+        static let hint = Style(weight: .medium, preferred: 12.5, floor: 10.5, maxLines: 2)
+        /// A wedge's digit, by the dead zone.
+        static let digit = Style(weight: .bold, preferred: 9, floor: 9, maxLines: 1)
+        /// "Esc" and "Cancel" in the centre.
+        static let centre = Style(weight: .semibold, preferred: 12, floor: 12, maxLines: 1)
     }
 
-    /// Outermost (first) line first.
+    /// Top line first.
     var lines: [String]
     var size: CGFloat
     var truncated: Bool
@@ -36,74 +47,84 @@ struct TextFit: Equatable {
         return CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
     }
 
-    /// `budget(lineCount, size)`: the length each of `lineCount` lines may take at `size`, first
-    /// line first, or nil when that many lines at that size do not fit (a band too shallow).
-    static func fit(_ text: String, style: Style, budget: (Int, CGFloat) -> [CGFloat]?) -> TextFit {
-        let words = text.split(separator: " ").map(String.init)
-        guard !words.isEmpty else { return TextFit(lines: [text], size: style.preferred, truncated: false) }
-        let sizes = Array(stride(from: style.preferred, through: style.floor, by: -step))
-        for lines in 1...max(1, min(style.maxLines, words.count)) {
-            for size in sizes {
-                guard let budgets = budget(lines, size), budgets.count == lines else { continue }
-                if let split = bestSplit(words, into: lines, font: style.font(size), budgets: budgets) {
+    static func fit(_ text: String, style: Style, width room: CGFloat) -> TextFit {
+        let words = text.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !words.isEmpty else { return TextFit(lines: [""], size: style.preferred, truncated: false) }
+        let most = max(1, min(style.maxLines, words.count))
+        var sizes = Array(stride(from: style.preferred, to: style.floor, by: -step))
+        sizes.append(style.floor)
+        // Wrapping comes before shrinking: every line count at the preferred size first.
+        for lines in 1...most {
+            if let split = bestSplit(words, into: lines, font: style.font(style.preferred), width: room) {
+                return TextFit(lines: split, size: style.preferred, truncated: false)
+            }
+        }
+        for size in sizes.dropFirst() {
+            for lines in 1...most {
+                if let split = bestSplit(words, into: lines, font: style.font(size), width: room) {
                     return TextFit(lines: split, size: size, truncated: false)
                 }
             }
         }
-        return truncate(words, style: style, budget: budget)
+        return truncate(words, style: style, width: room)
     }
 
-    /// The split of `words` into `count` lines that fit their budgets with the most room to spare
-    /// on the tightest line; nil when none fits. Handles one and two lines.
-    private static func bestSplit(_ words: [String], into count: Int, font: NSFont, budgets: [CGFloat]) -> [String]? {
+    /// The split of `words` into `count` lines, each no wider than `room`, whose widest line is
+    /// narrowest; nil when none fits.
+    private static func bestSplit(_ words: [String], into count: Int, font: NSFont, width room: CGFloat) -> [String]? {
         if count == 1 {
             let line = words.joined(separator: " ")
-            return width(line, font: font) <= budgets[0] ? [line] : nil
+            return width(line, font: font) <= room ? [line] : nil
         }
-        var best: (lines: [String], tightest: CGFloat)?
-        for k in 1..<words.count {
-            let lines = [words[..<k].joined(separator: " "), words[k...].joined(separator: " ")]
-            let ratios = zip(lines, budgets).map { width($0, font: font) / max($1, 1) }
-            guard let tightest = ratios.max(), tightest <= 1 else { continue }
-            if best == nil || tightest < best!.tightest { best = (lines, tightest) }
+        guard words.count >= count else { return nil }
+        var best: (lines: [String], widest: CGFloat)?
+        for k in 1...(words.count - count + 1) {
+            let first = words[..<k].joined(separator: " ")
+            let w = width(first, font: font)
+            guard w <= room, let rest = bestSplit(Array(words[k...]), into: count - 1, font: font, width: room) else { continue }
+            let widest = max(w, rest.map { width($0, font: font) }.max() ?? 0)
+            if best == nil || widest < best!.widest { best = ([first] + rest, widest) }
         }
         return best?.lines
     }
 
-    /// At the floor, on as many lines as fit: whole words fill the lines in turn, and the last
-    /// line ends in an ellipsis after the last word that fits (letters only when no word does).
-    private static func truncate(_ words: [String], style: Style, budget: (Int, CGFloat) -> [CGFloat]?) -> TextFit {
+    /// At the floor, on as many lines as the style allows: whole words fill the lines in turn,
+    /// and the last line ends in an ellipsis after the last word that fits. A word too wide for
+    /// a line of its own is cut there, letters first, and ends the text.
+    private static func truncate(_ words: [String], style: Style, width room: CGFloat) -> TextFit {
         let font = style.font(style.floor)
-        var count = max(1, min(style.maxLines, words.count))
-        while count > 1, budget(count, style.floor) == nil { count -= 1 }
-        let budgets = budget(count, style.floor) ?? [0]
+        let count = max(1, min(style.maxLines, words.count))
         var rest = words[...]
         var lines: [String] = []
-        for (i, room) in budgets.enumerated() where !rest.isEmpty {
-            if i == budgets.count - 1 {
-                lines.append(ending(Array(rest), font: font, room: room))
+        var cut = false
+        while !rest.isEmpty, lines.count < count {
+            if lines.count == count - 1 {
+                let all = rest.joined(separator: " ")
+                cut = width(all, font: font) > room
+                lines.append(cut ? ending(Array(rest), font: font, room: room) : all)
                 break
             }
             var taken = 0
-            while taken < rest.count,
-                  width(rest.prefix(taken + 1).joined(separator: " "), font: font) <= room { taken += 1 }
+            while taken < rest.count, width(rest.prefix(taken + 1).joined(separator: " "), font: font) <= room { taken += 1 }
             guard taken > 0 else {
+                cut = true
                 lines.append(ending(Array(rest), font: font, room: room))
                 break
             }
             lines.append(rest.prefix(taken).joined(separator: " "))
             rest = rest.dropFirst(taken)
         }
-        return TextFit(lines: lines, size: style.floor, truncated: true)
+        return TextFit(lines: lines.isEmpty ? [""] : lines, size: style.floor, truncated: cut)
     }
 
     /// `words` cut to `room` with an ellipsis: after the most whole words that fit, else after
-    /// the most letters of the first word, else nothing.
+    /// the most letters of the first word, else the ellipsis alone, else nothing.
     private static func ending(_ words: [String], font: NSFont, room: CGFloat) -> String {
         let trailing = CharacterSet.punctuationCharacters.union(.whitespaces)
         for k in stride(from: words.count - 1, through: 1, by: -1) {
             var kept = words.prefix(k).joined(separator: " ")
             while let last = kept.unicodeScalars.last, trailing.contains(last) { kept.removeLast() }
+            guard !kept.isEmpty else { continue }
             let line = kept + ellipsis
             if width(line, font: font) <= room { return line }
         }
@@ -116,98 +137,42 @@ struct TextFit: Equatable {
     }
 }
 
-/// A text fitted to a band of the wheel and laid along its arc: each line's baseline is a circle
-/// around the wheel's centre, the text centred on its wedge's centre angle, every glyph standing
-/// on the arc with its top pointing outward. At the bottom of the wheel that is upside-down, on
-/// purpose: nothing is flipped to read.
-struct ArcText: Equatable {
-    var fit: TextFit
-    /// Each line's baseline radius, outermost (first) line first.
-    var baselines: [CGFloat]
-
-    /// Fits `text` between the `inner` and `outer` radii, its lines centred in the band, each
-    /// within `angle` radians at its lowest point (the descenders), less `inset` points at both ends.
-    static func fit(_ text: String, style: TextFit.Style, inner: CGFloat, outer: CGFloat,
-                    angle: Double, inset: CGFloat) -> ArcText {
-        let fit = TextFit.fit(text, style: style) { count, size in
-            baselines(count: count, font: style.font(size), inner: inner, outer: outer)?.map {
-                CGFloat(angle) * ($0 + style.font(size).descender) - 2 * inset
-            }
-        }
-        let font = style.font(fit.size)
-        return ArcText(fit: fit, baselines: baselines(count: fit.lines.count, font: font, inner: inner, outer: outer)
-                        ?? stack(count: fit.lines.count, font: font, middle: (inner + outer) / 2))
+/// A fitted text ready to draw upright: one CoreText line per line, drawn whole (so kerning and
+/// combining marks keep their places) in the context's fill colour, with its shadow.
+struct PreparedText {
+    struct Line {
+        var line: CTLine
+        var width: CGFloat
     }
 
-    /// The baselines of `count` lines centred (on their capitals) between `inner` and `outer`,
-    /// outermost first; nil when they do not fit between them.
-    static func baselines(count: Int, font: NSFont, inner: CGFloat, outer: CGFloat) -> [CGFloat]? {
-        let lines = stack(count: count, font: font, middle: (inner + outer) / 2)
-        guard let top = lines.first, let bottom = lines.last,
-              top + font.ascender <= outer + 0.001, bottom + font.descender >= inner - 0.001 else { return nil }
-        return lines
-    }
+    let lines: [Line]
+    let font: NSFont
 
-    private static func stack(count: Int, font: NSFont, middle: CGFloat) -> [CGFloat] {
-        let pitch = font.ascender - font.descender
-        return (0..<count).map { i in middle + (CGFloat(count - 1) / 2 - CGFloat(i)) * pitch - font.capHeight / 2 }
-    }
-
-    /// Where the glyph whose middle is `x` points into a line `lineWidth` long sits on a baseline
-    /// of `radius` centred on `centerAngle` (clockwise from straight up), and how much it turns:
-    /// its top points away from `center`.
-    static func place(x: CGFloat, lineWidth: CGFloat, radius: CGFloat, centerAngle: Double,
-                      center c: CGPoint) -> (point: CGPoint, rotation: CGFloat) {
-        let a = centerAngle + Double((x - lineWidth / 2) / radius)
-        return (CGPoint(x: c.x + radius * CGFloat(sin(a)), y: c.y + radius * CGFloat(cos(a))), -CGFloat(a))
-    }
-
-    /// Draws `line` along its baseline circle with `ctx`'s fill colour and shadow.
-    static func draw(_ line: String, font: NSFont, radius: CGFloat, centerAngle: Double, center c: CGPoint,
-                     in ctx: CGContext) {
-        let ctLine = CTLineCreateWithAttributedString(NSAttributedString(string: line, attributes: [.font: font]))
-        let lineWidth = CGFloat(CTLineGetTypographicBounds(ctLine, nil, nil, nil))
-        guard let runs = CTLineGetGlyphRuns(ctLine) as? [CTRun] else { return }
-        for run in runs {
-            let count = CTRunGetGlyphCount(run)
-            guard count > 0 else { continue }
-            var glyphs = [CGGlyph](repeating: 0, count: count)
-            var positions = [CGPoint](repeating: .zero, count: count)
-            var advances = [CGSize](repeating: .zero, count: count)
-            CTRunGetGlyphs(run, CFRange(location: 0, length: 0), &glyphs)
-            CTRunGetPositions(run, CFRange(location: 0, length: 0), &positions)
-            CTRunGetAdvances(run, CFRange(location: 0, length: 0), &advances)
-            let attributes = CTRunGetAttributes(run) as NSDictionary
-            let fallback: CTFont = font
-            let runFont = attributes[kCTFontAttributeName as String].map { $0 as! CTFont } ?? fallback
-            for i in 0..<count {
-                let spot = place(x: positions[i].x + advances[i].width / 2, lineWidth: lineWidth, radius: radius,
-                                 centerAngle: centerAngle, center: c)
-                ctx.saveGState()
-                ctx.translateBy(x: spot.point.x, y: spot.point.y)
-                ctx.rotate(by: spot.rotation)
-                ctx.textMatrix = .identity
-                var glyph = glyphs[i]
-                var origin = CGPoint(x: -advances[i].width / 2, y: 0)
-                CTFontDrawGlyphs(runFont, &glyph, &origin, 1, ctx)
-                ctx.restoreGState()
-            }
+    init(_ fit: TextFit, style: TextFit.Style) {
+        font = style.font(fit.size)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true,
+        ]
+        lines = fit.lines.map { text in
+            let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: attributes))
+            return Line(line: line, width: CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil)))
         }
     }
-}
 
-extension RadialGeometry {
-    /// A wedge's name fitted along the name band.
-    func fitName(_ name: String) -> ArcText {
-        let band = nameTextBand
-        return ArcText.fit(name, style: .name, inner: band.inner, outer: band.outer,
-                           angle: textAngle(at: .greatestFiniteMagnitude), inset: Self.textInset)
-    }
+    static func lineHeight(_ font: NSFont) -> CGFloat { font.ascender - font.descender }
+    var lineHeight: CGFloat { Self.lineHeight(font) }
+    var height: CGFloat { CGFloat(lines.count) * lineHeight }
 
-    /// A ring's button label fitted along its label band.
-    func fitLabel(_ label: String, ring: Ring, of index: Int) -> ArcText {
-        let band = labelBand(ring, of: index)
-        return ArcText.fit(label, style: .label, inner: band.inner, outer: band.outer,
-                           angle: textAngle(at: .greatestFiniteMagnitude), inset: Self.textInset)
+    /// Draws the lines from the top of `frame` down, each placed across the frame by `align`
+    /// (0 at its left edge, 1 at its right), with `ctx`'s fill colour and shadow.
+    func draw(in frame: CGRect, align: CGFloat, in ctx: CGContext) {
+        ctx.textMatrix = .identity
+        for (i, line) in lines.enumerated() {
+            let x = frame.minX + (frame.width - line.width) * align
+            let baseline = frame.maxY - font.ascender - CGFloat(i) * lineHeight
+            ctx.textPosition = CGPoint(x: x, y: baseline)
+            CTLineDraw(line.line, ctx)
+        }
     }
 }

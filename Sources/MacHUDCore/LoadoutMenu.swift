@@ -709,7 +709,7 @@ final class LoadoutMenu {
                 response.merge(self.radial.json) { a, _ in a }
             } else {
                 let wedges = self.wedges()
-                response.merge(RadialMenu.json(wedges: wedges, geometry: RadialGeometry(count: wedges.count, ringCounts: wedges.map { RadialMenu.ringCount(for: $0.kind) }))) { a, _ in a }
+                response.merge(RadialMenu.json(wedges: wedges, layout: RadialLayout(wedges: wedges))) { a, _ in a }
                 response["visible"] = false
             }
             if let last = self.lastApply { response["lastApply"] = last }

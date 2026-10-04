@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import MacHUDCore
 
@@ -133,7 +134,6 @@ final class RadialGeometryTests: XCTestCase {
         XCTAssertEqual(g.selection(at: .zero, shift: true), .cancel)
     }
 
-
     func testSelectionAccessors() {
         XCTAssertNil(RadialGeometry.Selection.cancel.index)
         XCTAssertNil(RadialGeometry.Selection.cancel.ring)
@@ -142,57 +142,14 @@ final class RadialGeometryTests: XCTestCase {
         XCTAssertEqual(s.ring, .outer)
     }
 
-    // MARK: the name band
-
-    /// Each wedge's name sits on a band outside its last ring. The band is not a button: a
-    /// pointer over it still selects the wedge's last ring, whatever the wedge has.
-    func testThePointerOverTheNameBandSelectsTheLastRing() {
+    /// Each wedge's name is anchored outside its last ring. It is not a button: a pointer over
+    /// it, or past it, still selects the wedge's last ring, whatever the wedge has.
+    func testThePointerOverANameSelectsTheLastRing() {
         let g = RadialGeometry(count: 3, ringCounts: [3, 2, 3])
-        XCTAssertGreaterThan(g.nameBand.inner, g.outerEdge)
-        XCTAssertGreaterThan(g.nameBand.outer, g.nameBand.inner)
-        for r in [g.nameBand.inner, (g.nameBand.inner + g.nameBand.outer) / 2, g.nameBand.outer] {
+        XCTAssertGreaterThan(g.nameRadius, g.outerEdge)
+        for r in [g.nameRadius, g.nameRadius + 40, g.nameRadius + 400] {
             XCTAssertEqual(g.selection(at: offset(angle: g.centerAngle(of: 0), radius: r)), .wedge(index: 0, ring: .outer))
             XCTAssertEqual(g.selection(at: offset(angle: g.centerAngle(of: 1), radius: r)), .wedge(index: 1, ring: .middle))
-        }
-    }
-
-    /// Every ring's label band lies inside that ring, clear of the digit by the dead zone.
-    func testEachLabelSitsInsideItsRing() {
-        let g = RadialGeometry(count: 2, ringCounts: [3, 2])
-        for i in 0..<2 {
-            for ring in g.rings(of: i) {
-                let band = g.band(ring, of: i)
-                let label = g.labelBand(ring, of: i)
-                XCTAssertGreaterThanOrEqual(label.inner, band.r0, "\(i) \(ring)")
-                XCTAssertLessThanOrEqual(label.outer, band.r1, "\(i) \(ring)")
-                XCTAssertGreaterThan(label.outer - label.inner, 24, "room for a line or two")
-            }
-        }
-        XCTAssertGreaterThanOrEqual(g.labelBand(.inner, of: 0).inner, g.deadZone + 14, "the digit sits below the label")
-    }
-
-    /// Up to eight wedges the wheel keeps its size; past that its rings move out, so a word on
-    /// the inner ring still has room. The dead zone never moves, and the middle and outer rings
-    /// keep their depth.
-    func testAWheelWithManyWedgesMovesItsRingsOut() {
-        for count in 1...8 {
-            XCTAssertEqual(RadialGeometry.growth(count: count), 0, "\(count) wedges")
-            XCTAssertEqual(RadialGeometry(count: count).outerEdge, 196)
-        }
-        var last: CGFloat = 196
-        for count in 9...12 {
-            let g = RadialGeometry(count: count)
-            XCTAssertGreaterThan(g.outerEdge, last, "\(count) wedges")
-            last = g.outerEdge
-            XCTAssertEqual(g.deadZone, 46)
-            XCTAssertEqual(g.middleEdge - g.innerEdge, 48, accuracy: 0.001)
-            XCTAssertEqual(g.outerEdge - g.middleEdge, 48, accuracy: 0.001)
-        }
-        for count in 1...12 {
-            let g = RadialGeometry(count: count)
-            let band = g.labelBand(.inner, of: 0)
-            let line = (band.inner + band.outer) / 2 - 6   // the foot of one line centred in the band
-            XCTAssertGreaterThanOrEqual(g.textAngle(at: line) * Double(line), 40, "\(count) wedges")
         }
     }
 
@@ -271,7 +228,7 @@ final class RadialGeometryTests: XCTestCase {
         XCTAssertEqual(RadialMenu.outcome(of: thisScreen, ring: .outer), .drawLayout)
 
         let wedges = [RadialMenu.Wedge(name: "Capture", kind: thisScreen)]
-        let json = RadialMenu.json(wedges: wedges, geometry: RadialGeometry(count: 1, ringCounts: [RadialMenu.ringCount(for: thisScreen)]))
+        let json = RadialMenu.json(wedges: wedges, layout: RadialLayout(wedges: wedges))
         let wedge = (json["wedges"] as? [[String: Any]])?.first
         XCTAssertEqual(wedge?["kind"] as? String, "capture")
         XCTAssertEqual(wedge?["name"] as? String, "Capture")
@@ -280,13 +237,14 @@ final class RadialGeometryTests: XCTestCase {
     }
 
     /// `menu` lists each wedge's name, its rings' labels and the hint each ring shows, and the
-    /// selection with the hint showing now; nothing reports a subtitle.
+    /// selection with the hint showing now.
     @MainActor
     func testTheMenuJSONCarriesNamesLabelsAndHints() {
         let wedges = [RadialMenu.Wedge(name: "Morning research and writing", kind: .loadout("Morning research and writing")),
                       RadialMenu.Wedge(name: "Park", kind: .park(.init(focused: "Notes · Groceries")))]
-        let g = RadialGeometry(count: 2, ringCounts: wedges.map { RadialMenu.ringCount(for: $0.kind) })
-        let json = RadialMenu.json(wedges: wedges, geometry: g)
+        let layout = RadialLayout(wedges: wedges)
+        let g = layout.geometry
+        let json = RadialMenu.json(wedges: wedges, layout: layout)
         let out = json["wedges"] as? [[String: Any]]
         XCTAssertEqual(out?[0]["name"] as? String, "Morning research and writing")
         XCTAssertEqual(out?[0]["rings"] as? [String], ["Preview", "Apply", "Clear + Apply"])
@@ -299,15 +257,33 @@ final class RadialGeometryTests: XCTestCase {
         XCTAssertNil(out?[0]["subtitle"])
         XCTAssertNil(out?[0]["title"])
         let rings = json["rings"] as? [String: Double]
-        XCTAssertEqual(rings?["names"], Double(g.nameBand.outer))
+        XCTAssertEqual(rings?["deadZone"], Double(g.deadZone))
+        XCTAssertEqual(rings?["inner"], Double(g.innerEdge))
+        XCTAssertEqual(rings?["middle"], Double(g.middleEdge))
+        XCTAssertEqual(rings?["outer"], Double(g.outerEdge))
+        XCTAssertEqual(rings?["names"], Double(g.nameRadius))
 
-        let selected = RadialMenu.json(wedges: wedges, geometry: g, selection: .wedge(index: 0, ring: .outer))["selection"] as? [String: Any]
+        let selected = RadialMenu.json(wedges: wedges, layout: layout, selection: .wedge(index: 0, ring: .outer))["selection"] as? [String: Any]
         XCTAssertEqual(selected?["name"] as? String, "Morning research and writing")
         XCTAssertEqual(selected?["ring"] as? String, "outer")
         XCTAssertEqual(selected?["hint"] as? String, "Clear this screen and apply Morning research and writing")
-        let idle = RadialMenu.json(wedges: wedges, geometry: g, selection: .cancel)["selection"] as? [String: Any]
+        let idle = RadialMenu.json(wedges: wedges, layout: layout, selection: .cancel)["selection"] as? [String: Any]
         XCTAssertEqual(idle?["kind"] as? String, "cancel")
         XCTAssertEqual(idle?["hint"] as? String, "Release on a button · centre cancels")
+    }
+
+    /// `icons` counts the icons the wheel draws by each name: up to `RadialLayout.maxIcons` on
+    /// a wheel of up to eight wedges, none on a bigger one.
+    @MainActor
+    func testTheMenuJSONCountsTheIconsDrawn() {
+        let image = NSImage(systemSymbolName: "app", accessibilityDescription: nil) ?? NSImage()
+        func icons(_ count: Int) -> [Int] {
+            let wedges = (0..<count).map { RadialMenu.Wedge(name: "L\($0)", icons: Array(repeating: image, count: 7), kind: .loadout("L\($0)")) }
+            let out = RadialMenu.json(wedges: wedges, layout: RadialLayout(wedges: wedges))["wedges"] as? [[String: Any]]
+            return out?.compactMap { $0["icons"] as? Int } ?? []
+        }
+        XCTAssertEqual(icons(8), Array(repeating: RadialLayout.maxIcons, count: 8))
+        XCTAssertEqual(icons(9), Array(repeating: 0, count: 9))
     }
 }
 
