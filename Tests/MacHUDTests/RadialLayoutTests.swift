@@ -359,8 +359,15 @@ final class RadialLayoutTests: XCTestCase {
         }
     }
 
+    /// The blur is full a little past a lit word's glow, and the light under a hovered button
+    /// ends where the full blur around a lone word would: one reach decides all three.
+    func testTheGlowTheBlurAndTheLightAgree() {
+        XCTAssertGreaterThan(RadialField.pad, RadialWheelView.glowReach)
+        XCTAssertEqual(RadialWheelView.lightReach, RadialField.pad)
+    }
+
     /// Each image is its profile in black: the blur's alpha is the blur profile, the tint's the
-    /// tint profile, whose strength is the tint view's darkness (`RadialBackdrop.darkness(for:)`).
+    /// tint profile, whose strength is the tint view's darkness (`RadialField.darkness`).
     func testTheImagesAreTheProfiles() throws {
         let field = RadialField(layout: RadialLayout(wedges: Self.wedges(8, Self.long)), reduced: false)
         for (image, value) in [(field.blurImage, field.blur), (field.tintImage, field.tint)] as [(CGImage, (CGPoint) -> CGFloat)] {

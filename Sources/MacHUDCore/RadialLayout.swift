@@ -83,8 +83,6 @@ struct RadialLayout: Equatable {
     /// Every word and the hint's zone.
     let bounds: CGRect
 
-    var showsIcons: Bool { geometry.count <= Self.iconLimit }
-
     func word(_ role: Word.Role) -> Word? { words.first { $0.role == role } }
 
     /// The icons drawn by wedge `index`'s name.
@@ -395,7 +393,9 @@ struct RadialField {
     static let readable: CGFloat = 0.84
     /// How much weaker the tint's profile is at the farthest word than in the middle.
     static let rim: CGFloat = 0.14
-    static let pad: CGFloat = 26
+    /// How far past each word's box the blur stays full: a little past a lit word's glow
+    /// (`RadialWheelView.glowReach`).
+    nonisolated static let pad: CGFloat = RadialWheelView.glowReach + 12
     static let fade: CGFloat = 72
     static let smoothing: CGFloat = 120
     /// How far past the names' anchors the field's disc reaches.

@@ -541,7 +541,7 @@ final class RadialMenu {
         let local = CGRect(x: center.x - screenFrame.minX - canvas.center.x, y: center.y - screenFrame.minY - canvas.center.y,
                            width: canvas.size.width, height: canvas.size.height)
         backdrop.view.frame = local
-        tint.darkness = RadialBackdrop.darkness(for: backdrop.show(field: field.blurImage))
+        backdrop.show(field: field.blurImage)
         tint.frame = local
         tint.image = field.tintImage
         wheel.frame = local
@@ -779,26 +779,14 @@ final class RadialMenu {
 
 /// What the wheel's tint and words sit on: HUDKit's soft backdrop (`HUDSoftBackdropView`), a
 /// blur of what is behind the window shown through the field, so its edge fades out instead of
-/// ending in a line. It draws no tint of its own: the wheel's tint is its own view
-/// (`RadialTintView`), as dark as `darkness(for:)` says for the way the backdrop draws. Nothing
-/// else in the wheel's window may be on the window server's blur (`HUDGlassView` with the window
-/// blur): that blur covers everything the window draws and would end in a line.
+/// ending in a line. With a field it always draws: the blur, or the system's material (opaque
+/// and dark with Reduce transparency on; AppKit's own translucent material where the blur
+/// cannot be made). It draws no tint of its own: the wheel's tint is its own view
+/// (`RadialTintView`), the same over either. Nothing else in the wheel's window may be on the
+/// window server's blur (`HUDGlassView` with the window blur): that blur covers everything the
+/// window draws and would end in a line.
 @MainActor
 final class RadialBackdrop {
-    /// The tint's darkness with no backdrop at all, the words over the sharp desktop.
-    nonisolated static let darknessWithoutBackdrop: CGFloat = 0.85
-
-    /// How dark the wheel's tint is where its profile is full, over a backdrop that draws by
-    /// `path`: `RadialField.darkness` over the blur, and over the system's material (opaque and
-    /// dark with Reduce transparency on; AppKit's own translucent material where the blur cannot
-    /// be made); `darknessWithoutBackdrop` with none, where sharp detail sits behind the words.
-    nonisolated static func darkness(for path: HUDSoftBackdropView.Path) -> CGFloat {
-        switch path {
-        case .blur, .systemMaterial: return RadialField.darkness
-        case .none: return darknessWithoutBackdrop
-        }
-    }
-
     let view: HUDSoftBackdropView
     private var shown: CGImage?
 
@@ -806,6 +794,8 @@ final class RadialBackdrop {
     init(view: HUDSoftBackdropView? = nil) {
         self.view = view ?? HUDSoftBackdropView(frame: .zero)
         self.view.tint = nil
+        // HUDKit's log lines about the backdrop name it by this.
+        self.view.identifier = NSUserInterfaceItemIdentifier("loadout wheel")
     }
 
     var path: HUDSoftBackdropView.Path { view.path }
@@ -827,18 +817,17 @@ final class RadialBackdrop {
 
 /// The wheel's tint: the field's tint profile (black, its alpha the profile) stretched over the
 /// canvas, composited by the GPU and drawn once per configuration, under the words. Its opacity
-/// is `darkness` times how far the wheel has faded in (`shown`).
+/// is `RadialField.darkness` times how far the wheel has faded in (`shown`).
 final class RadialTintView: NSView {
     var image: CGImage? { didSet { layer?.contents = image } }
-    var darkness = RadialField.darkness { didSet { alphaValue = darkness * shown } }
-    var shown: CGFloat = 1 { didSet { alphaValue = darkness * shown } }
+    var shown: CGFloat = 1 { didSet { alphaValue = RadialField.darkness * shown } }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
         layer?.contentsGravity = .resize
         layer?.magnificationFilter = .linear
-        alphaValue = darkness * shown
+        alphaValue = RadialField.darkness * shown
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
@@ -876,6 +865,12 @@ final class RadialWheelView: NSView {
     /// The most a button grows under the pointer, about its own centre; each grows as far as
     /// its region allows (`RadialLayout.Word.grow`).
     nonisolated static let grow: CGFloat = 1.3
+    /// How far a lit word's glow reaches past its box, at full size. The field's blur is full a
+    /// little further out (`RadialField.pad`).
+    nonisolated static let glowReach: CGFloat = 14
+    /// How far the light under a hovered button reaches past most of its box, at full size: as
+    /// far as the full blur around a lone word.
+    nonisolated static let lightReach: CGFloat = RadialField.pad
 
     /// Which buttons show while the pointer is not on their wedge.
     var restingButtons = RadialMenu.restingButtons { didSet { if restingButtons != oldValue { needsDisplay = true } } }
@@ -1053,7 +1048,7 @@ final class RadialWheelView: NSView {
     /// the shadows sized for wheel scale `size`.
     private static func still(_ text: PreparedText?, frame: CGRect, align: CGFloat, scale: CGFloat, size s: CGFloat,
                               icons: [NSImage] = [], glow: Bool = false, grow: CGFloat = 1) -> Still {
-        let margin = (glow ? 14 : 6) * s
+        let margin = (glow ? glowReach : 6) * s
         let grown = CGRect(x: frame.midX - frame.width * grow / 2, y: frame.midY - frame.height * grow / 2,
                            width: frame.width * grow, height: frame.height * grow)
         let rect = grown.insetBy(dx: -margin, dy: -margin).integral
@@ -1184,7 +1179,7 @@ final class RadialWheelView: NSView {
         for (role, k) in buttonIndex {
             let l = value(lit, k) * shown
             guard l > 0.01, let frame = layout.word(role)?.frame else { continue }
-            let radius = max(frame.width, frame.height) * 0.8 + 26 * layout.scale
+            let radius = max(frame.width, frame.height) * 0.8 + Self.lightReach * layout.scale
             let colors = [NSColor.white.withAlphaComponent(0.13 * l).cgColor, NSColor.white.withAlphaComponent(0.05 * l).cgColor,
                           NSColor.white.withAlphaComponent(0).cgColor] as CFArray
             guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 0.45, 1]) else { continue }

@@ -269,10 +269,10 @@ final class RadialWheelSnapshotTests: XCTestCase {
             context.draw(blurred, in: bounds)
         }
         context.restoreGState()
-        // The wheel's tint through its profile, as dark as the backdrop's path asks.
+        // The wheel's tint through its profile.
         context.saveGState()
         context.clip(to: rect, mask: tintMask)
-        context.setFillColor(NSColor.black.withAlphaComponent(RadialBackdrop.darkness(for: shot.reduced ? .systemMaterial : .blur)).cgColor)
+        context.setFillColor(NSColor.black.withAlphaComponent(RadialField.darkness).cgColor)
         context.fill(bounds)
         context.restoreGState()
         // The words.
