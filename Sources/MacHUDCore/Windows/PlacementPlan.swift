@@ -55,8 +55,22 @@ enum NewWindowClass: String, Equatable {
 
     /// `hasNewWindowMenu`: `NewWindowMenu` found an item to press.
     static func of(bundleID: String, hasNewWindowMenu: Bool) -> NewWindowClass {
+        if opensWindowsElsewhere(bundleID) { return .single }
         if browsers.contains(bundleID) { return .browser }
         return hasNewWindowMenu ? .menu : .single
+    }
+
+    /// A browser whose new windows open on its own desktop (Arc) counts as single-window.
+    static func opensWindowsElsewhere(_ bundleID: String) -> Bool {
+        BrowserWindow.Kind(bundleID: bundleID)?.opensNewWindowsOnItsOwnDesktop == true
+    }
+
+    /// A web page's window: `.browser`, unless the browser it opens in (its host, or the one a
+    /// Chrome-app page falls back to) opens new windows on its own desktop.
+    static func forWeb(host: WebHost, configuredBrowser: String?) -> NewWindowClass {
+        let opensIn = BrowserWindow.Kind(host: host)
+            ?? WebHost.chromeAppFallback(configuredBrowser: configuredBrowser).flatMap { BrowserWindow.Kind(host: $0) }
+        return opensIn?.opensNewWindowsOnItsOwnDesktop == true ? .single : .browser
     }
 
     var canOpenAnother: Bool { self != .single }

@@ -91,6 +91,7 @@ extension NewWindowClass {
     /// How the running app `pid` gets another window: the browser list, else its menus. The one
     /// answer the planner, a failed fetch and the new-window request share.
     static func of(bundleID: String, pid: pid_t) -> NewWindowClass {
+        if opensWindowsElsewhere(bundleID) { return .single }
         if browsers.contains(bundleID) { return .browser }
         return NewWindowMenu.item(pid: pid) != nil ? .menu : .single
     }

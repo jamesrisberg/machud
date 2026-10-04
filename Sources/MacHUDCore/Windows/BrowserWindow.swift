@@ -29,6 +29,10 @@ enum BrowserWindow {
             }
         }
 
+        /// A new window opens on the browser's own desktop (where its other windows are), not on
+        /// the one showing, so it cannot be asked for a window here (`NewWindowClass.single`).
+        var opensNewWindowsOnItsOwnDesktop: Bool { self == .arc }
+
         init?(host: WebHost) {
             switch host {
             case .arc: self = .arc

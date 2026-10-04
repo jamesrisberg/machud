@@ -68,6 +68,10 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   ⌘N: applying a loadout no longer makes a new note in Notes or a new message in Mail when it
   wants another of their windows. Menu titles are read in English; with macOS in another
   language such apps count as single-window.
+- Arc opens a new window on its own desktop, not the one you are on, so an Arc window (or a page
+  in Arc) on another desktop is fetched like a single-window app's instead of leaving a blank
+  Arc window behind. When a window MacHUD asked for opens on another desktop anyway, it is left
+  there and the toast says so.
 - The MCP tools tell an agent that a loadout is one screen: `apply_loadout` arranges the display
   the pointer is on, switching desktops only to fetch a single-window app, `capture_loadout`
   saves the screen the user is looking at, and `list_loadouts` (and `machud_status`) count the

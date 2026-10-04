@@ -142,7 +142,7 @@ extension LoadoutEngine {
         case .web(let url, let host):
             input.kind = .web
             input.running = true
-            input.newWindow = .browser
+            input.newWindow = NewWindowClass.forWeb(host: host, configuredBrowser: store.config.browser)
             let window: AXWindow? = host == .builtin ? nil : browsers.window(url: url)
             if let window, let frame = window.cocoaFrame {
                 let number = window.windowNumber ?? 0
@@ -364,7 +364,7 @@ extension LoadoutEngine {
         if let new = NewWindow.since(job.baseline, bundleID: bundleID) { return .ready(.ax(new.window)) }
         if Date().timeIntervalSince(job.askedAt ?? Date()) > 3,
            NewWindow.isOnAnotherDesktop(job.baseline, bundleID: bundleID) {
-            return .failed("\(job.occupant.label) opened its new window on another desktop")
+            return .failed("\(job.occupant.label) opened its new window on another desktop; it was left there")
         }
         return .waiting
     }

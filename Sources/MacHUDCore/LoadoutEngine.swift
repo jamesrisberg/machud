@@ -666,7 +666,7 @@ final class LoadoutEngine {
             guard browsers.hasTimedOut(regionID: job.regionID, bundleID: bundleID) else { return .waiting }
             browsers.finishOpening(bundleID: bundleID)
             if NewWindow.isOnAnotherDesktop(job.baseline, bundleID: bundleID) {
-                return .failed("\(browserName) opened \(url) on another desktop")
+                return .failed("\(browserName) opened \(url) on another desktop; it was left there")
             }
             return .failed("\(browserName) opened no window for \(url)")
         }

@@ -92,6 +92,20 @@ final class NewWindowMenuTests: XCTestCase {
         XCTAssertNil(found([[Item("Nouvelle fenêtre"), Item("Neues Fenster")]]))
     }
 
+    /// Arc opens a new window on its own desktop, not the one showing: for getting a window here
+    /// it is single-window, and its window is fetched.
+    func testABrowserThatOpensWindowsOnItsOwnDesktopIsFetched() {
+        XCTAssertTrue(BrowserWindow.Kind.arc.opensNewWindowsOnItsOwnDesktop)
+        XCTAssertFalse(BrowserWindow.Kind.safari.opensNewWindowsOnItsOwnDesktop)
+        XCTAssertEqual(NewWindowClass.of(bundleID: "company.thebrowser.Browser", hasNewWindowMenu: true), .single)
+        XCTAssertEqual(NewWindowClass.of(bundleID: "com.apple.Safari", hasNewWindowMenu: true), .browser)
+        // A web page's window: by its host, or the browser a Chrome-app page falls back to.
+        XCTAssertEqual(NewWindowClass.forWeb(host: .arc, configuredBrowser: nil), .single)
+        XCTAssertEqual(NewWindowClass.forWeb(host: .chromeApp, configuredBrowser: "company.thebrowser.Browser"), .single)
+        XCTAssertEqual(NewWindowClass.forWeb(host: .chromeApp, configuredBrowser: "com.google.Chrome"), .browser)
+        XCTAssertEqual(NewWindowClass.forWeb(host: .safari, configuredBrowser: nil), .browser)
+    }
+
     func testTheClassComesFromTheMenuAndTheBrowserList() {
         XCTAssertEqual(NewWindowClass.of(bundleID: "com.google.Chrome", hasNewWindowMenu: false), .browser)
         XCTAssertEqual(NewWindowClass.of(bundleID: "com.apple.mail", hasNewWindowMenu: true), .menu)

@@ -195,6 +195,17 @@ final class PlacementPlanTests: XCTestCase {
         XCTAssertEqual(there.reason, "show desktop 1 on Built-in, move it to DELL, switch back")
     }
 
+    /// A page in Arc: its window on another desktop is fetched, since a new Arc window would
+    /// open on Arc's own desktop too.
+    func testOneScreenFetchesAnArcPage() {
+        var input = slot([win(1, screen: 0, space: 1, visible: false)],
+                         newWindow: NewWindowClass.forWeb(host: .arc, configuredBrowser: nil))
+        input.kind = .web
+        let s = oneScreen(input)
+        XCTAssertEqual(s.action, .switchSpace)
+        XCTAssertNotNil(s.bring)
+    }
+
     /// With one display there is nothing to carry it across: the slot is left and names the app.
     func testOneScreenLeavesASingleWindowAppItCannotFetchAndNamesIt() {
         let s = oneScreen(slot([win(1, screen: 0, space: 1, visible: false)], newWindow: .single), screens: [screens[0]])
