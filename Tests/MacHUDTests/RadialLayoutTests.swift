@@ -76,8 +76,22 @@ final class RadialLayoutTests: XCTestCase {
         }
     }
 
-    /// Each button's word sits in the middle of its region, so the word under the pointer is
-    /// the one that lights; a pointer over a name selects its wedge's last ring.
+    /// Points over `frame`, a quarter point inside its edges: corners, edges and within.
+    private static func over(_ frame: CGRect) -> [CGPoint] {
+        let inner = frame.insetBy(dx: 0.25, dy: 0.25)
+        var points: [CGPoint] = []
+        for u in 0...8 {
+            for v in 0...4 {
+                points.append(CGPoint(x: inner.minX + inner.width * CGFloat(u) / 8, y: inner.minY + inner.height * CGFloat(v) / 4))
+            }
+        }
+        return points
+    }
+
+    /// Each button's word sits in the middle of its region and lies wholly inside it, at rest
+    /// and grown under the pointer, so the word under the pointer is the one that lights,
+    /// wherever on the word the pointer is; a pointer anywhere over a name selects its wedge's
+    /// last ring.
     func testTheWordUnderThePointerIsTheOneThatLights() {
         everyLayout { layout, what in
             let g = layout.geometry
@@ -85,13 +99,21 @@ final class RadialLayoutTests: XCTestCase {
                 let middle = CGPoint(x: word.frame.midX, y: word.frame.midY)
                 switch word.role {
                 case .button(let i, let ring):
-                    XCTAssertEqual(g.selection(at: middle), .wedge(index: i, ring: ring), "\(what): \(word.role)")
                     let band = g.band(ring, of: i)
                     XCTAssertEqual(RadialGeometry.radius(of: middle), (band.r0 + band.r1) / 2, accuracy: 0.01, "\(what)")
+                    XCTAssertGreaterThanOrEqual(word.grow, RadialLayout.minimumGrow, "\(what): \(word.fit.lines)")
+                    XCTAssertLessThanOrEqual(word.grow, RadialWheelView.grow, "\(what): \(word.fit.lines)")
+                    for (state, frame) in [("resting", word.frame), ("grown", RadialLayout.grown(word.frame, by: word.grow))] {
+                        for p in Self.over(frame) where g.selection(at: p) != .wedge(index: i, ring: ring) {
+                            XCTFail("\(what): \(word.fit.lines) \(state) at \(p) selects \(g.selection(at: p))")
+                            break
+                        }
+                    }
                 case .name(let i):
-                    let anchor = CGPoint(x: g.nameRadius * CGFloat(sin(g.centerAngle(of: i))),
-                                         y: g.nameRadius * CGFloat(cos(g.centerAngle(of: i))))
-                    XCTAssertEqual(g.selection(at: anchor), .wedge(index: i, ring: g.lastRing(of: i)), "\(what): \(word.role)")
+                    for p in Self.over(word.frame) where g.selection(at: p) != .wedge(index: i, ring: g.lastRing(of: i)) {
+                        XCTFail("\(what): name \(word.fit.lines) at \(p) selects \(g.selection(at: p))")
+                        break
+                    }
                 case .centre:
                     XCTAssertEqual(g.selection(at: middle), .cancel)
                 case .digit:
@@ -125,7 +147,7 @@ final class RadialLayoutTests: XCTestCase {
             for button in layout.words {
                 guard case .button = button.role else { continue }
                 let f = button.frame
-                let grown = f.insetBy(dx: -f.width * (RadialWheelView.grow - 1) / 2, dy: -f.height * (RadialWheelView.grow - 1) / 2)
+                let grown = RadialLayout.grown(f, by: button.grow)
                 for other in layout.words where other.role != button.role {
                     XCTAssertFalse(grown.intersects(other.frame), "\(what): \(button.fit.lines) grown and \(other.fit.lines)")
                 }
@@ -221,7 +243,7 @@ final class RadialLayoutTests: XCTestCase {
     /// with its icons), the digits, the centre and the hint's two-line zone.
     private static func places(_ layout: RadialLayout) -> [(String, CGRect)] {
         layout.words.map { word -> (String, CGRect) in
-            if case .button = word.role { return ("\(word.role) grown", RadialLayout.grown(word.frame, by: RadialWheelView.grow)) }
+            if case .button = word.role { return ("\(word.role) grown", RadialLayout.grown(word.frame, by: word.grow)) }
             return ("\(word.role)", word.frame)
         } + [("hint", layout.hintZone)]
     }

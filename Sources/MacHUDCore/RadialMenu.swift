@@ -801,9 +801,12 @@ final class RadialWheelView: NSView {
         var role: RadialLayout.Word.Role
         var rest: Still
         var lit: Still?
+        /// How many times its size it grows lit (`RadialLayout.Word.grow`).
+        var grow: CGFloat = 1
     }
 
-    /// How much a button grows under the pointer, about its own centre.
+    /// The most a button grows under the pointer, about its own centre; each grows as far as
+    /// its region allows (`RadialLayout.Word.grow`).
     nonisolated static let grow: CGFloat = 1.3
 
     /// Which buttons show while the pointer is not on their wedge.
@@ -934,7 +937,8 @@ final class RadialWheelView: NSView {
             switch word.role {
             case .button:
                 return Drawn(role: word.role, rest: Self.still(text, frame: word.frame, align: 0.5, scale: scale, size: s),
-                             lit: Self.still(text, frame: word.frame, align: 0.5, scale: scale, size: s, glow: true, grow: Self.grow))
+                             lit: Self.still(text, frame: word.frame, align: 0.5, scale: scale, size: s, glow: true, grow: word.grow),
+                             grow: word.grow)
             case .name(let i):
                 let icons = wedges.indices.contains(i) ? Array(wedges[i].icons.prefix(word.icons)) : []
                 return Drawn(role: word.role,
@@ -1037,7 +1041,7 @@ final class RadialWheelView: NSView {
                 let h = value(highlight, i)
                 let resting: CGFloat = restingButtons == .faint ? 0.45 - 0.13 * recede(i) : 0
                 let base = resting + (0.88 - resting) * h
-                draw(word, alpha: (base + (1 - base) * l) * shown, lit: l, grow: 1 + (Self.grow - 1) * l, in: ctx)
+                draw(word, alpha: (base + (1 - base) * l) * shown, lit: l, grow: 1 + (word.grow - 1) * l, in: ctx)
             case .name(let i):
                 let h = value(highlight, i)
                 draw(word, alpha: (0.88 + 0.12 * h - 0.3 * recede(i)) * shown, lit: h, in: ctx)

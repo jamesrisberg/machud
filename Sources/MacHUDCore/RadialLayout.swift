@@ -8,7 +8,10 @@ import AppKit
 ///   horizontal spoke a wedge's words sit side by side, so each ring is as deep as its widest
 ///   label grown (`RadialWheelView.grow`) plus `buttonGap`: a grown word never touches the next.
 ///   With many wedges every ring moves out (the dead zone stays) until no grown word touches a
-///   word of another wedge.
+///   word of another wedge and every word, grown by at least `minimumGrow`, lies inside its own
+///   region. Each word then grows under the pointer as far as its region allows, up to
+///   `RadialWheelView.grow` (`Word.grow`), so the word under the pointer is the one that lights
+///   wherever on it the pointer is.
 /// - Names. Each wedge's name is anchored at `RadialGeometry.nameRadius`, past the last ring,
 ///   and grows away from the centre: on the right half it starts at its anchor, on the left half
 ///   it ends there, at the top and the bottom it is centred on it, blending between; above the
@@ -41,6 +44,9 @@ struct RadialLayout {
         var align: CGFloat
         /// Icons in a row under a name's lines.
         var icons: Int
+        /// How many times its size a button grows under the pointer, inside its region; 1 for
+        /// every other word.
+        var grow: CGFloat = 1
 
         var font: NSFont { style.font(fit.size) }
         var lineHeight: CGFloat { PreparedText.lineHeight(font) }
@@ -63,6 +69,9 @@ struct RadialLayout {
     /// The least room between two words.
     static let wordGap: CGFloat = 4
     static let iconLimit = 8
+    /// The least a button grows under the pointer: the rings move out until every button can
+    /// grow this much inside its region.
+    static let minimumGrow: CGFloat = 1.15
     static let maxIcons = 5
 
     let geometry: RadialGeometry
@@ -114,7 +123,8 @@ struct RadialLayout {
             if have < last.width { depth[depth.count - 1] += last.width - have }
         }
 
-        // Out until no grown button touches another.
+        // Out until no grown button touches another and each fits its region grown at least
+        // `minimumGrow`.
         let dead = Self.deadZone * s
         var geometry = RadialGeometry(count: count, ringCounts: ringCounts)
         var buttons: [Word] = []
@@ -125,9 +135,13 @@ struct RadialLayout {
                                       middleEdge: inner + depth[1], outerEdge: inner + depth[1] + depth[2],
                                       nameRadius: inner + depth[1] + depth[2] + Self.nameGap * s)
             buttons = Self.buttons(wedges, geometry: geometry, style: labelStyle, room: { ($0 - gap) / grow + 0.01 })
-            if !Self.anyOverlap(buttons, grown: grow, gap: Self.wordGap * s) { break }
+            let inside = buttons.allSatisfy {
+                Self.inside(Self.grown($0.frame, by: Self.minimumGrow), region: $0.role, geometry: geometry, margin: s)
+            }
+            if inside && !Self.anyOverlap(buttons, grown: grow, gap: Self.wordGap * s) { break }
             extra += 2 * s
         }
+        for k in buttons.indices { buttons[k].grow = Self.largestGrowth(buttons[k], upTo: grow, geometry: geometry, margin: s) }
 
         let small = (0..<min(count, 9)).map { Self.digit($0, geometry: geometry, scale: s) } + [Self.centre(scale: s)]
 
@@ -140,7 +154,7 @@ struct RadialLayout {
             names = wedges.indices.map { i in
                 Self.name(wedges[i], index: i, width: widths[i], icons: icons, geometry: geometry, style: nameStyle, scale: s)
             }
-            let others = buttons.map { Self.grown($0.frame, by: grow) } + small.map(\.frame)
+            let others = buttons.map { Self.grown($0.frame, by: $0.grow) } + small.map(\.frame)
             var crowded = Set<Int>()
             for (a, name) in names.enumerated() {
                 if others.contains(where: { $0.insetBy(dx: -Self.wordGap * s, dy: -Self.wordGap * s).intersects(name.frame) }) {
@@ -253,6 +267,41 @@ struct RadialLayout {
         frame.insetBy(dx: -frame.width * (factor - 1) / 2, dy: -frame.height * (factor - 1) / 2)
     }
 
+    /// The most `word` can grow, up to `limit`, and lie inside its region (`minimumGrow` at
+    /// least, where the rings made room for that).
+    private static func largestGrowth(_ word: Word, upTo limit: CGFloat, geometry g: RadialGeometry, margin: CGFloat) -> CGFloat {
+        func fits(_ factor: CGFloat) -> Bool { inside(grown(word.frame, by: factor), region: word.role, geometry: g, margin: margin) }
+        if fits(limit) { return limit }
+        var (low, high) = (CGFloat(1), limit)
+        for _ in 0..<12 {
+            let middle = (low + high) / 2
+            if fits(middle) { low = middle } else { high = middle }
+        }
+        return low
+    }
+
+    /// Whether `frame` lies inside the region of the button `role` names (its wedge's angle and
+    /// its ring's radii; a wedge's last ring has no outer edge), `margin` points clear of its edges.
+    static func inside(_ frame: CGRect, region role: Word.Role, geometry g: RadialGeometry, margin: CGFloat = 1) -> Bool {
+        guard case .button(let i, let ring) = role else { return true }
+        let band = g.band(ring, of: i)
+        let corners = [CGPoint(x: frame.minX, y: frame.minY), CGPoint(x: frame.maxX, y: frame.minY),
+                       CGPoint(x: frame.minX, y: frame.maxY), CGPoint(x: frame.maxX, y: frame.maxY)]
+        let nearest = hypot(max(frame.minX, 0, -frame.maxX), max(frame.minY, 0, -frame.maxY))
+        guard nearest >= band.r0 + margin else { return false }
+        if ring != g.lastRing(of: i), corners.contains(where: { RadialGeometry.radius(of: $0) > band.r1 - margin }) { return false }
+        // A wedge narrower than a half turn is convex, so its corners decide.
+        guard g.count > 1 else { return true }
+        let half = g.wedgeAngle / 2
+        return corners.allSatisfy { corner in
+            var off = RadialGeometry.angle(of: corner) - g.centerAngle(of: i)
+            off = off.truncatingRemainder(dividingBy: RadialGeometry.fullTurn)
+            if off > .pi { off -= RadialGeometry.fullTurn }
+            if off < -.pi { off += RadialGeometry.fullTurn }
+            return abs(off) <= half - Double(margin / max(1, RadialGeometry.radius(of: corner)))
+        }
+    }
+
     /// Whether any of `words`, grown by `factor`, comes within `gap` of another at rest.
     private static func anyOverlap(_ words: [Word], grown factor: CGFloat, gap: CGFloat) -> Bool {
         for (a, first) in words.enumerated() {
@@ -340,7 +389,7 @@ struct RadialField {
     /// with its icons, the digits and the centre) and the hint's two-line zone.
     static func places(_ layout: RadialLayout) -> [CGRect] {
         layout.words.map { word in
-            if case .button = word.role { return RadialLayout.grown(word.frame, by: RadialWheelView.grow) }
+            if case .button = word.role { return RadialLayout.grown(word.frame, by: word.grow) }
             return word.frame
         } + [layout.hintZone]
     }
