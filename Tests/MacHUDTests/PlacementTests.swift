@@ -176,7 +176,7 @@ final class PlacementPlanTests: XCTestCase {
 
     func testOneScreenOpensANewWindowForAnAppThatCan() {
         // Its only window is on hidden desktop 1 of this display, and a second display could
-        // carry it across: with the feature off nothing switches desktops, so a new one opens here.
+        // carry it across: with the feature off an app that can open a window gets a new one here.
         for kind in [NewWindowClass.menu, .browser] {
             let s = oneScreen(slot([win(1, screen: 0, space: 1, visible: false)], newWindow: kind))
             XCTAssertEqual(s.action, .launch, "\(kind)")
@@ -186,15 +186,29 @@ final class PlacementPlanTests: XCTestCase {
         }
     }
 
-    func testOneScreenLeavesASingleWindowAppAndNamesIt() {
-        for screens in [self.screens, [self.screens[0]]] {
-            let s = oneScreen(slot([win(1, screen: 0, space: 1, visible: false)], newWindow: .single), screens: screens)
-            XCTAssertEqual(s.action, .cannot)
-            XCTAssertFalse(s.places)
-            XCTAssertNil(s.bring)
-            XCTAssertTrue(s.reason.hasPrefix("Signal "), s.reason)
-            XCTAssertTrue(s.reason.contains("on another desktop"), s.reason)
-        }
+    /// The owner's ruling: a single-window app's window is fetched from the other desktop (the one
+    /// desktop switch an apply makes with the feature off), in today's `bring` wording.
+    func testOneScreenFetchesASingleWindowAppsWindow() {
+        let here = oneScreen(slot([win(1, screen: 0, space: 1, visible: false)], newWindow: .single))
+        XCTAssertEqual(here.action, .switchSpace)
+        XCTAssertEqual(here.bring, .hop(screen: 0, space: 1, via: 1))
+        XCTAssertEqual(here.window, 1)
+        XCTAssertEqual(here.reason, "show desktop 1, hop it through Built-in, switch back")
+        var screens = self.screens
+        screens[1].currentSpace = 2
+        screens[1].spaces = 2
+        let there = oneScreen(slot([win(1, screen: 1, space: 1, visible: false)], newWindow: .single), screens: screens)
+        XCTAssertEqual(there.bring, .acrossDisplays(fromScreen: 1, space: 1))
+        XCTAssertEqual(there.reason, "show desktop 1 on Built-in, move it to DELL, switch back")
+    }
+
+    /// With one display there is nothing to carry it across: the slot is left and names the app.
+    func testOneScreenLeavesASingleWindowAppItCannotFetchAndNamesIt() {
+        let s = oneScreen(slot([win(1, screen: 0, space: 1, visible: false)], newWindow: .single), screens: [screens[0]])
+        XCTAssertEqual(s.action, .cannot)
+        XCTAssertFalse(s.places)
+        XCTAssertNil(s.bring)
+        XCTAssertTrue(s.reason.hasPrefix("Signal has one window, on another desktop (desktop 1 of DELL; "), s.reason)
     }
 
     func testOneScreenDoesNotFetchWhatBringWould() {
@@ -210,18 +224,23 @@ final class PlacementPlanTests: XCTestCase {
         XCTAssertNil(s.bring)
     }
 
-    func testOneScreenNeverSwitchesDesktops() {
-        let windows: [P.Candidate] = [
-            win(1, screen: 0, space: 1, visible: false), win(2, screen: 1, space: 2, visible: false),
+    /// The only desktop switch with the feature off is fetching a single-window app's window from
+    /// a hidden desktop: never for an app that can open a window, never for a window in reach,
+    /// and never because a slot names a desktop.
+    func testOneScreenSwitchesOnlyToFetchASingleWindowApp() {
+        let hidden: [P.Candidate] = [win(1, screen: 0, space: 1, visible: false), win(2, screen: 1, space: 2, visible: false)]
+        let inReach: [P.Candidate] = [
             win(3, screen: 0, space: nil, visible: false), win(4, screen: 0, space: 3, visible: true),
             win(5, screen: 1, space: 1, visible: true), win(6, screen: 0, space: nil, visible: false, minimized: true),
         ]
         for kind in [NewWindowClass.menu, .browser, .single] {
-            for candidates in [[]] + windows.map({ [$0] }) {
+            for candidates in [[]] + (hidden + inReach).map({ [$0] }) {
                 for space in [nil, 2] {
                     let s = oneScreen(slot(candidates, space: space, newWindow: kind))
-                    XCTAssertNotEqual(s.action, .switchSpace, "\(kind) \(candidates) slot desktop \(space as Any): \(s.reason)")
-                    XCTAssertNil(s.bring, "\(kind) \(candidates)")
+                    let fetches = kind == .single && candidates.count == 1 && hidden.contains(candidates[0])
+                    let what = "\(kind) \(candidates) slot desktop \(space as Any): \(s.reason)"
+                    XCTAssertEqual(s.action == .switchSpace, fetches, what)
+                    XCTAssertEqual(s.bring != nil, fetches, what)
                 }
             }
         }

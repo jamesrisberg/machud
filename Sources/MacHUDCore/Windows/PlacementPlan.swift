@@ -15,18 +15,19 @@ enum SpacesPolicy: String, Codable, Equatable, CaseIterable {
 }
 
 extension SpacesPolicy {
-    /// With multi-desktop loadouts off apply keeps to the desktop showing and `spaces.policy` is
-    /// not read: an app whose only window is on another desktop gets a new window here when it
-    /// can open one, and a single-window app gets `oneScreenSingleWindow`.
+    /// With multi-desktop loadouts off `spaces.policy` is not read: an app whose only window is on
+    /// another desktop gets a new window here when it can open one, and a single-window app gets
+    /// `oneScreenSingleWindow`.
     static func oneScreen(_ newWindow: NewWindowClass) -> SpacesPolicy {
         newWindow.canOpenAnother ? .launchNew : oneScreenSingleWindow
     }
 
     /// What a single-window app (Messages, Signal…) whose window is on another desktop gets while
-    /// multi-desktop loadouts are off: `launchNew` leaves the window there and fails its slot,
-    /// naming the app (it cannot open a second one); `bring` fetches it by switching desktops, as
-    /// `spaces.policy: bring` does (which needs a second display to carry it across).
-    static let oneScreenSingleWindow: SpacesPolicy = .launchNew
+    /// multi-desktop loadouts are off: `bring` fetches it by switching desktops (it needs a
+    /// display to carry it across; without one, or when the switch fails, the slot is left and
+    /// names the app). It is the one desktop switch an apply makes with the setting off.
+    /// `launchNew` would leave the window there and fail the slot instead.
+    static let oneScreenSingleWindow: SpacesPolicy = .bring
 }
 
 /// `spaces` in layouts.json.
@@ -120,8 +121,9 @@ enum PlacementPlan {
         /// On: a slot may name a desktop, and `spaces.policy` decides what happens to a window on
         /// a desktop that is not showing.
         case multiDesktop(SpacesPolicy)
-        /// Off: the desktop showing only. A slot's desktop is not read and the window's desktop
-        /// is never shown; `SpacesPolicy.oneScreen` decides instead of `spaces.policy`.
+        /// Off: the desktop showing. A slot's desktop is not read, and `SpacesPolicy.oneScreen`
+        /// decides instead of `spaces.policy`: only a single-window app's window is fetched from
+        /// another desktop.
         case oneScreen
 
         /// As `apply … plan=1` reports it (`policy`).
@@ -301,9 +303,10 @@ enum PlacementPlan {
                 s.newWindow = true
                 s.window = nil
                 s.reason = "\(why)open a new \(slot.occupant) window here; the one \(whereNow) stays"
-            } else if mode == .oneScreen, why.isEmpty {
+            } else if mode == .oneScreen {
+                let note = why.trimmingCharacters(in: CharacterSet(charactersIn: "; "))
                 s.action = .cannot
-                s.reason = "\(slot.occupant) has one window, on another desktop (\(desktop))"
+                s.reason = "\(slot.occupant) has one window, on another desktop (\(desktop)\(note.isEmpty ? "" : "; \(note)"))"
             } else {
                 s.action = .cannot
                 s.reason = "\(slot.occupant) has one window, \(whereNow)\(why.isEmpty ? "" : " (\(why.trimmingCharacters(in: CharacterSet(charactersIn: "; "))))")"

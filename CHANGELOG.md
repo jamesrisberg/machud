@@ -55,15 +55,17 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   Capturing every screen (`screens=all`), walking desktops (`desktops=`), filling a layout per
   display (`screens=<layout>@<display>`) and `machud spaces action=switch` are experimental: while
   **Multi-desktop loadouts** is off they answer with an error saying how to turn it on.
-- Applying a loadout never switches desktops while **Multi-desktop loadouts** is off. An app whose
-  only window is on another desktop gets a new window on this one when it can open one; an app
-  with a single window (Messages, Signal, Slack…) is left where it is and the toast names it.
-  Windows on another display are still moved over, and minimised ones restored. `spaces.policy`
-  in layouts.json applies only with the setting on.
+- While **Multi-desktop loadouts** is off, an app in the loadout whose only window is on another
+  desktop gets a new window on this one when it can open one. An app with a single window
+  (Messages, Signal, Slack…) has its window fetched: MacHUD shows that desktop, brings the window
+  over and switches back, the one time an apply switches desktops with the setting off. When it
+  cannot (one display, the switch fails), the window is left where it is and the toast names the
+  app. Windows on another display are still moved over, and minimised ones restored.
+  `spaces.policy` in layouts.json applies only with the setting on.
 - The MCP tools tell an agent that a loadout is one screen: `apply_loadout` arranges the display
-  the pointer is on without switching desktops, `capture_loadout` saves the screen the user is
-  looking at, and `list_loadouts` (and `machud_status`) count the loadouts held back as
-  experimental instead of listing them.
+  the pointer is on, switching desktops only to fetch a single-window app, `capture_loadout`
+  saves the screen the user is looking at, and `list_loadouts` (and `machud_status`) count the
+  loadouts held back as experimental instead of listing them.
 
 ### Fixed
 - `machud apply loadout=… screen=<display>` with a display that is not attached says so instead

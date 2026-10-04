@@ -108,8 +108,8 @@ takes effect at once. While it is off:
 - `apply` (and `plan=1`, and the preview) refuses a spanning loadout by name before anything
   moves, saying how to turn the setting on. The startup loadout and the re-apply after a
   display change do not run one either; a toast says so.
-- `apply` never switches desktops and `spaces.policy` is not read (see
-  [Placement plan](#placement-plan)).
+- `spaces.policy` is not read, and `apply` switches desktops only to fetch the window of an app
+  that has a single window and cannot open another (see [Placement plan](#placement-plan)).
 - `capture` takes one display, on the desktop showing: the default form, `screen=`, `layout=`
   and `hud=only` work as described; `screens=all`, `desktops=` and `screens=<layout>@<ref>`
   answer `ok: false` with an `error` naming the setting. So does any capture, `hud=only`
@@ -155,7 +155,7 @@ and the preview draws). `action` is one of:
 | `stay` | the window is already in its region |
 | `resize` | same display and desktop: moved/resized in place (or restored from the Dock) |
 | `move` | on another display's showing desktop: moved across |
-| `switchSpace` | multi-desktop loadouts only: a desktop is switched first, the slot's own `space` or (`bring`) the desktop the window is on |
+| `switchSpace` | a desktop is switched first: the slot's own `space` or (`bring`) the desktop the window is on. With multi-desktop loadouts off, only to fetch a single-window app's window |
 | `launch` | no usable window: launch the app, ask it for a window, or (`launchNew`) open a second one |
 | `leave` | left on its desktop (`spaces.policy: "leave"`) |
 | `cannot` | not placeable; `reason` says why (not installed, single-window app on another desktop, …) |
@@ -165,14 +165,20 @@ desktop on that display. The window used is the one on the target display's
 showing desktop, else on the slot's desktop, else on another display, else a
 minimised one, else one on a hidden desktop.
 
-While multi-desktop loadouts are off (the default) the plan's `policy` is `oneScreen`:
-apply never switches desktops, a slot's `space` is not read, and neither is `spaces.policy`. An
-app whose only window is on a desktop that is not showing gets a new window here when it can
-open one (as `launchNew` below); a single-window app is left there and its slot reports
-`cannot`, naming the app and saying it is on another desktop. An app whose windows are all on
-other desktops and that would not open a window without being brought forward is not brought
-forward (that would show its desktop); its slot reports `cannot` too. A window showing on another
-display is still moved over, and a minimised one restored.
+While multi-desktop loadouts are off (the default) the plan's `policy` is `oneScreen`: a
+slot's `space` is not read, and neither is `spaces.policy`. An app whose only window is on a
+desktop that is not showing gets a new window here when it can open one (as `launchNew` below).
+A single-window app's window is fetched instead (as `bring` below: `switchSpace`, with the
+reason saying which desktop is shown and how the window comes over); this is the one time an
+apply switches desktops with the setting off. When it cannot be fetched (one display, the
+switch fails), its slot reports `cannot`, naming the app and saying it is on another desktop.
+An app whose windows are all on other desktops and that would not open a window without being
+brought forward is not brought forward (that would show its desktop); its slot reports `cannot`
+too. A window showing on another display is still moved over, and a minimised one restored.
+Whether an app can open another window: browsers can; the chat and media apps MacHUD lists as
+single-window (Messages, Signal, Beeper, Slack, Discord, WhatsApp, Telegram, Spotify, Music,
+FaceTime, Zoom, Teams, System Settings, App Store) cannot; any other app can when its menus have
+an enabled ⌘N item.
 
 While they are on, `spaces.policy` in layouts.json decides what happens to a window on a
 desktop that is not showing:

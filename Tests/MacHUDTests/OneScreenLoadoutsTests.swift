@@ -106,8 +106,9 @@ final class OneScreenApplyTests: XCTestCase {
     }
 
     /// With the setting off, a one-screen loadout whose app's only window is on a hidden desktop
-    /// plans no desktop switch and no fetch, wherever that window is.
-    func testAOneScreenPlanForAWindowOnAHiddenDesktopNeverSwitches() throws {
+    /// plans a fetch (a desktop switch) only for a single-window app; an app that can open a window
+    /// gets a new one here, wherever its window is.
+    func testAOneScreenPlanSwitchesDesktopsOnlyToFetchASingleWindowApp() throws {
         let engine = try engine(multiDesktop: nil)
         let screens = [PlacementPlan.Screen(name: "DELL", frame: CGRect(x: 0, y: 0, width: 2560, height: 1440), currentSpace: 3, spaces: 4),
                        PlacementPlan.Screen(name: "Built-in", frame: CGRect(x: 2560, y: 0, width: 1728, height: 1117), currentSpace: 1, spaces: 2)]
@@ -119,8 +120,16 @@ final class OneScreenApplyTests: XCTestCase {
                                                     rect: CGRect(x: 0, y: 0, width: 800, height: 600), candidates: [hidden],
                                                     running: true, newWindow: kind)
                 let step = PlacementPlan.step(for: input, screens: screens, mode: engine.planMode)
-                XCTAssertNotEqual(step.action, .switchSpace, "\(kind) on \(screen):\(space): \(step.reason)")
-                XCTAssertNil(step.bring, "\(kind) on \(screen):\(space)")
+                let what = "\(kind) on \(screen):\(space): \(step.reason)"
+                if kind == .single {
+                    XCTAssertEqual(step.action, .switchSpace, what)
+                    XCTAssertNotNil(step.bring, what)
+                    XCTAssertTrue(step.reason.hasPrefix("show desktop \(space)"), what)
+                } else {
+                    XCTAssertEqual(step.action, .launch, what)
+                    XCTAssertTrue(step.newWindow, what)
+                    XCTAssertNil(step.bring, what)
+                }
             }
         }
     }

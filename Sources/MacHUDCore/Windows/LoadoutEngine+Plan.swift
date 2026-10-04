@@ -83,7 +83,8 @@ extension LoadoutEngine {
     // MARK: - Planning
 
     /// How the planner treats other desktops: `spaces.policy` is read only while multi-desktop
-    /// loadouts are on; off, nothing switches desktops (`PlacementPlan.Mode.oneScreen`).
+    /// loadouts are on; off, only a single-window app's window is fetched from another desktop
+    /// (`PlacementPlan.Mode.oneScreen`).
     var planMode: PlacementPlan.Mode {
         store.config.multiDesktopLoadouts ? .multiDesktop(store.spacesPolicy) : .oneScreen
     }

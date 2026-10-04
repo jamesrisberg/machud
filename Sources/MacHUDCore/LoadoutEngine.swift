@@ -557,7 +557,8 @@ final class LoadoutEngine {
             job.askedForWindow = AXWindow.openNewWindow(pid: app.processIdentifier)
             if !job.askedForWindow, !job.activated {
                 // Bringing forward an app whose windows are all on desktops that are not showing
-                // shows one of them; with multi-desktop loadouts off nothing switches desktops.
+                // shows one of them. With multi-desktop loadouts off the only desktop switch is the
+                // plan's fetch of a single-window app (`SpacesPolicy.oneScreenSingleWindow`).
                 if !store.config.multiDesktopLoadouts, Self.windowsOnlyOnOtherDesktops(pid: app.processIdentifier) {
                     return .failed("cannot: \(job.occupant.label) has windows only on another desktop "
                                    + "and would not open one here without coming forward")

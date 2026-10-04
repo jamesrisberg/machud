@@ -108,7 +108,8 @@ public final class MacHUDTools: @unchecked Sendable {
                  properties: [:], readOnly: true),
             tool("apply_loadout",
                  "Apply a saved loadout to one screen, the display the pointer is on (or `screen`) on the desktop "
-                 + "showing; it never switches desktops. Launches or finds each app and moves its windows into "
+                 + "showing; it switches desktops only to fetch the window of an app that has a single window and "
+                 + "cannot open another. Launches or finds each app and moves its windows into "
                  + "place, then its HUD part. Visible to the user. Use dry_run first for an unfamiliar loadout; "
                  + "the reply lists each slot's result. A loadout that spans several displays or desktops needs "
                  + "the experimental Multi-desktop loadouts setting.",

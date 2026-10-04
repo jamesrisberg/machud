@@ -40,8 +40,8 @@ final class MacHUDSettings {
               group: "Menu Bar", help: "MacHUD's menu gets an Apps section and the apps hide their own menu bar icons while MacHUD runs."),
         .init(key: ExperimentalLoadouts.settingKey, title: ExperimentalLoadouts.settingTitle, type: .bool,
               default: .bool(false), group: "Experimental",
-              help: "Loadouts that span several desktops or displays: capturing every screen, walking desktops, and "
-                + "switching desktops to fetch a window. Off, a loadout is the screen in front of you. Still being worked on."),
+              help: "Loadouts that span several desktops or displays, capturing every screen, walking desktops, and "
+                + "spaces.policy for windows on other desktops. Off, a loadout is the screen in front of you. Still being worked on."),
     ])
 
     private let store: LayoutStore

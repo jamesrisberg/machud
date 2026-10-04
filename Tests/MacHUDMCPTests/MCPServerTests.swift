@@ -337,7 +337,8 @@ final class MCPServerTests: XCTestCase {
             XCTAssertTrue(text.contains("the desktop showing"), "\(name): \(text)")
             XCTAssertTrue(text.contains("experimental Multi-desktop loadouts setting"), "\(name): \(text)")
         }
-        XCTAssertTrue(description("apply_loadout").contains("never switches desktops"), description("apply_loadout"))
+        XCTAssertTrue(description("apply_loadout").contains("switches desktops only to fetch the window of an app that has a single window"),
+                      description("apply_loadout"))
         XCTAssertTrue(description("list_loadouts").contains("experimental Multi-desktop loadouts setting"),
                       description("list_loadouts"))
     }
