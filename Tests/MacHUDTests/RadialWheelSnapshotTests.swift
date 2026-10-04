@@ -64,7 +64,7 @@ final class RadialWheelSnapshotTests: XCTestCase {
 
     /// What is rendered without `MACHUD_WHEEL_SNAPSHOT_DIR`.
     private static let checked: Set<String> = ["hover-08-side-outer-colourful", "system-material-reduce-transparency-08-bright",
-                                               "screen-1024x640-08-corner-bright"]
+                                               "screen-1024x640-08-corner-open-bright"]
 
     private func shots() -> [Shot] {
         var out: [Shot] = []
@@ -142,8 +142,11 @@ final class RadialWheelSnapshotTests: XCTestCase {
                         desktop: .colourful, ellipse: true))
 
         // A 13-inch display at Larger Text (1024 by 640, less the menu bar), eight wedges, the
-        // wheel opened near the bottom right corner.
-        out.append(Shot(name: "screen-1024x640-08-corner-bright", wedges: eight, selection: .wedge(index: 2, ring: .outer),
+        // wheel opened near the bottom right corner (as it shows, the pointer moved to its
+        // centre; and with a button lit) and in the middle.
+        out.append(Shot(name: "screen-1024x640-08-corner-open-bright", wedges: eight, selection: .cancel,
+                        desktop: .bright, screen: CGSize(width: 1024, height: 616), pointer: CGPoint(x: 960, y: 40)))
+        out.append(Shot(name: "screen-1024x640-08-corner-hover-bright", wedges: eight, selection: .wedge(index: 2, ring: .outer),
                         desktop: .bright, screen: CGSize(width: 1024, height: 616), pointer: CGPoint(x: 960, y: 40)))
         out.append(Shot(name: "screen-1024x640-08-middle-colourful", wedges: eight, selection: .cancel,
                         desktop: .colourful, screen: CGSize(width: 1024, height: 616), pointer: CGPoint(x: 512, y: 308)))
@@ -292,9 +295,41 @@ final class RadialWheelSnapshotTests: XCTestCase {
         view.settle(selection: shot.selection)
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        context.saveGState()
         context.translateBy(x: wheelCentre.x - field.canvas.center.x, y: wheelCentre.y - field.canvas.center.y)
         NSAppearance(named: .darkAqua)?.performAsCurrentDrawingAppearance { view.draw(view.bounds) }
+        context.restoreGState()
         NSGraphicsContext.restoreGraphicsState()
+        // On a whole screen, the pointer: at the wheel's centre as it shows (moved there where
+        // the wheel could not open around it), or on the button it lights.
+        if shot.screen != nil {
+            var pointer = centre
+            if case .wedge(let i, let ring) = shot.selection {
+                let g = layout.geometry, band = g.band(ring, of: i), r = (band.r0 + band.r1) / 2, a = g.centerAngle(of: i)
+                pointer = CGPoint(x: centre.x + r * CGFloat(sin(a)), y: centre.y + r * CGFloat(cos(a)))
+            }
+            // An arrow pointer, its tip at `pointer` (the system's cursor image draws nothing offscreen).
+            let tip = [(0.0, 0.0), (0, -17), (4, -13), (7, -20), (10, -19), (7, -12.5), (12, -12.5)]
+            let arrow = NSBezierPath()
+            for (k, (x, y)) in tip.enumerated() {
+                let p = CGPoint(x: pointer.x + x, y: pointer.y + y)
+                if k == 0 { arrow.move(to: p) } else { arrow.line(to: p) }
+            }
+            arrow.close()
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+            let shadow = NSShadow()
+            shadow.shadowColor = NSColor.black.withAlphaComponent(0.4)
+            shadow.shadowBlurRadius = 2
+            shadow.shadowOffset = NSSize(width: 0, height: -1)
+            shadow.set()
+            NSColor.black.setFill()
+            arrow.fill()
+            NSColor.white.setStroke()
+            arrow.lineWidth = 1.2
+            arrow.stroke()
+            NSGraphicsContext.restoreGraphicsState()
+        }
         guard let image = context.makeImage() else { return nil }
         let rep = NSBitmapImageRep(cgImage: image)
         rep.size = picture
