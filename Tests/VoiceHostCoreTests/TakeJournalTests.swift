@@ -105,6 +105,16 @@ final class TakeJournalTests: XCTestCase {
         XCTAssertEqual(VoiceTakeRecord(date: "d", trigger: .orb, mode: .agent, seconds: 3.14159, outcome: .sent).seconds, 3.14)
     }
 
+    func testADroppedTakeIsJournaledWithItsCount() throws {
+        let line = String(data: try JSONEncoder().encode(
+            VoiceTakeRecord(date: "d", trigger: .orb, mode: .agent, seconds: 2, end: .pause, outcome: .dropped,
+                            reason: "Heard you, but the agent is still working", characters: 12)), encoding: .utf8)
+        XCTAssertTrue(line?.contains(#""outcome":"dropped""#) == true, line ?? "")
+        XCTAssertEqual(VoiceTakeRecord(date: "d", trigger: .orb, mode: .agent, outcome: .dropped,
+                                       reason: "Heard you, but the brain is off", characters: 5).summary,
+                       "dropped (Heard you, but the brain is off), 5 characters: orb, agent")
+    }
+
     func testTheDateIsISO8601InLocalTime() throws {
         let date = Date(timeIntervalSince1970: 1_791_000_000)
         let newYork = try XCTUnwrap(TimeZone(identifier: "America/New_York"))

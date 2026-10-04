@@ -2,6 +2,7 @@ import BrainKit
 import Foundation
 import SpeakFreeLib
 import VoiceKit
+import XCTest
 @testable import VoiceHostCore
 
 @MainActor
@@ -222,12 +223,19 @@ final class FakeModels: VoiceModelProviding {
 
 @MainActor
 final class FakeWake: WakeDriving {
-    var onWake: ((WakeDetection) -> Void)?
+    var onWake: ((WakeDetection, Bool) -> Void)?
     var onListeningChanged: ((Bool) -> Void)?
     var onProblem: ((WakeFailure) -> Void)?
     var starts: [VoiceSettings] = []
     var stops = 0
+    /// The quiet period of each `rearm`, in order.
+    var rearms: [TimeInterval] = []
     var listening = false
+    /// Started and not stopped since (a failure leaves it so, as the live listener does).
+    private(set) var running = false
+    /// It reported a current detection and has not been re-armed, started or stopped since: like
+    /// VoiceKit's listener, it can make no other detection meanwhile.
+    private(set) var woke = false
     /// Each start fails with this (the microphone still refuses) while it is set.
     var startFailure: WakeFailure?
     /// A start listens at once; false leaves it starting until `listen()`.
@@ -235,6 +243,8 @@ final class FakeWake: WakeDriving {
 
     func start(_ settings: VoiceSettings) {
         starts.append(settings)
+        running = true
+        woke = false
         if let startFailure {
             onProblem?(startFailure)
             return
@@ -248,9 +258,31 @@ final class FakeWake: WakeDriving {
         onListeningChanged?(true)
     }
 
-    /// A detection of the wake phrase.
-    func detect(score: Double = 0.973, phrase: String = "Hey Jarvis") {
-        onWake?(WakeDetection(score: score, phrase: phrase))
+    /// A detection of the wake phrase. One from the listener running now leaves it quiet (not
+    /// listening) until it is re-armed or started again, as VoiceKit's does, and a second one before
+    /// that fails the test: the real listener cannot make it. `current` false is one in flight from
+    /// a listener stopped or replaced since.
+    func detect(score: Double = 0.973, phrase: String = "Hey Jarvis", frames: Int = 2, peak: Double? = nil,
+                audio: [Float] = [], current: Bool = true, file: StaticString = #filePath, line: UInt = #line) {
+        if current {
+            guard !woke else {
+                return XCTFail("a listener that woke detects nothing until it is re-armed or started again",
+                               file: file, line: line)
+            }
+            woke = true
+            if listening {
+                listening = false
+                onListeningChanged?(false)
+            }
+        }
+        onWake?(WakeDetection(score: score, phrase: phrase, frames: frames, peak: peak, audio: audio), current)
+    }
+
+    func rearm(quietFor seconds: TimeInterval) {
+        rearms.append(seconds)
+        guard running else { return }
+        woke = false
+        listen()
     }
 
     /// Listening stops by itself: the microphone (retryable) or the model (not).
@@ -262,9 +294,36 @@ final class FakeWake: WakeDriving {
 
     func stop() {
         stops += 1
+        running = false
+        woke = false
         listening = false
         onListeningChanged?(false)
     }
+}
+
+/// The speech model a wake's phrase is confirmed with. Answers at once with `immediate` while it
+/// is set (the words "Hey Jarvis." unless a test changes it), else waits for `answer`.
+@MainActor
+final class FakeWakeConfirmer: WakeConfirming {
+    /// The audio of each request, in order.
+    var heard: [[Float]] = []
+    var immediate: Result<String, WakeConfirmFailure>? = .success("Hey Jarvis.")
+    private var pending: [@MainActor (Result<String, WakeConfirmFailure>) -> Void] = []
+
+    var waiting: Int { pending.count }
+
+    func transcribe(_ audio: [Float], completion: @escaping @MainActor (Result<String, WakeConfirmFailure>) -> Void) {
+        heard.append(audio)
+        if let immediate { completion(immediate) } else { pending.append(completion) }
+    }
+
+    /// Answers the oldest request still waiting.
+    func answer(_ result: Result<String, WakeConfirmFailure>) {
+        guard !pending.isEmpty else { return }
+        pending.removeFirst()(result)
+    }
+
+    func answer(_ words: String) { answer(.success(words)) }
 }
 
 /// The take journal in memory.

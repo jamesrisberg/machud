@@ -5,12 +5,17 @@ import VoiceKit
 /// The wake word: VoiceKit's `WakeListener` on openWakeWord, fed by the microphone. Listens
 /// only for a phrase that has a downloaded model (`WakeModels`); otherwise, or when listening
 /// stops by itself, it says why through `onProblem`. The controller logs and restarts it.
+///
+/// One listener per model, threshold and frame count: stopping it (around a take, while muted)
+/// closes the microphone and keeps the listener with its loaded model, so starting it again
+/// rebuilds nothing; re-arming it after a wake that started nothing keeps the microphone open and
+/// can drop what it hears for a while (VoiceKit's quiet period). Other settings replace it.
 @MainActor
 final class WakeWordListener: WakeDriving {
     typealias DetectorFactory = @MainActor (WakeModel, URL) throws -> WakeDetector
     typealias SourceFactory = @MainActor () -> WakeAudioSource
 
-    var onWake: ((WakeDetection) -> Void)?
+    var onWake: ((WakeDetection, Bool) -> Void)?
     var onListeningChanged: ((Bool) -> Void)?
     var onProblem: ((WakeFailure) -> Void)?
 
@@ -18,21 +23,36 @@ final class WakeWordListener: WakeDriving {
     private let makeDetector: DetectorFactory
     private let makeSource: SourceFactory
     private let isInstalled: (WakeModel, URL) -> Bool
+    private let now: @MainActor () -> TimeInterval
+    /// The listener built for `listenerKey`, kept while stopped.
     private var listener: WakeListener?
+    private var listenerKey: ListenerKey?
+    /// Between `start` and `stop`: only then is a detection from `listener` current.
+    private var running = false
+
+    /// What a listener is built for: the phrase's model and the settings it scores with.
+    private struct ListenerKey: Equatable {
+        var model: String
+        var threshold: Double
+        var frames: Int
+    }
 
     /// - Parameters:
     ///   - modelsRoot: the folder wake models are downloaded under (`WakeModel.directory(in:)`).
     ///   - makeDetector: the detector for an installed model's folder (openWakeWord).
-    ///   - makeSource: the audio for one listening run (the microphone).
+    ///   - makeSource: the audio for one listener (the microphone).
     ///   - isInstalled: whether a model's folder is complete and verified.
+    ///   - now: seconds on a monotonic clock, for the quiet period after a re-arm.
     init(modelsRoot: URL,
          makeDetector: @escaping DetectorFactory = WakeWordListener.openWakeWordDetector,
          makeSource: @escaping SourceFactory = { MicrophoneWakeSource() },
-         isInstalled: @escaping (WakeModel, URL) -> Bool = { ModelStore.isInstalled($0.manifest, in: $1) }) {
+         isInstalled: @escaping (WakeModel, URL) -> Bool = { ModelStore.isInstalled($0.manifest, in: $1) },
+         now: @escaping @MainActor () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.modelsRoot = modelsRoot
         self.makeDetector = makeDetector
         self.makeSource = makeSource
         self.isInstalled = isInstalled
+        self.now = now
     }
 
     static func openWakeWordDetector(model: WakeModel, directory: URL) throws -> WakeDetector {
@@ -41,14 +61,23 @@ final class WakeWordListener: WakeDriving {
     }
 
     func start(_ settings: VoiceSettings) {
-        stop()
         guard let model = WakeModels.model(forPhrase: settings.wakePhrase) else {
+            release()
             return unavailable("There is no wake model for “\(settings.wakePhrase)” yet.")
         }
         let directory = model.directory(in: modelsRoot)
         guard isInstalled(model, directory) else {
+            release()
             return unavailable("Download the \(model.phrase) model to use the wake word.")
         }
+        let key = ListenerKey(model: model.id, threshold: settings.wakeThreshold, frames: settings.wakeFrames)
+        if let listener, listenerKey == key {
+            // Stopped, failed, or already listening (then this changes nothing).
+            running = true
+            Task { await listener.start() }
+            return
+        }
+        release()
         let detector: WakeDetector
         do {
             detector = try makeDetector(model, directory)
@@ -56,13 +85,19 @@ final class WakeWordListener: WakeDriving {
             return unavailable("The \(model.phrase) model could not load: \(error.localizedDescription)")
         }
         let source = makeSource()
-        let listener = WakeListener(detector: detector, source: source, threshold: settings.wakeThreshold)
+        let listener = WakeListener(detector: detector, source: source, threshold: key.threshold,
+                                    frames: key.frames, now: now)
         (source as? WakeSourceFailing)?.onFailure = { [weak self, weak listener] reason in
             guard let self, let listener, self.listener === listener else { return }
             stop()
             onProblem?(WakeFailure(reason: reason, retryable: true))
         }
-        listener.onWake = { [weak self] detection in self?.onWake?(detection) }
+        listener.onWake = { [weak self, weak listener] detection in
+            guard let self, let listener else { return }
+            // One that was on its way when its listener was stopped or replaced is passed on
+            // marked so: the controller journals it and acts on none of it.
+            onWake?(detection, running && self.listener === listener)
+        }
         listener.onStateChanged = { [weak self, weak listener] state in
             // A listener already replaced says nothing about the one running now.
             guard let self, let listener, self.listener === listener else { return }
@@ -71,13 +106,33 @@ final class WakeWordListener: WakeDriving {
             onListeningChanged?(state == .listening)
         }
         self.listener = listener
+        listenerKey = key
+        running = true
         Task { await listener.start() }
     }
 
     func stop() {
-        guard let listener else { return }
-        self.listener = nil
+        guard let listener, running else { return }
+        running = false
         onListeningChanged?(false)
+        Task { await listener.stop() }
+    }
+
+    func rearm(quietFor seconds: TimeInterval) {
+        guard running, let listener else { return }
+        Task { await listener.rearm(quietFor: seconds) }
+    }
+
+    /// Stops the listener and lets it go, its model with it: another phrase or settings, or a
+    /// model that is no longer there.
+    private func release() {
+        guard let listener else { return }
+        if running {
+            running = false
+            onListeningChanged?(false)
+        }
+        self.listener = nil
+        listenerKey = nil
         Task { await listener.stop() }
     }
 
@@ -118,14 +173,24 @@ final class MicrophoneWakeSource: WakeSourceFailing {
     var onFailure: ((String) -> Void)?
     private var engine: AVAudioEngine?
     private var configurationObserver: NSObjectProtocol?
+    /// Counts starts and stops. The listener keeps this source and starts it again after a stop,
+    /// so a start can still be waiting for the microphone permission when a stop and a newer start
+    /// come: only the latest call may open the engine, and never a second one.
+    private var calls = 0
 
     func start() async throws {
+        calls += 1
+        let call = calls
+        let allowed = await Self.microphoneAllowed()
+        // Stopped, or started again, while the permission was asked: the later call decides.
+        guard call == calls else { return }
         // Without access the input delivers silence, and the wake word would never hear a thing.
-        guard await Self.microphoneAllowed() else { throw MicrophoneDenied() }
+        guard allowed else { throw MicrophoneDenied() }
         try startEngine()
     }
 
     func stop() {
+        calls += 1
         if let configurationObserver { NotificationCenter.default.removeObserver(configurationObserver) }
         configurationObserver = nil
         guard let engine else { return }
@@ -143,6 +208,9 @@ final class MicrophoneWakeSource: WakeSourceFailing {
     }
 
     private func startEngine() throws {
+        // One engine at a time: a second would keep the microphone open after `stop` and deliver
+        // every sample twice.
+        guard engine == nil else { return }
         let engine = AVAudioEngine()
         let input = engine.inputNode
         let inputFormat = input.outputFormat(forBus: 0)

@@ -21,8 +21,9 @@ import VoiceKit
 ///
 /// One turn at a time: the companion refuses a second one, so while the brain works an agent
 /// take is refused, and a take moved to the agent then (or while the brain is off) is typed at
-/// the cursor instead. A typed turn (`send(typed:)`) goes to the same session and is refused the
-/// same way, with the reason returned to the sender rather than shown under the orb.
+/// the cursor instead, unless the wake word started it: that one is dropped, typed nowhere. A
+/// typed turn (`send(typed:)`) goes to the same session and is refused the same way, with the
+/// reason returned to the sender rather than shown under the orb.
 ///
 /// Every turn, spoken or typed, and every snapshot also go to `conversation`, which the
 /// presenter draws when the card is pinned or expanded (`state.cardMode`) and which is kept in
@@ -39,6 +40,10 @@ import VoiceKit
 /// on and cannot listen, `wakeProblem` says why, and turning it on shows that under the orb;
 /// a model installed later arms it at once (`wakeModelsChanged`). A listener that stops by
 /// itself is started again after `wakeRestartDelays` until it listens.
+///
+/// With `wakeConfirm` a detection starts nothing until `wakeConfirmer` has transcribed what woke
+/// the listener and the phrase is in the words: the take then starts as any wake's does; a wake
+/// whose phrase is not there leaves no trace but its journal line and log line.
 @MainActor
 public final class VoiceHostController: VoiceHostActing {
     public private(set) var state = VoiceHostState() {
@@ -72,10 +77,22 @@ public final class VoiceHostController: VoiceHostActing {
     static let brainOffPasted = "The brain is off — pasted instead"
     static let agentBusy = "The agent is still working"
     static let agentBusyPasted = "The agent is still working — pasted instead"
+    static let wakeDroppedBrainOff = "Heard you, but the brain is off"
+    static let wakeDroppedBusy = "Heard you, but the agent is still working"
     static let voiceOff = "Voice is off"
     static let voiceMuted = "Voice is muted"
     static let wakeOff = "The wake word is off"
     static let otherWakePhrase = "Not the wake phrase listened for"
+    static let staleWake = "From a wake listener stopped or replaced since"
+    static let wakeBeingConfirmed = "Another wake is being confirmed"
+    static let wakeNotConfirmed = "The wake phrase was not confirmed"
+    static let wakeConfirmNoModel = "Download the speech model to confirm the wake phrase."
+    static let wakeConfirmLoading = "The speech model was still loading, so the wake phrase could not be confirmed."
+    static let wakeConfirmFailed = "The speech model could not check the wake phrase."
+    static let wakeConfirmSlow = "Checking the wake phrase took longer than 1.5 s."
+    static let wakeConfirmBusy =
+        "The speech model was still transcribing the last take, so the wake phrase could not be confirmed."
+    static let wakeConfirmUnavailable = "This voice host has no speech model to confirm the wake phrase with."
     static let wakeModelMissing = "The wake phrase's model is not installed"
     static let hostQuit = "The voice host quit"
     static let modelMissing = "Speech model not installed"
@@ -96,6 +113,11 @@ public final class VoiceHostController: VoiceHostActing {
     /// How long a wake listener that stopped by itself waits before each restart: the first,
     /// the second, then every one after.
     static let wakeRestartDelays: [TimeInterval] = [2, 10, 60]
+    /// After a wake that starts no take the listener drops this many seconds of what it hears, so
+    /// the rest of the sound that woke it cannot wake it again.
+    static let wakeQuietPeriod: TimeInterval = 1
+    /// How long confirming a wake's phrase may take before the wake counts as not confirmed.
+    static let wakeConfirmTimeout: TimeInterval = 1.5
 
     private let dictation: DictationDriving
     private let keys: VoiceKeySource?
@@ -104,6 +126,8 @@ public final class VoiceHostController: VoiceHostActing {
     private let wake: WakeDriving?
     /// The wake phrases there are models for, in the order they are offered.
     let wakeModels: [WakePhraseModel]
+    /// Transcribes what woke the listener, to confirm the phrase; nil confirms none.
+    private let wakeConfirmer: WakeConfirming?
     private let brainStateRoot: URL
     /// Where the conversation is kept between launches; nil keeps it only in memory.
     private let conversationStore: ConversationStoring?
@@ -144,6 +168,12 @@ public final class VoiceHostController: VoiceHostActing {
         /// Started by the fn key: a change to the key setup ends it.
         var fromKeys: Bool {
             if case .key = trigger { return true }
+            return false
+        }
+
+        /// Started by the wake word: when the brain cannot take it, it is dropped, not typed.
+        var fromWake: Bool {
+            if case .wake = trigger { return true }
             return false
         }
     }
@@ -219,6 +249,34 @@ public final class VoiceHostController: VoiceHostActing {
     /// The listener failed in a way starting it again cannot fix (`WakeFailure.retryable` false):
     /// it waits for a change to its model or to the voice settings.
     private var wakeWaitsForChange = false
+    /// Counts the listener's starts and stops: a wake re-arms the listener only if it is still
+    /// the run the wake came from.
+    private var wakeRun = 0
+    /// The listener was re-armed after a wake; its listening again continues the same run.
+    private var wakeRearming = false
+
+    /// A wake whose phrase is being confirmed: its trigger, the phrase to find, when it came and
+    /// the listener run it came from. Never its audio.
+    private struct WakeConfirmation {
+        let id = UUID()
+        let trigger: VoiceTakeTrigger
+        let phrase: String
+        let startedAt: TimeInterval
+        let run: Int
+    }
+
+    private var wakeConfirmation: WakeConfirmation? {
+        didSet { if wakeConfirmation == nil { wakeAudioWaiting = nil } }
+    }
+    /// The audio of the wake being confirmed while it waits for the speech model to be free; let
+    /// go once it goes to the model or the wake is decided.
+    private var wakeAudioWaiting: [Float]?
+    /// Wake confirmations the speech model is still working on, answered or not: one given up on
+    /// at the time limit keeps the model busy until it answers.
+    private var wakeTranscriptionsRunning = 0
+    /// Why the latest wake's phrase could not be confirmed; `wakeProblem` while nothing else is,
+    /// until a wake's words are had, confirmation is turned off or the voice settings change.
+    private var wakeConfirmProblem: String?
     /// The conversation with the agent, every turn and snapshot reduced to rows.
     private(set) var conversation: ConversationLog
     private var conversationSaveScheduled = false
@@ -232,6 +290,7 @@ public final class VoiceHostController: VoiceHostActing {
     ///   - brain: nil when the brain can never run (`MACHUD_VOICE_NO_BRAIN`).
     ///   - wake: nil without a microphone for it.
     ///   - wakeModels: the wake phrases there are models for, and their files.
+    ///   - wakeConfirmer: transcribes what woke the listener, to confirm the phrase.
     ///   - brainStateRoot: the folder per-workspace brain state directories go under.
     ///   - conversationStore: where the conversation is kept; nil keeps it in memory only.
     ///   - sessions: MacHUD's session broker; nil leaves `openSession` unavailable.
@@ -243,7 +302,7 @@ public final class VoiceHostController: VoiceHostActing {
     ///   - homeDirectory: the brain's workspace while `brain.workspacePath` is empty.
     init(settings: VoiceHostSettings, dictation: DictationDriving, keys: VoiceKeySource?,
          brain: BrainDriving?, speaker: ReplySpeaking?, wake: WakeDriving?, wakeModels: [WakePhraseModel] = [],
-         brainStateRoot: URL, conversationStore: ConversationStoring? = nil,
+         wakeConfirmer: WakeConfirming? = nil, brainStateRoot: URL, conversationStore: ConversationStoring? = nil,
          sessions: SessionOpening? = nil, feed: TextFeeding? = nil,
          machudTools: MacHUDToolServer? = nil, machudStatus: MacHUDStatusReading? = nil,
          detectRuntimes: @escaping (BrainSettings) -> [BrainRuntimeDetection] = { BrainRuntimes.detect($0) },
@@ -260,6 +319,7 @@ public final class VoiceHostController: VoiceHostActing {
         self.speaker = speaker
         self.wake = wake
         self.wakeModels = wakeModels
+        self.wakeConfirmer = wakeConfirmer
         self.brainStateRoot = brainStateRoot
         self.conversationStore = conversationStore
         conversation = ConversationLog(record: conversationStore?.load())
@@ -301,7 +361,7 @@ public final class VoiceHostController: VoiceHostActing {
             state.phase = .idle
         }
         speaker?.onChunkStarted = { [weak self] chunk in self?.chunkStarted(chunk) }
-        wake?.onWake = { [weak self] in self?.wakeDetected($0) }
+        wake?.onWake = { [weak self] in self?.wakeDetected($0, current: $1) }
         wake?.onListeningChanged = { [weak self] in self?.wakeListeningChanged($0) }
         wake?.onProblem = { [weak self] in self?.wakeListenerFailed($0) }
         apply(settings)
@@ -320,8 +380,10 @@ public final class VoiceHostController: VoiceHostActing {
             speaker?.configure(settings.voice)
             // The wake listener starts afresh with them: what stopped it before is forgotten.
             wakeListenerProblem = nil
+            wakeConfirmProblem = nil
             wakeRestarts = 0
         }
+        if !settings.wakeConfirm { wakeConfirmProblem = nil }
         refreshKeys()
         refreshWake()
         refreshBrain()
@@ -344,7 +406,7 @@ public final class VoiceHostController: VoiceHostActing {
             wakeWaitsForChange = false
             wakeFailureRun?.attempts += 1
             log("wake listener restarting: its model changed")
-            wake.start(settings)
+            startWake(wake, settings)
         }
         refreshWakeProblem()
     }
@@ -433,6 +495,10 @@ public final class VoiceHostController: VoiceHostActing {
     /// journaled after.
     func prepareToQuit() {
         guard !quitting else { return }
+        if let pending = wakeConfirmation {
+            wakeConfirmation = nil
+            refused(pending.trigger, mode: .agent, reason: Self.hostQuit)
+        }
         reportTakeEnd(.cancelled)
         if let current = take { journal(current, outcome: .cancelled, reason: Self.hostQuit) }
         for ended in transcribing.values.sorted(by: { $0.startedAt < $1.startedAt }) {
@@ -567,22 +633,143 @@ public final class VoiceHostController: VoiceHostActing {
         return nil
     }
 
-    /// A detection starts an agent take. One that arrives after the listener was told to stop
-    /// (no listener is wanted: voice off, muted, the wake word off, a take recording) or that is
-    /// not of the phrase listened for (a listener replaced since) is refused before anything
-    /// else: it is journaled and logged and touches nothing, not the reply's speech, the orb or
-    /// the listener running now.
-    private func wakeDetected(_ detection: WakeDetection) {
+    /// A detection starts an agent take once its phrase is confirmed (`confirmWake`), or at once
+    /// with confirmation off. One that arrives after the listener was told to stop (no listener is
+    /// wanted: voice off, muted, the wake word off, a take recording), from a listener stopped or
+    /// replaced since, or not of the phrase listened for is refused before anything else: it is
+    /// journaled and logged and touches nothing, not the reply's speech, the orb or the listener
+    /// running now. Its audio is not kept.
+    ///
+    /// The listener makes one detection per arm and a wake being confirmed is decided whenever its
+    /// listener stops or is replaced (`refusePendingWake`), so a detection from the listener running
+    /// now never meets another being confirmed; if one did, it is refused and the listener re-armed.
+    private func wakeDetected(_ detection: WakeDetection, current: Bool) {
         let trigger = VoiceTakeTrigger(detection)
         guard let listening = runningWake else {
             return refused(trigger, mode: .agent, reason: wakeStopReason)
         }
+        guard current else { return refused(trigger, mode: .agent, reason: Self.staleWake) }
         guard TriggerPhrase.normalize(detection.phrase) == TriggerPhrase.normalize(listening.wakePhrase) else {
             return refused(trigger, mode: .agent, reason: Self.otherWakePhrase)
         }
+        guard wakeConfirmation == nil else {
+            refused(trigger, mode: .agent, reason: Self.wakeBeingConfirmed)
+            return rearmWake()
+        }
+        guard settings.wakeConfirm else { return startWakeTake(trigger, run: wakeRun) }
+        confirmWake(detection, trigger: trigger)
+    }
+
+    /// A wake that may start a take starts it as any take starts, refusals included; with no take
+    /// to pause it, the listener it came from listens again.
+    private func startWakeTake(_ trigger: VoiceTakeTrigger, run: Int) {
         startTake(.agent, handsFree: true, trigger: trigger)
-        // The listener stays quiet after a wake; with no take to pause it, listen again now.
-        if take == nil { restartWake() }
+        if take == nil, wakeRun == run { rearmWake() }
+    }
+
+    /// Hands what woke the listener to the speech model and waits, at most `wakeConfirmTimeout`,
+    /// for its words. Until they come nothing is shown, stopped, said or written; the listener
+    /// stays quiet meanwhile. The audio goes to `wakeConfirmer` and nowhere else.
+    ///
+    /// The speech model transcribes one thing at a time, as SpeakFree uses it (its engine is not
+    /// made to run two at once): while a take is being transcribed, or an earlier wake's
+    /// confirmation still runs, the wake waits for it, within the same time limit
+    /// (`confirmWaitingWake`).
+    private func confirmWake(_ detection: WakeDetection, trigger: VoiceTakeTrigger) {
+        let pending = WakeConfirmation(trigger: trigger, phrase: detection.phrase, startedAt: now(), run: wakeRun)
+        wakeConfirmation = pending
+        schedule(Self.wakeConfirmTimeout) { [weak self] in
+            guard let self else { return }
+            let takeInTheWay = wakeAudioWaiting != nil && !transcribing.isEmpty
+            wakeChecked(pending.id, .cannot(takeInTheWay ? Self.wakeConfirmBusy : Self.wakeConfirmSlow))
+        }
+        guard speechModelFree else {
+            wakeAudioWaiting = detection.audio
+            return
+        }
+        transcribeWake(detection.audio, pending)
+    }
+
+    /// No take is being transcribed and no wake confirmation is running.
+    private var speechModelFree: Bool { transcribing.isEmpty && wakeTranscriptionsRunning == 0 }
+
+    /// What was transcribing is done: the wake waiting for it goes to the speech model.
+    private func confirmWaitingWake() {
+        guard speechModelFree, let audio = wakeAudioWaiting, let pending = wakeConfirmation else { return }
+        wakeAudioWaiting = nil
+        transcribeWake(audio, pending)
+    }
+
+    private func transcribeWake(_ audio: [Float], _ pending: WakeConfirmation) {
+        guard let wakeConfirmer else { return wakeChecked(pending.id, .cannot(Self.wakeConfirmUnavailable)) }
+        wakeTranscriptionsRunning += 1
+        wakeConfirmer.transcribe(audio) { [weak self] result in
+            guard let self else { return }
+            wakeTranscriptionsRunning -= 1
+            switch result {
+            case .success(let words): wakeChecked(pending.id, .heard(words))
+            case .failure(let failure): wakeChecked(pending.id, .cannot(Self.message(for: failure)))
+            }
+            confirmWaitingWake()
+        }
+    }
+
+    private enum WakeCheck {
+        /// What the speech model heard.
+        case heard(String)
+        /// Why it could not say.
+        case cannot(String)
+    }
+
+    /// The first answer for the wake being confirmed, the time running out included; a later one,
+    /// or one for a wake already refused because its listener stopped, finds it gone. The words
+    /// decide and go no further. A wake whose phrase is not in them, or that could not be checked,
+    /// is refused and its listener re-armed.
+    private func wakeChecked(_ id: UUID, _ check: WakeCheck) {
+        guard let pending = wakeConfirmation, pending.id == id else { return }
+        wakeConfirmation = nil
+        let confirmed: Bool
+        let refusal: String
+        let problem: String?
+        switch check {
+        case .heard(let words):
+            confirmed = TriggerPhrase.transcript(words, contains: pending.phrase)
+            refusal = Self.wakeNotConfirmed
+            problem = nil
+        case .cannot(let why):
+            confirmed = false
+            refusal = why
+            problem = why
+        }
+        let trigger = pending.trigger.confirming(confirmed, ms: Int(((now() - pending.startedAt) * 1000).rounded()))
+        // Unreachable while every stop of the listener decides its wake; kept so an answer for an
+        // older listener can never act, or show a problem new settings cleared.
+        guard pending.run == wakeRun, runningWake != nil else {
+            return refused(trigger, mode: .agent, reason: runningWake == nil ? wakeStopReason : Self.staleWake)
+        }
+        wakeConfirmProblem = problem
+        refreshWakeProblem()
+        guard confirmed else {
+            refused(trigger, mode: .agent, reason: refusal)
+            return rearmWake()
+        }
+        startWakeTake(trigger, run: pending.run)
+    }
+
+    /// The listener the wake being confirmed came from stops or is replaced: the wake is refused
+    /// now, with no answer, so the next detection, from the listener started again, is heard.
+    private func refusePendingWake(_ reason: String) {
+        guard let pending = wakeConfirmation else { return }
+        wakeConfirmation = nil
+        refused(pending.trigger, mode: .agent, reason: reason)
+    }
+
+    static func message(for failure: WakeConfirmFailure) -> String {
+        switch failure {
+        case .noModel: wakeConfirmNoModel
+        case .loading: wakeConfirmLoading
+        case .failed: wakeConfirmFailed
+        }
     }
 
     private func handle(_ intent: KeyGestureRecognizer.Intent) {
@@ -664,6 +851,8 @@ public final class VoiceHostController: VoiceHostActing {
     }
 
     private func handle(_ update: DictationUpdate, take id: UUID) {
+        // A take's transcription that ended may let a wake waiting for it be confirmed.
+        defer { confirmWaitingWake() }
         let isCurrent = take.map { $0.id == nil || $0.id == id } ?? false
         if isCurrent, take?.id == nil {
             take?.id = id
@@ -848,8 +1037,8 @@ public final class VoiceHostController: VoiceHostActing {
 
     // MARK: - Brain turns
 
-    /// An agent take's words: to the brain, or typed at the cursor when it cannot take them now.
-    /// `ended` is the take they came from, for the journal.
+    /// An agent take's words: to the brain, or, when it cannot take them now, typed at the cursor
+    /// or dropped (`notTaken`). `ended` is the take they came from, for the journal.
     private func submit(_ text: String, isLatest: Bool, ended: Take?) {
         let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else {
@@ -858,10 +1047,35 @@ public final class VoiceHostController: VoiceHostActing {
             return
         }
         // The brain went off, or another turn started, while this take was recording.
-        guard brainEnabled, let brain else { return paste(prompt, notice: Self.brainOffPasted, ended: ended) }
-        if let problem = blockingBrainProblem { return paste(prompt, notice: Self.pasted(problem), ended: ended) }
-        guard !agentBusy else { return paste(prompt, notice: Self.agentBusyPasted, ended: ended) }
+        guard brainEnabled, let brain else {
+            return notTaken(prompt, pasted: Self.brainOffPasted, dropped: Self.wakeDroppedBrainOff, isLatest: isLatest,
+                            ended: ended)
+        }
+        if let problem = blockingBrainProblem {
+            return notTaken(prompt, pasted: Self.pasted(problem), dropped: Self.wakeDropped(problem), isLatest: isLatest,
+                            ended: ended)
+        }
+        guard !agentBusy else {
+            return notTaken(prompt, pasted: Self.agentBusyPasted, dropped: Self.wakeDroppedBusy, isLatest: isLatest,
+                            ended: ended)
+        }
         begin(prompt, source: .voice, isLatest: isLatest, brain: brain, ended: ended)
+    }
+
+    /// Words the brain cannot take now. The wake word's are dropped: whoever spoke may not have
+    /// been talking to this Mac, so they are typed nowhere. The fn key's, the orb's and the
+    /// socket's are typed at the cursor, where the user is. A take the host has no record of is
+    /// dropped too, since it may have been the wake word's (and has no journal line to write). The
+    /// notice shows on the orb only for the latest take; a newer one recording or being
+    /// transcribed keeps the orb.
+    private func notTaken(_ text: String, pasted: String, dropped: String, isLatest: Bool, ended: Take?) {
+        if let ended, !ended.fromWake { return paste(text, notice: pasted, isLatest: isLatest, ended: ended) }
+        if let ended {
+            journal(ended, mode: .agent, outcome: .dropped, reason: dropped, characters: text.count)
+        } else {
+            log("take dropped (\(dropped)), \(text.count) characters: a take this host has no record of")
+        }
+        if isLatest { fail(dropped) }
     }
 
     /// Sends `text` to the agent as a typed turn, to the same session as voice. Nil once it is
@@ -964,10 +1178,10 @@ public final class VoiceHostController: VoiceHostActing {
         if let lastSnapshot, lastSnapshot.requestId == requestId { handle(lastSnapshot) }
     }
 
-    private func paste(_ text: String, notice: String, ended: Take?) {
+    private func paste(_ text: String, notice: String, isLatest: Bool, ended: Take) {
         dictation.insert(text)
-        if let ended { journal(ended, mode: .agent, outcome: .typed, reason: notice, characters: text.count) }
-        fail(notice)
+        journal(ended, mode: .agent, outcome: .typed, reason: notice, characters: text.count)
+        if isLatest { fail(notice) }
     }
 
     private func handle(_ snapshot: AgentSessionSnapshot) {
@@ -1173,6 +1387,9 @@ public final class VoiceHostController: VoiceHostActing {
         let wanted = wakeWanted && take == nil && wakeModel?.store.status.installed == true ? settings.voice : nil
         guard wanted != runningWake else { return }
         if runningWake != nil {
+            refusePendingWake(wanted == nil ? wakeStopReason : Self.staleWake)
+            wakeRun += 1
+            wakeRearming = false
             wake.stop()
             log("wake listener stopped: \(wanted == nil ? wakeStopReason : "its settings changed")")
         }
@@ -1182,8 +1399,18 @@ public final class VoiceHostController: VoiceHostActing {
         wakeListeningSince = nil
         wakeFailureRun = nil
         guard let wanted else { return }
-        log("wake listener starting: \"\(wanted.wakePhrase)\", threshold \(String(format: "%.2f", wanted.wakeThreshold))")
-        wake.start(wanted)
+        log("wake listener starting: \"\(wanted.wakePhrase)\", threshold \(String(format: "%.2f", wanted.wakeThreshold)), "
+            + "\(wanted.wakeFrames) frame\(wanted.wakeFrames == 1 ? "" : "s")")
+        startWake(wake, wanted)
+    }
+
+    /// Every start of the listener begins a run of its own; a wake still being confirmed from an
+    /// earlier one (a listener that failed meanwhile) is refused.
+    private func startWake(_ wake: WakeDriving, _ settings: VoiceSettings) {
+        refusePendingWake(Self.staleWake)
+        wakeRun += 1
+        wakeRearming = false
+        wake.start(settings)
     }
 
     /// Why no wake listener is wanted now: for the log, and for a detection that arrives anyway.
@@ -1201,6 +1428,11 @@ public final class VoiceHostController: VoiceHostActing {
         let was = state.wakeListening
         state.wakeListening = listening
         guard listening, !was else { return }
+        // Listening again after a re-arm: the same run, still listening since it started.
+        if wakeRearming {
+            wakeRearming = false
+            return
+        }
         wakeListeningSince = now()
         if let run = wakeFailureRun {
             log("wake listener listening again after \(run.attempts) attempt\(run.attempts == 1 ? "" : "s")")
@@ -1223,6 +1455,7 @@ public final class VoiceHostController: VoiceHostActing {
     private func wakeListenerFailed(_ failure: WakeFailure) {
         let listened = wakeListeningSince.map { now() - $0 }
         wakeListeningSince = nil
+        wakeRearming = false
         if let listened, let longest = Self.wakeRestartDelays.last, listened >= longest { wakeRestarts = 0 }
         wakeListenerProblem = failure.reason
         refreshWakeProblem()
@@ -1251,7 +1484,7 @@ public final class VoiceHostController: VoiceHostActing {
         guard let wake, let settings = runningWake, wakeListenerProblem != nil, take == nil else { return }
         wakeRestarts += 1
         wakeFailureRun?.attempts += 1
-        wake.start(settings)
+        startWake(wake, settings)
     }
 
     /// Why the wake word is on and not listening; nil while it is off, muted or able to listen.
@@ -1264,7 +1497,7 @@ public final class VoiceHostController: VoiceHostActing {
         } else if let model = wakeModel {
             let status = model.store.status
             if status.installed {
-                problem = wakeListenerProblem
+                problem = wakeListenerProblem ?? (settings.wakeConfirm ? wakeConfirmProblem : nil)
             } else if status.downloading {
                 problem = "The \(model.phrase) model is downloading."
             } else if let error = status.error {
@@ -1278,14 +1511,13 @@ public final class VoiceHostController: VoiceHostActing {
         if problem != state.wakeProblem { state.wakeProblem = problem }
     }
 
-    /// Listens again after a wake that started no take.
-    private func restartWake() {
-        if runningWake != nil {
-            wake?.stop()
-            log("wake listener stopped: re-arming after a wake that started no take")
-        }
-        runningWake = nil
-        refreshWake()
+    /// Listens again after a wake that started no take, with the listener running now, dropping
+    /// the rest of the sound that woke it (`wakeQuietPeriod`). Not logged: the wake's own line says
+    /// what happened.
+    private func rearmWake() {
+        guard let wake, runningWake != nil else { return }
+        wakeRearming = true
+        wake.rearm(quietFor: Self.wakeQuietPeriod)
     }
 
     /// The brain settings with the workspace resolved: the home folder while none is chosen.
@@ -1424,8 +1656,17 @@ public final class VoiceHostController: VoiceHostActing {
     }
 
     static func pasted(_ problem: String) -> String {
-        let reason = problem.hasSuffix(".") ? String(problem.dropLast()) : problem
-        return "\(reason) — pasted instead"
+        "\(sentence(problem)) — pasted instead"
+    }
+
+    /// The orb's notice for a wake take dropped because of the brain's `problem`.
+    static func wakeDropped(_ problem: String) -> String {
+        "Heard you, but the agent cannot take it: \(sentence(problem))"
+    }
+
+    /// `problem` without its full stop, to go inside a notice.
+    private static func sentence(_ problem: String) -> String {
+        problem.hasSuffix(".") ? String(problem.dropLast()) : problem
     }
 
     // MARK: - Sessions
@@ -1476,8 +1717,11 @@ public final class VoiceHostController: VoiceHostActing {
 }
 
 extension VoiceTakeTrigger {
-    /// A wake detection, its score kept to three decimals (the detector scores in `Float`).
+    /// A wake detection's score, phrase and run, the scores kept to three decimals (the detector
+    /// scores in `Float`). Its audio is not part of it.
     init(_ detection: WakeDetection) {
-        self = .wake(score: (detection.score * 1000).rounded() / 1000, phrase: detection.phrase)
+        func rounded(_ score: Double) -> Double { (score * 1000).rounded() / 1000 }
+        self = .wake(score: rounded(detection.score), phrase: detection.phrase, frames: detection.frames,
+                     peak: rounded(detection.peak))
     }
 }

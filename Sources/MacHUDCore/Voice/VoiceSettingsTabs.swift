@@ -441,6 +441,9 @@ struct VoiceTabView: View {
                         model.set("voice.wakeThreshold", VoiceSettingsModel.threshold(sensitivity: $0))
                     }
                 }
+                VoiceToggle(model: model, title: "Confirm the wake phrase before listening", path: "voice.wakeConfirm",
+                            help: "The speech model checks on this Mac that the phrase was said, so speech that only "
+                                + "sounds like it does not start the agent.")
             }
             Section("Replies") {
                 VoicePicker(model: model, title: "Reply voice", path: "voice.replyVoice",

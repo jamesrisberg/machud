@@ -197,18 +197,44 @@ struct WakePhraseModel {
     }
 }
 
-/// The wake word listener.
+/// The wake word listener: one per wake model and settings, kept while it is stopped.
 @MainActor
 protocol WakeDriving: AnyObject {
-    /// A detection: its score and the phrase. The listener stays quiet until started again.
-    var onWake: ((WakeDetection) -> Void)? { get set }
+    /// A detection, and whether it came from the listener running now (false: it was on its way
+    /// when its listener was stopped or replaced). The listener stays quiet until re-armed or
+    /// started again.
+    var onWake: ((WakeDetection, _ current: Bool) -> Void)? { get set }
     var onListeningChanged: ((Bool) -> Void)? { get set }
     /// Listening could not start or stopped by itself. Nothing reports it again until the next
     /// start.
     var onProblem: ((WakeFailure) -> Void)? { get set }
-    /// Start (or restart) listening for `settings.wakePhrase`.
+    /// Listen for `settings.wakePhrase`: the listener kept for the same model, threshold and
+    /// frames starts again (also after it failed), other settings replace it.
     func start(_ settings: VoiceSettings)
+    /// Stops listening (the microphone closes); the listener is kept for the next `start`.
     func stop()
+    /// Listens again after a wake that started nothing, dropping what it hears for `quietFor`
+    /// seconds. Nothing happens while it is stopped.
+    func rearm(quietFor: TimeInterval)
+}
+
+/// Why the words of a wake could not be had.
+enum WakeConfirmFailure: Error, Equatable {
+    /// No speech model is installed.
+    case noModel
+    /// The speech model is installed and not loaded yet.
+    case loading
+    /// The speech model failed on the audio.
+    case failed
+}
+
+/// Transcribes the audio a wake handed over, on this Mac, so the host can confirm the phrase.
+@MainActor
+protocol WakeConfirming: AnyObject {
+    /// The words in `audio` (16 kHz mono), or why they cannot be had, given once on the main actor.
+    /// On a false wake `audio` is speech in the room nobody meant for the assistant: it is used for
+    /// this and let go, never kept, written, logged or sent, and so are the words.
+    func transcribe(_ audio: [Float], completion: @escaping @MainActor (Result<String, WakeConfirmFailure>) -> Void)
 }
 
 /// Why the wake listener could not start or stopped by itself.

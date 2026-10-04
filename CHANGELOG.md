@@ -16,11 +16,24 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   what the agent answered), and says what looks wrong. The menu item shows a toast and selects the file in
   Finder; the command prints the file's path and the list. Take it before you relaunch anything, since a
   relaunch clears what it records. Files go to `~/Library/Logs/MacHUD`; the newest 20 are kept.
-- Every voice take now says what started it: the wake word (with how sure it was), the orb, a
-  script's `action`, or the fn key. `machud voice takes` lists your recent takes, what started
+- Every voice take now says what started it: the wake word (with how sure it was, and for how
+  many 80 ms frames in a row), the orb, a script's `action`, or the fn key. `machud voice takes`
+  lists your recent takes, what started
   each, how long it recorded and what became of it (sent to the agent, typed at the cursor,
-  thrown away, refused, cancelled or failed), counting characters and never keeping your words.
+  dropped, thrown away, refused, cancelled or failed), counting characters and never keeping your words.
   A wake word heard while it could not start a take is listed too, with its score.
+- The agent no longer starts listening when something in the room only sounds like the wake word.
+  Once the wake word fires, the speech model checks on your Mac that “Hey Jarvis” was really said
+  (about a tenth of a second) before the orb listens or a reply being spoken stops. When it was
+  not, nothing appears, nothing is sent or said, and only a line in `machud voice takes` records
+  it, never the words. If the phrase cannot be checked (no speech model, it is still loading
+  just after launch, or the last take is still being transcribed), the Voice settings say why
+  under the wake word. **Confirm the wake phrase
+  before listening** in the Voice settings (`voice.wakeConfirm`) turns this off.
+- When the wake word started a request and the agent is still working, or the brain is off or
+  cannot take it, your words are no longer typed into whatever app is in front: the orb says
+  “Heard you, but the agent is still working” (or why the brain cannot take it) and nothing is
+  typed. Requests started with the fn key, the orb or a script are still typed at the cursor.
 - Spoken messages in the conversation carry the time you said them and what started the take.
 - The voice host's account of each take and of the wake word's listening is in the system log
   (`log show --predicate 'subsystem == "com.jrisberg.machud.voice"'`), readable rather than
@@ -89,8 +102,17 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   the pointer is on, switching desktops only to fetch a single-window app, `capture_loadout`
   saves the screen the user is looking at, and `list_loadouts` (and `machud_status`) count the
   loadouts held back as experimental instead of listing them.
+- A sound that reaches the wake word's threshold for a moment no longer wakes it: the phrase has
+  to hold for two 80 ms frames in a row (`voice.wakeFrames`, 1 to 4). Saying it still wakes the
+  agent, about 80 ms later.
 
 ### Fixed
+- After a wake word that starts nothing (the agent busy or the brain off), the rest of the sound
+  that woke it can no longer wake it again: the wake word ignores the next second and listens on
+  without reopening the microphone or reloading its model. A wake word heard by a listener that
+  was being replaced (its settings had just changed) no longer starts a take.
+- A notice about an earlier request (“— pasted instead”) no longer appears on the orb while you
+  are speaking a newer one.
 - One loadout is applied at a time. Asking for another while one is being applied (a hotkey, the
   menu, a script, the voice agent, the startup loadout or a display change) says "<name> is
   still being applied" instead of running both, which could leave a desktop switched. A HUD

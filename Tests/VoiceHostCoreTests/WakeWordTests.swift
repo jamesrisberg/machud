@@ -14,6 +14,8 @@ final class WakeWordTests: XCTestCase {
     private var wake: FakeWake!
     private var jarvis: FakeModels!
     private var clock: ManualClock!
+    private var journal: FakeTakeJournal!
+    private var confirmer: FakeWakeConfirmer!
     /// The take and wake-listener lines the controller logged.
     private var logged: [String] = []
 
@@ -24,6 +26,8 @@ final class WakeWordTests: XCTestCase {
         wake = FakeWake()
         jarvis = FakeModels.wake(installed: false)
         clock = ManualClock()
+        journal = FakeTakeJournal()
+        confirmer = FakeWakeConfirmer()
         logged = []
     }
 
@@ -38,8 +42,9 @@ final class WakeWordTests: XCTestCase {
         let clock = self.clock!
         let controller = VoiceHostController(
             settings: settings, dictation: dictation, keys: nil, brain: brain, speaker: nil,
-            wake: wake ?? self.wake, wakeModels: wakeModels, brainStateRoot: directory,
-            detectRuntimes: FakeRuntimes.detect(), now: { clock.now }, schedule: { clock.schedule($0, $1) })
+            wake: wake ?? self.wake, wakeModels: wakeModels, wakeConfirmer: confirmer, brainStateRoot: directory,
+            detectRuntimes: FakeRuntimes.detect(), now: { clock.now }, schedule: { clock.schedule($0, $1) },
+            takeJournal: journal)
         controller.log = { [weak self] in self?.logged.append($0) }
         controller.start()
         return controller
@@ -148,7 +153,7 @@ final class WakeWordTests: XCTestCase {
             XCTAssertEqual(controller.state.wakeProblem, denied, "the problem stays while it fails, at \(time) s")
             XCTAssertFalse(controller.state.wakeListening)
         }
-        XCTAssertEqual(lines("wake listener"), ["wake listener starting: \"Hey Jarvis\", threshold 0.50",
+        XCTAssertEqual(lines("wake listener"), ["wake listener starting: \"Hey Jarvis\", threshold 0.50, 2 frames",
                                                 "wake listener listening",
                                                 "wake listener failed: \(denied); restarting in 2 s"],
                        "the same failure again and again is logged once")
@@ -283,12 +288,12 @@ final class WakeWordTests: XCTestCase {
         controller.perform(.orbClicked)
         controller.perform(.setMuted(true))
         XCTAssertEqual(logged.filter { $0.hasPrefix("wake listener") }, [
-            #"wake listener starting: "Hey Jarvis", threshold 0.50"#,
+            #"wake listener starting: "Hey Jarvis", threshold 0.50, 2 frames"#,
             "wake listener listening",
             "wake listener stopped: A take is recording",
         ])
         controller.perform(.setMuted(false))
-        XCTAssertEqual(lines("wake listener").suffix(2), [#"wake listener starting: "Hey Jarvis", threshold 0.50"#,
+        XCTAssertEqual(lines("wake listener").suffix(2), [#"wake listener starting: "Hey Jarvis", threshold 0.50, 2 frames"#,
                                                           "wake listener listening"])
     }
 
@@ -371,14 +376,19 @@ final class WakeWordTests: XCTestCase {
 
     /// The live listener on VoiceKit's `WakeListener` and `InProcessWakeDetector`, with a fake
     /// microphone and a fake scoring engine: installed model → the listener starts the source →
-    /// a detection → an agent take, with the source stopped during the take and started again after.
+    /// a detection → an agent take, with the source stopped during the take and the same listener
+    /// started again after.
     func testADetectionStartsAnAgentTakeAndTheWakeWordReArmsAfter() async throws {
         jarvis = FakeModels.wake(installed: true)
         let engine = FakeWakeEngine()
         var sources: [FakeWakeSource] = []
+        var detectors = 0
         let listener = WakeWordListener(
             modelsRoot: directory,
-            makeDetector: { model, _ in InProcessWakeDetector(engine: engine, phrase: model.phrase, model: model.id) },
+            makeDetector: { model, _ in
+                detectors += 1
+                return InProcessWakeDetector(engine: engine, phrase: model.phrase, model: model.id)
+            },
             makeSource: { let source = FakeWakeSource(); sources.append(source); return source },
             isInstalled: { _, _ in true })
         let controller = makeController(wakeOn(), wake: listener)
@@ -390,6 +400,10 @@ final class WakeWordTests: XCTestCase {
         sources[0].send(Array(repeating: 0.01, count: 1600))
         await settle()
         XCTAssertTrue(dictation.starts.isEmpty, "quiet audio does not wake")
+        // One loud frame (the second chunk's first frame) is not a wake under the two-frame rule.
+        sources[0].send(Array(repeating: 0.9, count: 1600))
+        await settle()
+        XCTAssertTrue(dictation.starts.isEmpty, "a single loud frame does not wake")
         sources[0].send(Array(repeating: 0.9, count: 1600))
         await waitUntil { !self.dictation.starts.isEmpty }
         XCTAssertEqual(dictation.starts, [.caller], "an agent take")
@@ -398,17 +412,128 @@ final class WakeWordTests: XCTestCase {
         XCTAssertFalse(controller.state.wakeListening, "paused while the take records")
 
         controller.perform(.stop)
-        XCTAssertEqual(controller.state.lastTakeEnd?.trigger, .wake(score: 0.95, phrase: "Hey Jarvis"),
-                       "the detection's score and phrase reach the take")
+        XCTAssertEqual(controller.state.lastTakeEnd?.trigger,
+                       .wake(score: 0.95, phrase: "Hey Jarvis", frames: 2, peak: 0.95, confirmed: true, confirmMs: 0),
+                       "the detection's score, phrase and run reach the take")
+        XCTAssertEqual(confirmer.heard.map(\.count), [4800],
+                       "everything the listener heard since it was armed went to the speech model")
         dictation.finish("what time is it")
         await controller.pendingWork?.value
         await waitUntil { controller.state.wakeListening }
-        XCTAssertEqual(sources.count, 2)
-        XCTAssertTrue(sources[1].running, "listening again after the take")
+        XCTAssertEqual(sources.count, 1, "the same listener and microphone")
+        XCTAssertEqual(detectors, 1, "the model is loaded once")
+        XCTAssertTrue(sources[0].running, "listening again after the take")
         XCTAssertEqual(brain.submitted.map(\.text), ["what time is it"])
     }
 
-    func testTheLiveListenerRecoversFromASourceThatFailedToStart() async {
+    /// A wake that starts no take re-arms the listener running now, which drops what it hears for
+    /// the quiet period (VoiceKit's), so the rest of the sound that woke it cannot wake it again.
+    func testAWakeThatStartsNoTakeReArmsTheSameListenerWithAQuietPeriod() async throws {
+        jarvis = FakeModels.wake(installed: true)
+        var uptime: TimeInterval = 100
+        var sources: [FakeWakeSource] = []
+        var detectors = 0
+        let listener = WakeWordListener(
+            modelsRoot: directory,
+            makeDetector: { model, _ in
+                detectors += 1
+                return InProcessWakeDetector(engine: FakeWakeEngine(), phrase: model.phrase, model: model.id)
+            },
+            makeSource: { let source = FakeWakeSource(); sources.append(source); return source },
+            isInstalled: { _, _ in true }, now: { uptime })
+        var settings = wakeOn()
+        settings.brainEnabled = false
+        let controller = makeController(settings, wake: listener)
+        await waitUntil { controller.state.wakeListening }
+        let source = try XCTUnwrap(sources.first)
+        source.send(Array(repeating: 0.9, count: 3200))
+        await waitUntil { self.journal.records.count == 1 }
+        XCTAssertEqual(journal.records.last?.reason, VoiceHostController.brainOff)
+        await waitUntil { controller.state.wakeListening }
+
+        uptime += 0.9
+        source.send(Array(repeating: 0.9, count: 3200))
+        await settle()
+        XCTAssertEqual(journal.records.count, 1, "within the quiet period nothing is scored")
+        uptime += 0.2
+        source.send(Array(repeating: 0.9, count: 3200))
+        await waitUntil { self.journal.records.count == 2 }
+        XCTAssertEqual(detectors, 1)
+        XCTAssertEqual(sources.count, 1)
+        XCTAssertTrue(source.running, "the microphone stayed open throughout")
+        XCTAssertTrue(dictation.starts.isEmpty)
+    }
+
+    /// The listener is kept while paused for a take and started again with its model loaded; new
+    /// settings replace it and close the old one's microphone.
+    func testTheLiveListenerIsReplacedOnlyForNewSettings() async throws {
+        jarvis = FakeModels.wake(installed: true)
+        var sources: [FakeWakeSource] = []
+        var detectors = 0
+        let listener = WakeWordListener(
+            modelsRoot: directory,
+            makeDetector: { model, _ in
+                detectors += 1
+                return InProcessWakeDetector(engine: FakeWakeEngine(), phrase: model.phrase, model: model.id)
+            },
+            makeSource: { let source = FakeWakeSource(); sources.append(source); return source },
+            isInstalled: { _, _ in true })
+        let controller = makeController(wakeOn(), wake: listener)
+        await waitUntil { controller.state.wakeListening }
+        controller.perform(.orbClicked)
+        await waitUntil { sources.first?.running == false }
+        controller.perform(.cancel)
+        await waitUntil { controller.state.wakeListening && sources.first?.running == true }
+        XCTAssertEqual(detectors, 1)
+        XCTAssertEqual(sources.count, 1)
+
+        var settings = wakeOn()
+        settings.voice.wakeThreshold = 0.6
+        controller.apply(settings)
+        await waitUntil { sources.count == 2 && sources[1].running && controller.state.wakeListening }
+        XCTAssertEqual(detectors, 2)
+        await waitUntil { !sources[0].running }
+        XCTAssertFalse(sources[0].running, "the replaced listener's microphone is closed")
+    }
+
+    /// A detection on its way from a listener when new settings replace it reaches the host marked
+    /// as not from the listener running now. The chunk's scoring is queued before the replaced
+    /// listener's stop, so the detection is made before that listener knows it was stopped.
+    func testADetectionInFlightFromAReplacedListenerIsNotCurrent() async throws {
+        var detectors: [ScriptedWakeDetector] = []
+        var sources: [FakeWakeSource] = []
+        let listener = WakeWordListener(
+            modelsRoot: directory,
+            makeDetector: { _, _ in
+                let detector = ScriptedWakeDetector()
+                detectors.append(detector)
+                return detector
+            },
+            makeSource: { let source = FakeWakeSource(); sources.append(source); return source },
+            isInstalled: { _, _ in true })
+        var wakes: [(score: Double, current: Bool)] = []
+        listener.onWake = { wakes.append(($0.score, $1)) }
+        var settings = VoiceSettings()
+        settings.wakePhrase = "Hey Jarvis"
+        listener.start(settings)
+        await waitUntil { sources.first?.running == true }
+        detectors[0].next = WakeDetection(score: 0.9, phrase: "Hey Jarvis", frames: 2)
+        sources[0].send(Array(repeating: 0.5, count: 1600))
+        settings.wakeThreshold = 0.6
+        listener.start(settings)
+        await waitUntil { !wakes.isEmpty }
+        XCTAssertEqual(wakes.map(\.current), [false])
+        XCTAssertEqual(detectors.count, 2)
+
+        // The listener running now is current.
+        await waitUntil { sources.count == 2 && sources[1].running }
+        detectors[1].next = WakeDetection(score: 0.8, phrase: "Hey Jarvis", frames: 2)
+        sources[1].send(Array(repeating: 0.5, count: 1600))
+        await waitUntil { wakes.count == 2 }
+        XCTAssertEqual(wakes.last?.current, true)
+    }
+
+    func testTheLiveListenerRecoversFromASourceThatFailedToStart() async throws {
         jarvis = FakeModels.wake(installed: true)
         var sources: [FakeWakeSource] = []
         let listener = WakeWordListener(
@@ -416,7 +541,7 @@ final class WakeWordTests: XCTestCase {
             makeDetector: { model, _ in InProcessWakeDetector(engine: FakeWakeEngine(), phrase: model.phrase, model: model.id) },
             makeSource: {
                 let source = FakeWakeSource()
-                if sources.isEmpty { source.startError = MicrophoneWakeSource.StartFailed() }
+                source.startError = MicrophoneWakeSource.StartFailed()
                 sources.append(source)
                 return source
             },
@@ -424,10 +549,13 @@ final class WakeWordTests: XCTestCase {
         let controller = makeController(wakeOn(), wake: listener)
         await waitUntil { controller.state.wakeProblem != nil }
         XCTAssertEqual(controller.state.wakeProblem, MicrophoneWakeSource.StartFailed().errorDescription)
+        let source = try XCTUnwrap(sources.first)
+        // The microphone can start by the time the restart comes.
+        source.startError = nil
         clock.advance(to: 2)
         await waitUntil { controller.state.wakeListening }
-        XCTAssertEqual(sources.count, 2)
-        XCTAssertTrue(sources[1].running)
+        XCTAssertEqual(sources.count, 1, "the same listener starts again")
+        XCTAssertTrue(source.running)
         XCTAssertNil(controller.state.wakeProblem)
     }
 
@@ -497,6 +625,23 @@ private final class FakeWakeEngine: WakeScoringEngine, @unchecked Sendable {
     func score(_ frame: [Float]) async throws -> Float {
         frame.reduce(0) { $0 + abs($1) } / Float(frame.count) > 0.5 ? 0.95 : 0.02
     }
+}
+
+/// A detector that answers the next chunk with `next`, at once, and every other with nothing.
+@MainActor
+private final class ScriptedWakeDetector: WakeDetector {
+    var next: WakeDetection?
+
+    func arm(threshold: Double, frames: Int) async throws -> WakeDetectorInfo {
+        WakeDetectorInfo(phrase: "Hey Jarvis", model: "fake")
+    }
+
+    func detect(_ samples: [Float]) async throws -> WakeDetection? {
+        defer { next = nil }
+        return next
+    }
+
+    func disarm() async {}
 }
 
 /// The microphone, as the wake listener sees it.
