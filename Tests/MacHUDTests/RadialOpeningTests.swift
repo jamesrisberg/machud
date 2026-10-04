@@ -106,6 +106,44 @@ final class RadialOpeningTests: XCTestCase {
         XCTAssertNil(on(.zero, []))
     }
 
+    /// The park wedge's targets are read again as it becomes highlighted without waiting for the
+    /// answer: the hint keeps what it said until the answer comes, which is used only while the
+    /// park wedge is still highlighted in the same opening of the wheel.
+    func testTheParkWedgeRereadsItsTargetsWithoutWaiting() {
+        let menu = menu()
+        var asked: [(RadialMenu.Wedge.ParkTargets) -> Void] = []
+        menu.readParkTargets = { answer in asked.append(answer) }
+        let display = Self.displays[1]
+        var wedges = RadialLayoutTests.wedges(8, RadialLayoutTests.short)
+        wedges[6].kind = .park(.init(focused: "Safari · Docs"))
+        let at = CGPoint(x: display.frame.midX, y: display.frame.midY)
+        menu.prepare(wedges: wedges, at: at, on: display, movesPointer: true)
+        func hint() -> String { RadialMenu.hint(for: menu.selection, in: menu.wedges) }
+        XCTAssertTrue(asked.isEmpty)
+        menu.select(index: 6, ring: .inner)
+        XCTAssertEqual(asked.count, 1, "asked as it became highlighted")
+        XCTAssertEqual(hint(), "Park Safari · Docs", "unchanged until the answer")
+        menu.select(index: 6, ring: .middle)
+        XCTAssertEqual(asked.count, 1, "still highlighted: not asked again")
+        menu.select(index: 6, ring: .inner)
+        asked[0](.init(focused: "Notes · Groceries"))
+        XCTAssertEqual(hint(), "Park Notes · Groceries", "the answer, while the park wedge is highlighted")
+
+        menu.select(index: 0, ring: .inner)
+        menu.select(index: 6, ring: .inner)
+        XCTAssertEqual(asked.count, 2)
+        menu.select(index: 1, ring: .inner)
+        asked[1](.init(focused: "Terminal"))
+        menu.select(index: 6, ring: .inner)
+        XCTAssertEqual(asked.count, 3)
+        XCTAssertEqual(hint(), "Park Notes · Groceries", "an answer that came after the park wedge was left is not used")
+
+        menu.prepare(wedges: wedges, at: at, on: display, movesPointer: true)
+        menu.select(index: 6, ring: .inner)
+        asked[2](.init(focused: "Mail · Inbox"))
+        XCTAssertEqual(hint(), "Park Safari · Docs", "an answer from an earlier opening is not used")
+    }
+
     /// A wheel opened again with the same words in the same room reuses its layout; any other
     /// words (a widgets button that reads Lower now) or room lay it out anew.
     func testALayoutIsReusedOnlyForTheSameWordsAndRoom() {

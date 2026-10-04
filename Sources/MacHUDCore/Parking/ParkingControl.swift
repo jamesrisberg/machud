@@ -146,9 +146,22 @@ extension LoadoutEngine {
 
     /// "Safari · Page title", or nil when there is nothing Park could park.
     func focusedWindowLabel() -> String? {
-        guard let (app, window) = focusedWindow(), window.isPlaceable else { return nil }
+        guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != getpid() else { return nil }
+        return Self.focusedWindowLabel(pid: app.processIdentifier, appName: app.localizedName)
+    }
+
+    /// "Safari · Page title" for the focused window of the app with `pid` (called `appName`),
+    /// or nil when there is nothing Park could park. Accessibility calls only, each bounded by
+    /// `timeout` seconds (the app's and its window's), so it may run off the main thread.
+    nonisolated static func focusedWindowLabel(pid: pid_t, appName: String?, timeout: Float = 0.5) -> String? {
+        let element = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(element, timeout)
+        guard let focused = element.elementAttribute(kAXFocusedWindowAttribute) else { return nil }
+        AXUIElementSetMessagingTimeout(focused, timeout)
+        let window = AXWindow(element: focused, pid: pid)
+        guard window.isPlaceable else { return nil }
         let title = window.title
-        let name = app.localizedName ?? "window"
+        let name = appName ?? "window"
         return title.isEmpty ? name : "\(name) · \(title)"
     }
 

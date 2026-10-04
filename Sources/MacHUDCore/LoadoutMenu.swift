@@ -61,7 +61,7 @@ final class LoadoutMenu {
             return .init(focused: engine.focusedWindowLabel(), parked: engine.parking.parked.map(\.record.label))
         }
         radial.onCommit = { [weak self] outcome in self?.handle(outcome) }
-        radial.parkTargets = { [weak self] in self?.parkTargets() ?? .init() }
+        radial.readParkTargets = { [weak self] answer in self?.readParkTargets(answer) }
         radial.onDismiss = { [weak self] in
             guard let self, self.registrationDeferred else { return }
             self.registrationDeferred = false
@@ -78,9 +78,30 @@ final class LoadoutMenu {
     var widgetsState: (() -> RadialMenu.Wedge.WidgetsState?)?
     var onWidgets: ((_ edit: Bool, _ on: Bool) -> Void)?
 
-    /// What the park wedge acts on, read as the wheel opens and again as the park wedge becomes
-    /// highlighted: the focused window and the parked ones.
+    /// What the park wedge acts on, read as the wheel opens: the focused window and the parked
+    /// ones. As the park wedge becomes highlighted they are read again off the main thread
+    /// (`readParkTargets`).
     var parkTargets: () -> RadialMenu.Wedge.ParkTargets
+
+    /// Reads the park wedge's targets and calls back with them on the main thread. The parked
+    /// windows and the frontmost app are known here; the focused window's label takes
+    /// Accessibility calls, which a hung app answers only at its timeout, so it is read on a
+    /// queue of its own and the wheel's hint changes when it comes.
+    private func readParkTargets(_ answer: @escaping @MainActor (RadialMenu.Wedge.ParkTargets) -> Void) {
+        let parked = engine.parking.parked.map(\.record.label)
+        guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != getpid() else {
+            answer(.init(focused: nil, parked: parked))
+            return
+        }
+        let (pid, name) = (app.processIdentifier, app.localizedName)
+        Self.parkQueue.async {
+            let focused = LoadoutEngine.focusedWindowLabel(pid: pid, appName: name)
+            DispatchQueue.main.async { MainActor.assumeIsolated { answer(.init(focused: focused, parked: parked)) } }
+        }
+    }
+
+    /// Where the park wedge's targets are read again while the wheel is open.
+    private static let parkQueue = DispatchQueue(label: "machud.wheel.park", qos: .userInitiated)
 
     func wedges() -> [RadialMenu.Wedge] {
         func symbol(_ name: String) -> [NSImage] {

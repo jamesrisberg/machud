@@ -248,18 +248,20 @@ final class RadialMenu {
         }
     }
 
-    /// `wedges` with the park wedge's targets read again by `parkTargets`, when wedge `index`
-    /// has just become highlighted (it was `previous`) and is the park wedge; nil when nothing
-    /// changes. The wheel is click-through, so a click under it can change the focused window
-    /// while it is open: this keeps the hint naming the window a release would park.
-    static func refreshed(_ wedges: [Wedge], highlighting index: Int, from previous: Int?,
-                          parkTargets: (() -> Wedge.ParkTargets)?) -> [Wedge]? {
-        guard index != previous, wedges.indices.contains(index), case .park(let old) = wedges[index].kind,
-              let parkTargets else { return nil }
-        let now = parkTargets()
-        guard now != old else { return nil }
+    /// Whether the park wedge's targets are asked for again: wedge `index` has just become
+    /// highlighted (it was `previous`) and is the park wedge. The wheel is click-through, so a
+    /// click under it can change the focused window while it is open; asking again keeps the
+    /// hint naming the window a release would park.
+    nonisolated static func asksForParkTargets(highlighting index: Int, from previous: Int?, in wedges: [Wedge]) -> Bool {
+        guard index != previous, wedges.indices.contains(index), case .park = wedges[index].kind else { return false }
+        return true
+    }
+
+    /// `wedges` with the park wedge at `index` given `targets`; nil when that changes nothing.
+    nonisolated static func refreshed(_ wedges: [Wedge], park index: Int, with targets: Wedge.ParkTargets) -> [Wedge]? {
+        guard wedges.indices.contains(index), case .park(let old) = wedges[index].kind, old != targets else { return nil }
         var out = wedges
-        out[index].kind = .park(now)
+        out[index].kind = .park(targets)
         return out
     }
 
@@ -269,8 +271,14 @@ final class RadialMenu {
     var shiftSelectsOuter = true
     /// Called whenever a visible wheel goes away, however it was dismissed.
     var onDismiss: (() -> Void)?
-    /// Reads the park wedge's targets now (`refreshed`).
-    var parkTargets: (() -> Wedge.ParkTargets)?
+    /// Reads the park wedge's targets and calls back with them on the main thread
+    /// (`asksForParkTargets`). It must not wait for the answer on the main thread: the
+    /// Accessibility calls behind it can take a hung app's timeout.
+    var readParkTargets: ((@escaping @MainActor (Wedge.ParkTargets) -> Void) -> Void)?
+    /// Counts the wheel's openings: an answer about the park wedge from an earlier one is not used.
+    private var opening = 0
+    /// A read of the park wedge's targets has been asked for and not answered.
+    private var parkTargetsAsked = false
 
     private(set) var wedges: [Wedge] = []
     private(set) var layout = RadialLayout(wedges: [])
@@ -395,6 +403,8 @@ final class RadialMenu {
         pointerOffset = .zero
         pointerHasMoved = false
         firstReport = nil
+        opening += 1
+        parkTargetsAsked = false
         keyboardIndex = nil
         selection = .cancel
         wheel.selection = .cancel
@@ -562,12 +572,20 @@ final class RadialMenu {
         wheel.selection = selection
     }
 
-    /// The park wedge reads its targets again as it becomes highlighted (`refreshed`).
+    /// The park wedge asks for its targets again as it becomes highlighted (`asksForParkTargets`).
     private func noteHighlight(from previous: Int?) {
-        guard let i = selection.index,
-              let fresh = Self.refreshed(wedges, highlighting: i, from: previous, parkTargets: parkTargets) else { return }
-        wedges = fresh
-        wheel.update(wedges: fresh)
+        guard let i = selection.index, Self.asksForParkTargets(highlighting: i, from: previous, in: wedges),
+              let read = readParkTargets, !parkTargetsAsked else { return }
+        parkTargetsAsked = true
+        let asked = opening
+        read { [weak self] targets in
+            guard let self, self.opening == asked else { return }
+            self.parkTargetsAsked = false
+            // Only while the park wedge is still highlighted: its hint is the one that shows.
+            guard self.selection.index == i, let fresh = Self.refreshed(self.wedges, park: i, with: targets) else { return }
+            self.wedges = fresh
+            self.wheel.update(wedges: fresh)
+        }
     }
 
     /// A mouse-moved or dragged event: the pointer is at `location` (screen coordinates),
