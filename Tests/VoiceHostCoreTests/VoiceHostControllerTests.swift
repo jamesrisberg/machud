@@ -1160,9 +1160,10 @@ final class VoiceHostControllerTests: XCTestCase {
         controller.perform(.setMuted(false))
         assertTheWakeWordIsNotDeaf(controller)
         wake.detect(score: 0.9)
-        XCTAssertEqual(confirmer.heard.count, 2, "the second wake goes to the speech model too")
+        XCTAssertEqual(confirmer.heard.count, 1, "the first is still being transcribed")
         confirmer.answer("hey jarvis")
         XCTAssertTrue(dictation.starts.isEmpty, "the first answer finds its wake decided")
+        XCTAssertEqual(confirmer.heard.count, 2, "then the second wake goes to the speech model")
         confirmer.answer("hey jarvis")
         XCTAssertEqual(dictation.starts, [.caller])
         XCTAssertEqual(journal.records.map(\.reason), [VoiceHostController.voiceMuted])
@@ -1247,11 +1248,13 @@ final class VoiceHostControllerTests: XCTestCase {
             wake.detect()
             assertTheWakeWordIsNotDeaf(controller)
         }
-        // No answer in time.
+        // No answer in time (it comes later).
         confirmer.immediate = nil
         clock.now = 100
         wake.detect()
         clock.advance(to: 100 + VoiceHostController.wakeConfirmTimeout)
+        assertTheWakeWordIsNotDeaf(controller)
+        confirmer.answer("hey jarvis")
         assertTheWakeWordIsNotDeaf(controller)
         // Confirmed and refused: the agent is still working.
         confirmer.immediate = .success("hey jarvis")
@@ -1338,6 +1341,30 @@ final class VoiceHostControllerTests: XCTestCase {
         dictation.finish("a note", take: transcribed, at: .cursor)
         XCTAssertTrue(confirmer.heard.isEmpty)
         XCTAssertEqual(controller.state.phase, .listening(.agent))
+    }
+
+    /// A confirmation the time limit gave up on is still running on the speech model: the next wake
+    /// waits for it to answer, as for a take's transcription, then is sent.
+    func testAWakeWaitsForAnEarlierConfirmationStillRunning() {
+        var settings = VoiceHostSettings()
+        settings.voice.wakeWordEnabled = true
+        let controller = makeController(settings)
+        confirmer.immediate = nil
+        clock.now = 10
+        wake.detect(score: 0.8)
+        clock.advance(to: 11.5)
+        XCTAssertEqual(journal.records.last?.reason, VoiceHostController.wakeConfirmSlow)
+        clock.now = 12.6
+        wake.detect(score: 0.9, audio: [0.2])
+        XCTAssertEqual(confirmer.heard.count, 1, "not while the first is still being transcribed")
+        clock.now = 12.8
+        confirmer.answer("too late")
+        XCTAssertEqual(confirmer.heard, [[], [0.2]], "sent once the first answered")
+        confirmer.answer("hey jarvis")
+        XCTAssertEqual(dictation.starts, [.caller])
+        controller.perform(.stop)
+        XCTAssertEqual(controller.state.lastTakeEnd?.trigger,
+                       .wake(score: 0.9, phrase: "Hey Jarvis", frames: 2, peak: 0.9, confirmed: true, confirmMs: 200))
     }
 
     func testAWakeBeingConfirmedWhenTheHostQuitsIsJournaled() {

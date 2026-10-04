@@ -904,7 +904,8 @@ the listener heard (up to the last 2.5 s) and the phrase's words are in it, in o
 words (case and punctuation ignored: "Hey, Jarvis." is the phrase, "Hey Javier", "Jarvis" or
 "Hey Javis" is not). Meanwhile nothing shows, a reply being spoken goes on and the listener is
 quiet; this takes about 130 ms. The speech model transcribes one thing at a time, so a wake that
-comes while a take is still being transcribed waits for that first, within the same time limit. Confirmed, the take starts as any wake's does, stopping a reply
+comes while a take is still being transcribed, or while an earlier wake's check is still running
+(one the time limit gave up on), waits for that first, within the same time limit. Confirmed, the take starts as any wake's does, stopping a reply
 being spoken. Not confirmed, nothing shows or stops and nothing is said: the wake writes its
 journal line and its log line (`The wake phrase was not confirmed`, never the words) and the
 listener listens again with its quiet period. A wake that cannot be confirmed counts as not

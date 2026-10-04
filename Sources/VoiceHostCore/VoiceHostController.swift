@@ -268,9 +268,12 @@ public final class VoiceHostController: VoiceHostActing {
     private var wakeConfirmation: WakeConfirmation? {
         didSet { if wakeConfirmation == nil { wakeAudioWaiting = nil } }
     }
-    /// The audio of the wake being confirmed while it waits for a take's transcription to end;
-    /// let go once it goes to the speech model or the wake is decided.
+    /// The audio of the wake being confirmed while it waits for the speech model to be free; let
+    /// go once it goes to the model or the wake is decided.
     private var wakeAudioWaiting: [Float]?
+    /// Wake confirmations the speech model is still working on, answered or not: one given up on
+    /// at the time limit keeps the model busy until it answers.
+    private var wakeTranscriptionsRunning = 0
     /// Why the latest wake's phrase could not be confirmed; `wakeProblem` while nothing else is,
     /// until a wake's words are had, confirmation is turned off or the voice settings change.
     private var wakeConfirmProblem: String?
@@ -669,36 +672,45 @@ public final class VoiceHostController: VoiceHostActing {
     /// stays quiet meanwhile. The audio goes to `wakeConfirmer` and nowhere else.
     ///
     /// The speech model transcribes one thing at a time, as SpeakFree uses it (its engine is not
-    /// made to run two at once): while a take is being transcribed the wake waits for it, within
-    /// the same time limit (`confirmWaitingWake`).
+    /// made to run two at once): while a take is being transcribed, or an earlier wake's
+    /// confirmation still runs, the wake waits for it, within the same time limit
+    /// (`confirmWaitingWake`).
     private func confirmWake(_ detection: WakeDetection, trigger: VoiceTakeTrigger) {
         let pending = WakeConfirmation(trigger: trigger, phrase: detection.phrase, startedAt: now(), run: wakeRun)
         wakeConfirmation = pending
         schedule(Self.wakeConfirmTimeout) { [weak self] in
             guard let self else { return }
-            wakeChecked(pending.id, .cannot(wakeAudioWaiting == nil ? Self.wakeConfirmSlow : Self.wakeConfirmBusy))
+            let takeInTheWay = wakeAudioWaiting != nil && !transcribing.isEmpty
+            wakeChecked(pending.id, .cannot(takeInTheWay ? Self.wakeConfirmBusy : Self.wakeConfirmSlow))
         }
-        guard transcribing.isEmpty else {
+        guard speechModelFree else {
             wakeAudioWaiting = detection.audio
             return
         }
         transcribeWake(detection.audio, pending)
     }
 
-    /// The take that was being transcribed is done: the wake waiting for it goes to the speech model.
+    /// No take is being transcribed and no wake confirmation is running.
+    private var speechModelFree: Bool { transcribing.isEmpty && wakeTranscriptionsRunning == 0 }
+
+    /// What was transcribing is done: the wake waiting for it goes to the speech model.
     private func confirmWaitingWake() {
-        guard transcribing.isEmpty, let audio = wakeAudioWaiting, let pending = wakeConfirmation else { return }
+        guard speechModelFree, let audio = wakeAudioWaiting, let pending = wakeConfirmation else { return }
         wakeAudioWaiting = nil
         transcribeWake(audio, pending)
     }
 
     private func transcribeWake(_ audio: [Float], _ pending: WakeConfirmation) {
         guard let wakeConfirmer else { return wakeChecked(pending.id, .cannot(Self.wakeConfirmUnavailable)) }
+        wakeTranscriptionsRunning += 1
         wakeConfirmer.transcribe(audio) { [weak self] result in
+            guard let self else { return }
+            wakeTranscriptionsRunning -= 1
             switch result {
-            case .success(let words): self?.wakeChecked(pending.id, .heard(words))
-            case .failure(let failure): self?.wakeChecked(pending.id, .cannot(Self.message(for: failure)))
+            case .success(let words): wakeChecked(pending.id, .heard(words))
+            case .failure(let failure): wakeChecked(pending.id, .cannot(Self.message(for: failure)))
             }
+            confirmWaitingWake()
         }
     }
 
