@@ -759,9 +759,10 @@ model's Download button and progress, dictation history (Off, Text only, Text an
 history with SpeakFree while SpeakFree is installed; where it is kept), the text feed toggles,
 Hands-free (End of turn: Automatically / When I tap; Pause before sending, 1–4 s; Microphone
 sensitivity, low/medium/high; the last two disabled while ending on a tap),
-wake word on/off with why it is not listening (`wakeProblem`), the phrase (only phrases there is
-a model for, each marked when its model is not installed), that model's Download button,
-progress and terms, and sensitivity, reply voice, spoken replies, spoken replies to typed messages, Test Voice (`action say`), the Kokoro voice's
+wake word on/off with why it is not listening or could not confirm a wake (`wakeProblem`), the
+phrase (only phrases there is a model for, each marked when its model is not installed), that
+model's Download button, progress and terms, sensitivity, and Confirm the wake phrase before
+listening (`voice.wakeConfirm`), reply voice, spoken replies, spoken replies to typed messages, Test Voice (`action say`), the Kokoro voice's
 Download button and progress (`models`), Grok key) and Brain tab (why the brain cannot take a
 found; the workspace folder, chosen with a folder picker, the home folder while none is chosen;
 assistant name, port, per-runtime paths; while the companion still runs another runtime than the
@@ -897,7 +898,21 @@ or the fn key, or `action stop`, sends it. Either way a take stops after 120 s.
 The wake word (`voice.wakeWordEnabled`) listens for `voice.wakePhrase` with that phrase's model.
 It wakes once `voice.wakeFrames` consecutive 80 ms frames (1 to 4, default 2) score at or above
 `voice.wakeThreshold` (0.05 to 0.95, default 0.5; higher wakes less often), so a sound that
-reaches the threshold for a single frame does not wake it.
+reaches the threshold for a single frame does not wake it. With `voice.wakeConfirm` (default
+true) a wake starts nothing until the dictation's speech model, on this Mac, has transcribed what
+the listener heard (up to the last 2.5 s) and the phrase's words are in it, in order, as whole
+words (case and punctuation ignored: "Hey, Jarvis." is the phrase, "Hey Javier", "Jarvis" or
+"Hey Javis" is not). Meanwhile nothing shows, a reply being spoken goes on and the listener is
+quiet; this takes about 130 ms. Confirmed, the take starts as any wake's does, stopping a reply
+being spoken. Not confirmed, nothing shows or stops and nothing is said: the wake writes its
+journal line and its log line (`The wake phrase was not confirmed`, never the words) and the
+listener listens again with its quiet period. A wake that cannot be confirmed counts as not
+confirmed and says why in its journal line and in `wakeProblem`: no speech model (`Download the
+speech model to confirm the wake phrase.`), one still loading after launch (it is loaded for the
+next wake), a transcription that failed, or no answer within 1.5 s. The audio is used for this
+and let go: it is never kept, written, logged or sent, and neither are the words. With
+`voice.wakeConfirm` false the detection alone starts the take. `voice.wakeConfirm` is the voice
+host's own key, kept inside `voice` beside VoiceKit's.
 
 `lastTakeEnd` says how the latest hands-free take ended and what started it: `{reason, seconds,
 quietMs?, floor?, threshold?, pause?, grace, trigger}`. `reason` is `pause`, `maximum`,
@@ -907,9 +922,12 @@ last speech; `floor` and `threshold` the levels at the end; `pause` the quiet th
 (absent with `manual`) and `grace` whether it included the 1.5 s.
 
 `trigger` is what started a take: `{"source": "wake", "score": 0.973, "phrase": "Hey Jarvis",
-"frames": 2, "peak": 0.991}` (the wake word: the score of the frame that completed the detection,
-0 to 1, the phrase, and the run it completed, `frames` in a row with `peak` the highest score
-among them; a line journaled before the run was recorded has neither), `{"source": "orb"}` (a click
+"frames": 2, "peak": 0.991, "confirmed": true, "confirmMs": 142}` (the wake word: the score of the
+frame that completed the detection, 0 to 1, the phrase, and the run it completed, `frames` in a
+row with `peak` the highest score among them, absent from a line journaled before the run was
+recorded; `confirmed`, whether the speech model heard the phrase, false also when it could not
+tell, and `confirmMs`, how long it took to answer, both absent when no answer was had:
+`voice.wakeConfirm` off, or the wake refused before one), `{"source": "orb"}` (a click
 on the orb, or the orb pressed through accessibility), `{"source": "socket", "action": "ask"}`
 (`action name=ask`, `click` or `dictate`) or `{"source": "key", "gesture": "primary"|"alternate",
 "retargeted": false}` (the fn key: the gesture that began the take, and whether a later gesture
@@ -938,12 +956,15 @@ muted (the socket's `ask` and `dictate`), the brain off or unable to take a turn
 working, a take already recording, or the dictation refusing to start. So is each wake detection
 that starts no take, with its score. A detection that arrives when no listener is wanted (voice
 off, muted, the wake word off, a take recording), that was on its way from a listener stopped or
-replaced since (`From a wake listener stopped or replaced since`) or that is not of the phrase
-listened for (`Not the wake phrase listened for`) is refused before anything else: it writes its
-line and its log line and changes nothing, not the reply being spoken, the orb or the listener.
-A detection the listener running now makes is refused as any other take start is: the brain off
-or unable to take a turn, or the agent still working (`The agent is still working`), which stops
-a reply being spoken and shows on the orb.
+replaced since (`From a wake listener stopped or replaced since`), that is not of the phrase
+listened for (`Not the wake phrase listened for`) or that comes while another is being confirmed
+(`Another wake is being confirmed`) is refused before anything else: it writes its line and its
+log line and changes nothing, not the reply being spoken, the orb or the listener. So is a wake
+whose phrase is not confirmed (above), and one whose listener was stopped or replaced while it
+was being confirmed (a take started meanwhile, a mute, new settings). A confirmed wake from the
+listener running now is refused as any other take start is: the brain off or unable to take a
+turn, or the agent still working (`The agent is still working`), which stops a reply being
+spoken and shows on the orb.
 
 The voice host logs each take's start, end and outcome (counts, never words), and the wake
 listener's start, stop and failures, to the unified log at notice level with every value public:
@@ -972,7 +993,10 @@ for 60 s before failing again. A phrase without a model or a model that will not
 retried on a timer: it waits until the model changes (is downloaded or installed) or the voice
 settings change. `wakeProblem` gives the reason it stopped until it listens again, also through a
 take (during it and after, while the listener starts again) and after a mute (absent while muted,
-back from the unmute); new voice settings start the listener afresh and clear it.
+back from the unmute); new voice settings start the listener afresh and clear it. While the
+listener listens, `wakeProblem` is why the latest wake could not be confirmed (above), until a
+wake's words are had again, `voice.wakeConfirm` is turned off or the voice settings change; it
+is not shown under the orb, since the wake may have been anyone talking.
 `brainAvailable` is true
 when the brain can take a turn; otherwise `brainProblem` says why, in words for the user: voice
 or the brain is off, the brain companion's own reason (`Choose a workspace folder for the

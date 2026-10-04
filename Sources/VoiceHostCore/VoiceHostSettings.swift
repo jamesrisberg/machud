@@ -30,6 +30,10 @@ public struct VoiceHostSettings: Codable, Equatable, Sendable {
     /// approval policy either way.
     public var machudToolsRequireApproval: Bool
     public var voice: VoiceSettings
+    /// A wake starts a take only once the speech model has heard the wake phrase in what woke the
+    /// listener; off, the wake word's detection alone starts it. Stored inside `voice` as
+    /// `voice.wakeConfirm`, beside VoiceKit's own keys.
+    public var wakeConfirm: Bool
     /// Keep dictation history; nil (absent from `voice.json`) follows the default rule
     /// (`DictationHistoryLocator.plan(for:)`).
     public var history: DictationHistorySettings?
@@ -48,7 +52,7 @@ public struct VoiceHostSettings: Codable, Equatable, Sendable {
                 brainEnabled: Bool = true, brainPort: Int = 8791,
                 brain: BrainSettings = BrainSettings(), machudTools: Bool = true,
                 machudToolsRequireApproval: Bool = false, voice: VoiceSettings = VoiceSettings(),
-                history: DictationHistorySettings? = nil, feedTranscripts: Bool = true,
+                wakeConfirm: Bool = true, history: DictationHistorySettings? = nil, feedTranscripts: Bool = true,
                 feedAgentReplies: Bool = false, speakTypedReplies: Bool = false,
                 handsFree: HandsFreeSettings = HandsFreeSettings()) {
         self.enabled = enabled
@@ -60,6 +64,7 @@ public struct VoiceHostSettings: Codable, Equatable, Sendable {
         self.machudTools = machudTools
         self.machudToolsRequireApproval = machudToolsRequireApproval
         self.voice = voice
+        self.wakeConfirm = wakeConfirm
         self.history = history
         self.feedTranscripts = feedTranscripts
         self.feedAgentReplies = feedAgentReplies
@@ -77,6 +82,11 @@ public struct VoiceHostSettings: Codable, Equatable, Sendable {
         case machudTools, machudToolsRequireApproval
     }
 
+    /// The keys this host adds to the `voice` object.
+    private enum VoiceKeys: String, CodingKey {
+        case wakeConfirm
+    }
+
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = VoiceHostSettings()
@@ -92,6 +102,8 @@ public struct VoiceHostSettings: Codable, Equatable, Sendable {
         machudToolsRequireApproval = (try? tools?.decode(Bool.self, forKey: .machudToolsRequireApproval))
             ?? d.machudToolsRequireApproval
         voice = (try? c.decode(VoiceSettings.self, forKey: .voice)) ?? d.voice
+        let voiceKeys = try? c.nestedContainer(keyedBy: VoiceKeys.self, forKey: .voice)
+        wakeConfirm = (try? voiceKeys?.decode(Bool.self, forKey: .wakeConfirm)) ?? d.wakeConfirm
         history = try? c.decodeIfPresent(DictationHistorySettings.self, forKey: .history)
         feedTranscripts = (try? c.decode(Bool.self, forKey: .feedTranscripts)) ?? d.feedTranscripts
         feedAgentReplies = (try? c.decode(Bool.self, forKey: .feedAgentReplies)) ?? d.feedAgentReplies
@@ -112,7 +124,11 @@ public struct VoiceHostSettings: Codable, Equatable, Sendable {
         var tools = brainEncoder.container(keyedBy: BrainToolKeys.self)
         try tools.encode(machudTools, forKey: .machudTools)
         try tools.encode(machudToolsRequireApproval, forKey: .machudToolsRequireApproval)
-        try c.encode(voice, forKey: .voice)
+        // One `voice` object: VoiceKit's settings, then this host's keys in the same container.
+        let voiceEncoder = c.superEncoder(forKey: .voice)
+        try voice.encode(to: voiceEncoder)
+        var voiceKeys = voiceEncoder.container(keyedBy: VoiceKeys.self)
+        try voiceKeys.encode(wakeConfirm, forKey: .wakeConfirm)
         try c.encodeIfPresent(history, forKey: .history)
         try c.encode(feedTranscripts, forKey: .feedTranscripts)
         try c.encode(feedAgentReplies, forKey: .feedAgentReplies)

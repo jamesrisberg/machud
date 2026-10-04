@@ -15,6 +15,7 @@ final class WakeWordTests: XCTestCase {
     private var jarvis: FakeModels!
     private var clock: ManualClock!
     private var journal: FakeTakeJournal!
+    private var confirmer: FakeWakeConfirmer!
     /// The take and wake-listener lines the controller logged.
     private var logged: [String] = []
 
@@ -26,6 +27,7 @@ final class WakeWordTests: XCTestCase {
         jarvis = FakeModels.wake(installed: false)
         clock = ManualClock()
         journal = FakeTakeJournal()
+        confirmer = FakeWakeConfirmer()
         logged = []
     }
 
@@ -40,7 +42,7 @@ final class WakeWordTests: XCTestCase {
         let clock = self.clock!
         let controller = VoiceHostController(
             settings: settings, dictation: dictation, keys: nil, brain: brain, speaker: nil,
-            wake: wake ?? self.wake, wakeModels: wakeModels, brainStateRoot: directory,
+            wake: wake ?? self.wake, wakeModels: wakeModels, wakeConfirmer: confirmer, brainStateRoot: directory,
             detectRuntimes: FakeRuntimes.detect(), now: { clock.now }, schedule: { clock.schedule($0, $1) },
             takeJournal: journal)
         controller.log = { [weak self] in self?.logged.append($0) }
@@ -410,8 +412,11 @@ final class WakeWordTests: XCTestCase {
         XCTAssertFalse(controller.state.wakeListening, "paused while the take records")
 
         controller.perform(.stop)
-        XCTAssertEqual(controller.state.lastTakeEnd?.trigger, .wake(score: 0.95, phrase: "Hey Jarvis", frames: 2, peak: 0.95),
+        XCTAssertEqual(controller.state.lastTakeEnd?.trigger,
+                       .wake(score: 0.95, phrase: "Hey Jarvis", frames: 2, peak: 0.95, confirmed: true, confirmMs: 0),
                        "the detection's score, phrase and run reach the take")
+        XCTAssertEqual(confirmer.heard.map(\.count), [4800],
+                       "everything the listener heard since it was armed went to the speech model")
         dictation.finish("what time is it")
         await controller.pendingWork?.value
         await waitUntil { controller.state.wakeListening }

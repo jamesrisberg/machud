@@ -46,6 +46,26 @@ final class VoiceHostSettingsTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(VoiceHostSettings.self, from: JSONEncoder().encode(settings)), settings)
     }
 
+    /// A wake starts a take only once its phrase is confirmed, unless `voice.wakeConfirm` is off;
+    /// the setting lives inside `voice`, beside VoiceKit's own keys.
+    func testTheWakePhraseIsConfirmedByDefaultAndTheSettingIsStoredInsideVoice() throws {
+        XCTAssertTrue(try JSONDecoder().decode(VoiceHostSettings.self, from: Data("{}".utf8)).wakeConfirm)
+        XCTAssertTrue(VoiceHostSettings().wakeConfirm)
+        let json = #"{"voice":{"wakeConfirm":false,"wakeThreshold":0.6,"wakeFrames":3}}"#
+        let settings = try JSONDecoder().decode(VoiceHostSettings.self, from: Data(json.utf8))
+        XCTAssertFalse(settings.wakeConfirm)
+        XCTAssertEqual(settings.voice.wakeThreshold, 0.6)
+        XCTAssertEqual(settings.voice.wakeFrames, 3)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as? [String: Any])
+        let voice = try XCTUnwrap(object["voice"] as? [String: Any])
+        XCTAssertEqual(voice["wakeConfirm"] as? Bool, false)
+        XCTAssertEqual(voice["wakeThreshold"] as? Double, 0.6)
+        XCTAssertNil(object["wakeConfirm"])
+        XCTAssertEqual(try JSONDecoder().decode(VoiceHostSettings.self, from: JSONEncoder().encode(settings)), settings)
+        XCTAssertTrue(try JSONDecoder().decode(VoiceHostSettings.self, from: Data(#"{"voice":{"wakeConfirm":"no"}}"#.utf8))
+            .wakeConfirm, "an invalid value takes the default")
+    }
+
     func testHandsFreeDefaults() throws {
         let settings = try JSONDecoder().decode(VoiceHostSettings.self, from: Data("{}".utf8))
         XCTAssertEqual(settings.handsFree, HandsFreeSettings(endOfTurn: .auto, pause: 2, sensitivity: .medium))
@@ -119,6 +139,25 @@ final class VoiceHostSettingsTests: XCTestCase {
         XCTAssertEqual(older.summary, #"wake word "Hey Jarvis" (score 0.973)"#)
         XCTAssertEqual(VoiceTakeTrigger.wake(score: 0.973, phrase: "Hey Jarvis", frames: 2, peak: 0.991).summary,
                        #"wake word "Hey Jarvis" (score 0.973, 2 frames, peak 0.991)"#)
+    }
+
+    func testAWakeTriggerSaysWhetherItsPhraseWasConfirmed() throws {
+        let confirmed = VoiceTakeTrigger.wake(score: 0.973, phrase: "Hey Jarvis", frames: 2, peak: 0.991, confirmed: true,
+                                              confirmMs: 142)
+        XCTAssertEqual(try JSONSerialization.jsonObject(with: JSONEncoder().encode(confirmed)) as? NSDictionary,
+                       ["source": "wake", "score": 0.973, "phrase": "Hey Jarvis", "frames": 2, "peak": 0.991,
+                        "confirmed": true, "confirmMs": 142])
+        XCTAssertEqual(confirmed.summary, #"wake word "Hey Jarvis" (score 0.973, 2 frames, peak 0.991, confirmed in 142 ms)"#)
+        let refused = VoiceTakeTrigger.wake(score: 0.61, phrase: "Hey Jarvis", frames: 2, peak: 0.7, confirmed: false,
+                                            confirmMs: 1500)
+        XCTAssertEqual(refused.summary, #"wake word "Hey Jarvis" (score 0.610, 2 frames, peak 0.700, not confirmed in 1500 ms)"#)
+        for trigger in [confirmed, refused] {
+            XCTAssertEqual(try JSONDecoder().decode(VoiceTakeTrigger.self, from: JSONEncoder().encode(trigger)), trigger)
+        }
+        let off = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(
+            VoiceTakeTrigger.wake(score: 0.9, phrase: "Hey Jarvis", frames: 2, peak: 0.9))) as? [String: Any])
+        XCTAssertNil(off["confirmed"], "absent when confirmation is off")
+        XCTAssertNil(off["confirmMs"])
     }
 
     func testATriggerFromANewerBuildIsKeptAsItWas() throws {

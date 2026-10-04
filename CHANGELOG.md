@@ -22,6 +22,13 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   each, how long it recorded and what became of it (sent to the agent, typed at the cursor,
   thrown away, refused, cancelled or failed), counting characters and never keeping your words.
   A wake word heard while it could not start a take is listed too, with its score.
+- The agent no longer starts listening when something in the room only sounds like the wake word.
+  Once the wake word fires, the speech model checks on your Mac that “Hey Jarvis” was really said
+  (about a tenth of a second) before the orb listens or a reply being spoken stops. When it was
+  not, nothing appears, nothing is sent or said, and only a line in `machud voice takes` records
+  it, never the words. If the phrase cannot be checked (no speech model, or it is still loading
+  just after launch), the Voice settings say why under the wake word. **Confirm the wake phrase
+  before listening** in the Voice settings (`voice.wakeConfirm`) turns this off.
 - Spoken messages in the conversation carry the time you said them and what started the take.
 - The voice host's account of each take and of the wake word's listening is in the system log
   (`log show --predicate 'subsystem == "com.jrisberg.machud.voice"'`), readable rather than

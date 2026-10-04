@@ -17,6 +17,8 @@ final class VoiceHostControllerTests: XCTestCase {
     private var clock: ManualClock!
     private var sessions: FakeSessions!
     private var journal: FakeTakeJournal!
+    /// Confirms every wake's phrase at once unless a test holds its answer.
+    private var confirmer: FakeWakeConfirmer!
     /// The take and wake-listener lines the controller logged.
     private var logged: [String] = []
     private var missingRuntimes: Set<String> = []
@@ -35,6 +37,7 @@ final class VoiceHostControllerTests: XCTestCase {
         clock = ManualClock()
         sessions = FakeSessions()
         journal = FakeTakeJournal()
+        confirmer = FakeWakeConfirmer()
         logged = []
         missingRuntimes = []
     }
@@ -46,7 +49,8 @@ final class VoiceHostControllerTests: XCTestCase {
         let controller = VoiceHostController(
             settings: settings, dictation: dictation, keys: keys,
             brain: brain ?? self.brain, speaker: speaker, wake: wake,
-            wakeModels: [WakePhraseModel(model: WakeModels.heyJarvis, store: wakeStore)], brainStateRoot: brainRoot,
+            wakeModels: [WakePhraseModel(model: WakeModels.heyJarvis, store: wakeStore)], wakeConfirmer: confirmer,
+            brainStateRoot: brainRoot,
             sessions: sessions, detectRuntimes: FakeRuntimes.detect(missing: missingRuntimes),
             sessionKeyOf: { _ in fakeBrain.sessionKey },
             now: { clock.now }, wallClock: { [launchDate] in launchDate.addingTimeInterval(clock.now) },
@@ -718,20 +722,25 @@ final class VoiceHostControllerTests: XCTestCase {
         XCTAssertEqual(controller.state.card?.reply, "done")
     }
 
-    func testWakeWhileATurnRunsIsRefused() async {
+    func testWakeWhileATurnRunsIsRefusedOnceConfirmed() async {
         var settings = VoiceHostSettings()
         settings.voice.wakeWordEnabled = true
         let controller = makeController(settings)
         await startTurn(controller)
         let starts = dictation.starts.count
+        confirmer.immediate = nil
         wake.detect(score: 0.61)
+        XCTAssertEqual(controller.state.phase, .working, "nothing shows before it is confirmed")
+        confirmer.answer("Hey Jarvis, stop.")
         XCTAssertEqual(dictation.starts.count, starts)
         XCTAssertEqual(controller.state.phase, .failed(VoiceHostController.agentBusy))
         let refused = try? XCTUnwrap(journal.records.last)
         XCTAssertEqual(refused?.outcome, .refused)
         XCTAssertEqual(refused?.reason, VoiceHostController.agentBusy)
-        XCTAssertEqual(refused?.trigger, .wake(score: 0.61, phrase: "Hey Jarvis", frames: 2, peak: 0.61))
+        XCTAssertEqual(refused?.trigger, .wake(score: 0.61, phrase: "Hey Jarvis", frames: 2, peak: 0.61, confirmed: true,
+                                               confirmMs: 0))
         XCTAssertNil(refused?.seconds, "it never recorded")
+        XCTAssertEqual(wake.rearms, [VoiceHostController.wakeQuietPeriod])
     }
 
     func testFnAlternateWhileATurnRunsPastesInstead() async {
@@ -964,19 +973,204 @@ final class VoiceHostControllerTests: XCTestCase {
 
     // MARK: Wake word
 
-    func testWakeStartsAnAgentTakeAndPausesWhileRecording() async {
+    /// Nothing happens on a detection until the speech model has heard the phrase in what woke the
+    /// listener: no take, no orb, the reply still spoken. Then the take starts as a wake's always
+    /// did, stopping the reply.
+    func testAWakeStartsATakeOnlyOnceItsPhraseIsConfirmed() async {
+        var settings = speakingSettings()
+        settings.voice.wakeWordEnabled = true
+        let controller = makeController(settings)
+        await startTurn(controller)
+        brain.push(status: "idle", output: "A long answer.")
+        XCTAssertEqual(controller.state.phase, .speaking)
+        XCTAssertTrue(controller.state.wakeListening)
+        confirmer.immediate = nil
+        let before = controller.state
+        let stops = speaker.stops
+        let starts = dictation.starts.count
+        let records = journal.records.count
+        let renders = presenter.states.count
+        let lineCount = logged.count
+        clock.now = 10
+        wake.detect(peak: 0.991, audio: [0.1, -0.2, 0.3])
+        XCTAssertEqual(confirmer.heard, [[0.1, -0.2, 0.3]], "what woke it goes to the speech model")
+        XCTAssertEqual(dictation.starts.count, starts, "no take before the phrase is confirmed")
+        XCTAssertEqual(speaker.stops, stops, "the reply goes on")
+        XCTAssertEqual(controller.state.phase, before.phase)
+        XCTAssertEqual(controller.state.card, before.card)
+        XCTAssertTrue(presenter.states.dropFirst(renders).allSatisfy { $0.phase == before.phase && $0.card == before.card })
+        XCTAssertEqual(journal.records.count, records)
+        XCTAssertEqual(logged.count, lineCount, "nothing logged until it is decided")
+
+        clock.now = 10.14
+        confirmer.answer("Hey, Jarvis. What time is it?")
+        XCTAssertEqual(dictation.starts.count, starts + 1, "an agent take")
+        XCTAssertEqual(dictation.starts.last, .caller)
+        XCTAssertEqual(speaker.stops, stops + 1, "a confirmed wake stops the reply")
+        XCTAssertEqual(controller.state.phase, .listening(.agent))
+        XCTAssertFalse(wake.listening, "paused while the take records")
+        controller.perform(.stop)
+        XCTAssertEqual(controller.state.lastTakeEnd?.trigger,
+                       .wake(score: 0.973, phrase: "Hey Jarvis", frames: 2, peak: 0.991, confirmed: true, confirmMs: 140))
+        dictation.finish("what time is it")
+        await settled(controller)
+        XCTAssertTrue(wake.listening)
+        XCTAssertEqual(journal.records.last?.trigger,
+                       .wake(score: 0.973, phrase: "Hey Jarvis", frames: 2, peak: 0.991, confirmed: true, confirmMs: 140))
+    }
+
+    /// Speech the detector took for the phrase and the speech model did not: nothing shows,
+    /// nothing stops, nothing is said; one journal line and one log line, never the words; the
+    /// listener is re-armed with its quiet period.
+    func testAWakeWhosePhraseIsNotConfirmedLeavesNoTrace() async {
+        var settings = speakingSettings()
+        settings.voice.wakeWordEnabled = true
+        let controller = makeController(settings)
+        await startTurn(controller)
+        brain.push(status: "idle", output: "A long answer.")
+        confirmer.immediate = nil
+        let before = controller.state
+        let stops = speaker.stops
+        let spoken = speaker.spoken
+        let starts = dictation.starts.count
+        let records = journal.records.count
+        let renders = presenter.states.count
+        let lineCount = logged.count
+        clock.now = 20
+        wake.detect(score: 0.61, peak: 0.7)
+        clock.now = 20.2
+        confirmer.answer("Hey Javier, the narrator said, turning the page.")
+        XCTAssertEqual(dictation.starts.count, starts)
+        XCTAssertEqual(controller.state, before, "the state is as it was")
+        XCTAssertTrue(presenter.states.dropFirst(renders).allSatisfy { $0.phase == before.phase && $0.card == before.card },
+                      "the orb never showed it")
+        XCTAssertEqual(speaker.stops, stops, "the reply was not stopped")
+        XCTAssertEqual(speaker.spoken, spoken, "nothing was said")
+        XCTAssertEqual(wake.rearms, [VoiceHostController.wakeQuietPeriod])
+        XCTAssertEqual(Array(journal.records.dropFirst(records)), [VoiceTakeRecord(
+            date: date(at: 20), trigger: .wake(score: 0.61, phrase: "Hey Jarvis", frames: 2, peak: 0.7, confirmed: false,
+                                               confirmMs: 200),
+            mode: .agent, outcome: .refused, reason: VoiceHostController.wakeNotConfirmed)])
+        XCTAssertEqual(VoiceHostController.wakeNotConfirmed, "The wake phrase was not confirmed")
+        XCTAssertEqual(Array(logged.dropFirst(lineCount)), [
+            #"take refused (The wake phrase was not confirmed): wake word "Hey Jarvis" (score 0.610, 2 frames, "#
+                + "peak 0.700, not confirmed in 200 ms), agent",
+        ])
+        XCTAssertFalse(logged.contains { $0.contains("Javier") || $0.contains("narrator") }, "never the words")
+        XCTAssertNil(controller.state.wakeProblem, "the speech model answered: no problem to show")
+    }
+
+    /// No speech model, one still loading, a transcription that fails, or no answer in 1.5 s: the
+    /// wake counts as not confirmed, and `wakeProblem` says why until a wake's words are heard.
+    func testAWakeThatCannotBeConfirmedSaysWhyWhereTheWakeWordsProblemsShow() {
         var settings = VoiceHostSettings()
         settings.voice.wakeWordEnabled = true
         let controller = makeController(settings)
-        XCTAssertTrue(controller.state.wakeListening)
+        let cases: [(WakeConfirmFailure, String)] = [
+            (.noModel, VoiceHostController.wakeConfirmNoModel), (.loading, VoiceHostController.wakeConfirmLoading),
+            (.failed, VoiceHostController.wakeConfirmFailed),
+        ]
+        for (failure, reason) in cases {
+            confirmer.immediate = .failure(failure)
+            wake.detect()
+            XCTAssertEqual(journal.records.last?.reason, reason)
+            XCTAssertEqual(journal.records.last?.trigger,
+                           .wake(score: 0.973, phrase: "Hey Jarvis", frames: 2, peak: 0.973, confirmed: false, confirmMs: 0))
+            XCTAssertEqual(controller.state.wakeProblem, reason)
+            XCTAssertEqual(controller.state.phase, .idle, "not on the orb: it may have been anyone talking")
+            XCTAssertTrue(dictation.starts.isEmpty)
+        }
+        XCTAssertEqual(VoiceHostController.wakeConfirmTimeout, 1.5)
+        confirmer.immediate = nil
+        clock.now = 30
         wake.detect()
+        clock.advance(to: 31.49)
+        XCTAssertEqual(journal.records.count, 3)
+        clock.advance(to: 31.5)
+        XCTAssertEqual(journal.records.count, 4)
+        XCTAssertEqual(journal.records.last?.reason, VoiceHostController.wakeConfirmSlow)
+        XCTAssertEqual(journal.records.last?.trigger,
+                       .wake(score: 0.973, phrase: "Hey Jarvis", frames: 2, peak: 0.973, confirmed: false, confirmMs: 1500))
+        XCTAssertEqual(controller.state.wakeProblem, VoiceHostController.wakeConfirmSlow)
+        XCTAssertEqual(wake.rearms.count, 4, "re-armed after each")
+        confirmer.answer("Hey Jarvis")
+        XCTAssertTrue(dictation.starts.isEmpty, "an answer after the time is up changes nothing")
+        XCTAssertEqual(journal.records.count, 4)
+
+        confirmer.immediate = .success("hey jarvis")
+        wake.detect()
+        XCTAssertNil(controller.state.wakeProblem, "a wake whose words were heard clears it")
         XCTAssertEqual(dictation.starts, [.caller])
-        XCTAssertFalse(wake.listening)
+    }
+
+    func testWithConfirmationOffTheDetectionAloneStartsTheTake() {
+        var settings = VoiceHostSettings()
+        settings.voice.wakeWordEnabled = true
+        settings.wakeConfirm = false
+        let controller = makeController(settings)
+        confirmer.immediate = nil
+        wake.detect(audio: [0.5])
+        XCTAssertTrue(confirmer.heard.isEmpty, "nothing is transcribed")
+        XCTAssertEqual(dictation.starts, [.caller])
         controller.perform(.stop)
-        XCTAssertEqual(controller.state.lastTakeEnd?.trigger, .wake(score: 0.973, phrase: "Hey Jarvis", frames: 2, peak: 0.973))
-        dictation.finish("hello")
-        await settled(controller)
-        XCTAssertTrue(wake.listening)
+        XCTAssertEqual(controller.state.lastTakeEnd?.trigger, .wake(score: 0.973, phrase: "Hey Jarvis", frames: 2, peak: 0.973),
+                       "no confirmation recorded")
+    }
+
+    /// A take started by the orb, a mute or new settings while a wake is confirmed: the answer
+    /// finds the listener it came from gone and starts nothing.
+    func testAWakeConfirmedAfterItsListenerStoppedStartsNothing() {
+        var settings = VoiceHostSettings()
+        settings.voice.wakeWordEnabled = true
+        let controller = makeController(settings)
+        confirmer.immediate = nil
+        wake.detect(score: 0.8)
+        controller.perform(.orbClicked)
+        confirmer.answer("hey jarvis")
+        XCTAssertEqual(dictation.starts, [.caller], "only the orb's take")
+        XCTAssertEqual(controller.state.phase, .listening(.agent))
+        XCTAssertEqual(journal.records.last?.reason, VoiceHostController.takeRecording)
+        XCTAssertEqual(journal.records.last?.trigger,
+                       .wake(score: 0.8, phrase: "Hey Jarvis", frames: 2, peak: 0.8, confirmed: true, confirmMs: 0))
+        controller.perform(.cancel)
+
+        wake.detect(score: 0.81)
+        controller.perform(.setMuted(true))
+        controller.perform(.setMuted(false))
+        let rearms = wake.rearms.count
+        confirmer.answer("hey jarvis")
+        XCTAssertEqual(dictation.starts, [.caller])
+        XCTAssertEqual(journal.records.last?.reason, VoiceHostController.staleWake, "the listener was started again since")
+        XCTAssertEqual(wake.rearms.count, rearms, "the listener running now is left alone")
+        XCTAssertTrue(controller.state.wakeListening)
+    }
+
+    func testOneWakeIsConfirmedAtATime() {
+        var settings = VoiceHostSettings()
+        settings.voice.wakeWordEnabled = true
+        let controller = makeController(settings)
+        defer { withExtendedLifetime(controller) {} }
+        confirmer.immediate = nil
+        wake.detect(score: 0.8)
+        wake.detect(score: 0.9)
+        XCTAssertEqual(confirmer.heard.count, 1)
+        XCTAssertEqual(journal.records.map(\.reason), [VoiceHostController.wakeBeingConfirmed])
+        confirmer.answer("hey jarvis")
+        XCTAssertEqual(dictation.starts, [.caller])
+    }
+
+    func testAWakeBeingConfirmedWhenTheHostQuitsIsJournaled() {
+        var settings = VoiceHostSettings()
+        settings.voice.wakeWordEnabled = true
+        let controller = makeController(settings)
+        confirmer.immediate = nil
+        wake.detect()
+        controller.prepareToQuit()
+        confirmer.answer("hey jarvis")
+        XCTAssertTrue(dictation.starts.isEmpty)
+        XCTAssertEqual(journal.records.map(\.reason), [VoiceHostController.hostQuit])
+        XCTAssertEqual(journal.records.last?.trigger, .wake(score: 0.973, phrase: "Hey Jarvis", frames: 2, peak: 0.973),
+                       "never answered")
     }
 
     func testWakeListensAgainWhenNoTakeStarts() {
@@ -1065,7 +1259,7 @@ final class VoiceHostControllerTests: XCTestCase {
 
         wake.detect(score: 0.912)
         controller.perform(.stop)
-        XCTAssertEqual(controller.state.lastTakeEnd?.trigger, .wake(score: 0.912, phrase: "Hey Jarvis", frames: 2, peak: 0.912))
+        XCTAssertEqual(controller.state.lastTakeEnd?.trigger, .wake(score: 0.912, phrase: "Hey Jarvis", frames: 2, peak: 0.912, confirmed: true, confirmMs: 0))
         dictation.finish("")
 
         keys.send(.begin(.primary))
@@ -1079,11 +1273,11 @@ final class VoiceHostControllerTests: XCTestCase {
         await settled(controller)
 
         XCTAssertEqual(journal.records.map(\.trigger), [
-            .orb, .socket(action: "ask"), .wake(score: 0.912, phrase: "Hey Jarvis", frames: 2, peak: 0.912),
+            .orb, .socket(action: "ask"), .wake(score: 0.912, phrase: "Hey Jarvis", frames: 2, peak: 0.912, confirmed: true, confirmMs: 0),
             .key(.primary, retargeted: false), .key(.primary, retargeted: true),
         ])
         XCTAssertEqual(journal.records.map(\.mode), [.agent, .agent, .agent, .dictation, .agent])
-        XCTAssertEqual(controller.state.lastTakeEnd?.trigger, .wake(score: 0.912, phrase: "Hey Jarvis", frames: 2, peak: 0.912),
+        XCTAssertEqual(controller.state.lastTakeEnd?.trigger, .wake(score: 0.912, phrase: "Hey Jarvis", frames: 2, peak: 0.912, confirmed: true, confirmMs: 0),
                        "an fn take leaves the last hands-free take's ending")
     }
 
@@ -1132,7 +1326,8 @@ final class VoiceHostControllerTests: XCTestCase {
         XCTAssertEqual(record.reason, VoiceHostController.agentBusyPasted)
         XCTAssertEqual(record.mode, .agent)
         XCTAssertEqual(record.characters, 31)
-        XCTAssertEqual(record.trigger, .wake(score: 0.973, phrase: "Hey Jarvis", frames: 2, peak: 0.973))
+        XCTAssertEqual(record.trigger, .wake(score: 0.973, phrase: "Hey Jarvis", frames: 2, peak: 0.973, confirmed: true,
+                                             confirmMs: 0))
     }
 
     func testTakesThrownAwayAreJournaledWithWhy() async {
@@ -1225,6 +1420,7 @@ final class VoiceHostControllerTests: XCTestCase {
                        [.wake(score: 0.611, phrase: "Hey Jarvis", frames: 2, peak: 0.611), .wake(score: 0.702, phrase: "Hey Jarvis", frames: 2, peak: 0.702),
                         .wake(score: 0.85, phrase: "Hey Jarvis", frames: 2, peak: 0.85), .wake(score: 0.9, phrase: "Hey Computer", frames: 2, peak: 0.9)])
         XCTAssertEqual(lines("take refused").count, 4, "\(logged)")
+        XCTAssertTrue(confirmer.heard.isEmpty, "refused before its phrase was confirmed")
         XCTAssertTrue(lines("take refused").first?.contains("score 0.611") == true, "\(logged)")
     }
 
@@ -1314,14 +1510,15 @@ final class VoiceHostControllerTests: XCTestCase {
         controller.perform(.stop)
         dictation.finish("the secret plan")
         await settled(controller)
-        XCTAssertEqual(lines("take started"), [#"take started: wake word "Hey Jarvis" (score 0.973, 2 frames, peak 0.991), agent, hands-free"#])
+        XCTAssertEqual(lines("take started"), [#"take started: wake word "Hey Jarvis" (score 0.973, 2 frames, peak 0.991, confirmed in 0 ms), agent, "#
+                        + "hands-free"])
         let ended = try XCTUnwrap(lines("take ended").first)
         XCTAssertTrue(ended.hasPrefix("take ended: stop"), ended)
         XCTAssertTrue(ended.contains("floor"), ended)
         XCTAssertTrue(ended.contains("threshold"), ended)
         XCTAssertEqual(lines("take sent"),
-                       [#"take sent, 15 characters: wake word "Hey Jarvis" (score 0.973, 2 frames, peak 0.991), agent, "#
-                        + "take 1.0 s ended by stop"])
+                       [#"take sent, 15 characters: wake word "Hey Jarvis" (score 0.973, 2 frames, peak 0.991, confirmed in 0 ms), "#
+                        + "agent, take 1.0 s ended by stop"])
         XCTAssertFalse(logged.contains { $0.contains("secret") }, "\(logged)")
     }
 
@@ -1338,7 +1535,8 @@ final class VoiceHostControllerTests: XCTestCase {
         brain.push(status: "idle", output: "Nothing.")
         let row = try XCTUnwrap(controller.conversation.rows.first)
         XCTAssertEqual(row.kind, .user)
-        XCTAssertEqual(row.trigger, .wake(score: 0.973, phrase: "Hey Jarvis", frames: 2, peak: 0.973))
+        XCTAssertEqual(row.trigger, .wake(score: 0.973, phrase: "Hey Jarvis", frames: 2, peak: 0.973, confirmed: true,
+                                          confirmMs: 0))
         XCTAssertEqual(row.date, date(at: 7), "when the take started")
 
         clock.now = 30

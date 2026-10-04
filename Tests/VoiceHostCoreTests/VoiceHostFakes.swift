@@ -285,6 +285,31 @@ final class FakeWake: WakeDriving {
     }
 }
 
+/// The speech model a wake's phrase is confirmed with. Answers at once with `immediate` while it
+/// is set (the words "Hey Jarvis." unless a test changes it), else waits for `answer`.
+@MainActor
+final class FakeWakeConfirmer: WakeConfirming {
+    /// The audio of each request, in order.
+    var heard: [[Float]] = []
+    var immediate: Result<String, WakeConfirmFailure>? = .success("Hey Jarvis.")
+    private var pending: [@MainActor (Result<String, WakeConfirmFailure>) -> Void] = []
+
+    var waiting: Int { pending.count }
+
+    func transcribe(_ audio: [Float], completion: @escaping @MainActor (Result<String, WakeConfirmFailure>) -> Void) {
+        heard.append(audio)
+        if let immediate { completion(immediate) } else { pending.append(completion) }
+    }
+
+    /// Answers the oldest request still waiting.
+    func answer(_ result: Result<String, WakeConfirmFailure>) {
+        guard !pending.isEmpty else { return }
+        pending.removeFirst()(result)
+    }
+
+    func answer(_ words: String) { answer(.success(words)) }
+}
+
 /// The take journal in memory.
 @MainActor
 final class FakeTakeJournal: TakeJournaling {

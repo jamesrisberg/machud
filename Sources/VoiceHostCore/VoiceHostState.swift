@@ -140,15 +140,18 @@ public struct VoiceTakeEnd: Codable, Equatable, Sendable {
 }
 
 /// What started a take. On the wire it is `{"source": …}` plus the fields of its source:
-/// `{"source": "wake", "score": 0.973, "phrase": "Hey Jarvis", "frames": 2, "peak": 0.991}`,
-/// `{"source": "orb"}`, `{"source": "socket", "action": "ask"}`, `{"source": "key", "gesture":
-/// "primary", "retargeted": false}`.
+/// `{"source": "wake", "score": 0.973, "phrase": "Hey Jarvis", "frames": 2, "peak": 0.991,
+/// "confirmed": true, "confirmMs": 142}`, `{"source": "orb"}`, `{"source": "socket", "action":
+/// "ask"}`, `{"source": "key", "gesture": "primary", "retargeted": false}`.
 public enum VoiceTakeTrigger: Equatable, Sendable {
     /// The wake word: the score of the frame that completed the detection (0...1, at or above the
     /// threshold), the phrase its model listens for, and the run it completed: how many frames in
-    /// a row and the highest score among them. A trigger journaled before the run was recorded
-    /// has neither.
-    case wake(score: Double, phrase: String, frames: Int? = nil, peak: Double? = nil)
+    /// a row and the highest score among them (a trigger journaled before the run was recorded
+    /// has neither). `confirmed` says whether the speech model heard the phrase in what woke the
+    /// listener (false also when it could not tell) and `confirmMs` how long that took; both are
+    /// nil when no answer was had: confirmation off, or the wake refused before one.
+    case wake(score: Double, phrase: String, frames: Int? = nil, peak: Double? = nil, confirmed: Bool? = nil,
+              confirmMs: Int? = nil)
     /// A click on the orb, or the orb pressed through accessibility (they reach the host as the
     /// same action).
     case orb
@@ -223,8 +226,8 @@ public enum VoiceTakeTrigger: Equatable, Sendable {
     /// `socket action ask`, `key primary, retargeted`.
     public var summary: String {
         switch self {
-        case .wake(let score, let phrase, let frames, let peak):
-            "wake word \"\(phrase)\" (\(Self.wakeDetails(score: score, frames: frames, peak: peak)))"
+        case .wake(let score, let phrase, let frames, let peak, let confirmed, let confirmMs):
+            "wake word \"\(phrase)\" (\(Self.wakeDetails(score, frames, peak, confirmed, confirmMs)))"
         case .orb: "orb"
         case .socket(let action): "socket action \(action)"
         case .key(let gesture, let retargeted): "key \(gesture.rawValue)" + (retargeted ? ", retargeted" : "")
@@ -232,12 +235,23 @@ public enum VoiceTakeTrigger: Equatable, Sendable {
         }
     }
 
-    /// `score 0.973, 2 frames, peak 0.991`, leaving out what the trigger does not have.
-    private static func wakeDetails(score: Double, frames: Int?, peak: Double?) -> String {
+    /// `score 0.973, 2 frames, peak 0.991, confirmed in 142 ms`, leaving out what the trigger
+    /// does not have.
+    private static func wakeDetails(_ score: Double, _ frames: Int?, _ peak: Double?, _ confirmed: Bool?,
+                                    _ confirmMs: Int?) -> String {
         var details = [String(format: "score %.3f", score)]
         if let frames { details.append("\(frames) frame\(frames == 1 ? "" : "s")") }
         if let peak { details.append(String(format: "peak %.3f", peak)) }
+        if let confirmed {
+            details.append((confirmed ? "confirmed" : "not confirmed") + (confirmMs.map { " in \($0) ms" } ?? ""))
+        }
         return details.joined(separator: ", ")
+    }
+
+    /// A wake trigger with what its confirmation found and how long it took; others unchanged.
+    func confirming(_ confirmed: Bool, ms: Int) -> VoiceTakeTrigger {
+        guard case .wake(let score, let phrase, let frames, let peak, _, _) = self else { return self }
+        return .wake(score: score, phrase: phrase, frames: frames, peak: peak, confirmed: confirmed, confirmMs: ms)
     }
 
     /// The same trigger, marked as moved by a later fn gesture; other triggers are unchanged.
@@ -248,7 +262,9 @@ public enum VoiceTakeTrigger: Equatable, Sendable {
 }
 
 extension VoiceTakeTrigger: Codable {
-    private enum CodingKeys: String, CodingKey { case source, score, phrase, frames, peak, action, gesture, retargeted }
+    private enum CodingKeys: String, CodingKey {
+        case source, score, phrase, frames, peak, confirmed, confirmMs, action, gesture, retargeted
+    }
 
     public func encode(to encoder: Encoder) throws {
         if case .unrecognized(let fields) = self {
@@ -258,11 +274,13 @@ extension VoiceTakeTrigger: Codable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(source, forKey: .source)
         switch self {
-        case .wake(let score, let phrase, let frames, let peak):
+        case .wake(let score, let phrase, let frames, let peak, let confirmed, let confirmMs):
             try c.encode(score, forKey: .score)
             try c.encode(phrase, forKey: .phrase)
             try c.encodeIfPresent(frames, forKey: .frames)
             try c.encodeIfPresent(peak, forKey: .peak)
+            try c.encodeIfPresent(confirmed, forKey: .confirmed)
+            try c.encodeIfPresent(confirmMs, forKey: .confirmMs)
         case .orb:
             break
         case .socket(let action):
@@ -283,7 +301,9 @@ extension VoiceTakeTrigger: Codable {
             self = .wake(score: try c.decode(Double.self, forKey: .score),
                          phrase: (try? c.decode(String.self, forKey: .phrase)) ?? "",
                          frames: (try? c.decodeIfPresent(Int.self, forKey: .frames)) ?? nil,
-                         peak: (try? c.decodeIfPresent(Double.self, forKey: .peak)) ?? nil)
+                         peak: (try? c.decodeIfPresent(Double.self, forKey: .peak)) ?? nil,
+                         confirmed: (try? c.decodeIfPresent(Bool.self, forKey: .confirmed)) ?? nil,
+                         confirmMs: (try? c.decodeIfPresent(Int.self, forKey: .confirmMs)) ?? nil)
         case "orb":
             self = .orb
         case "socket":

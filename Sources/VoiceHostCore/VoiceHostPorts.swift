@@ -218,6 +218,25 @@ protocol WakeDriving: AnyObject {
     func rearm(quietFor: TimeInterval)
 }
 
+/// Why the words of a wake could not be had.
+enum WakeConfirmFailure: Error, Equatable {
+    /// No speech model is installed.
+    case noModel
+    /// The speech model is installed and not loaded yet.
+    case loading
+    /// The speech model failed on the audio.
+    case failed
+}
+
+/// Transcribes the audio a wake handed over, on this Mac, so the host can confirm the phrase.
+@MainActor
+protocol WakeConfirming: AnyObject {
+    /// The words in `audio` (16 kHz mono), or why they cannot be had, given once on the main actor.
+    /// On a false wake `audio` is speech in the room nobody meant for the assistant: it is used for
+    /// this and let go, never kept, written, logged or sent, and so are the words.
+    func transcribe(_ audio: [Float], completion: @escaping @MainActor (Result<String, WakeConfirmFailure>) -> Void)
+}
+
 /// Why the wake listener could not start or stopped by itself.
 struct WakeFailure: Equatable {
     /// In words for the user.

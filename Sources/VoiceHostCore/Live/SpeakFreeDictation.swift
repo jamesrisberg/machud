@@ -157,6 +157,42 @@ final class SpeakFreeDictation: DictationDriving {
     }
 }
 
+extension SpeakFreeDictation: WakeConfirming {
+    /// A wake's audio, transcribed with the dictation's speech model (`WakeAudioTranscription`).
+    func transcribe(_ audio: [Float], completion: @escaping @MainActor (Result<String, WakeConfirmFailure>) -> Void) {
+        prepareEngine()
+        WakeAudioTranscription.transcribe(audio, with: session.transcriber, language: language, completion: completion)
+    }
+}
+
+/// Transcribes the audio a wake handed over with SpeakFree's engine, on this Mac, straight from
+/// memory: no take, no file, no recording, none of SpeakFree's rescues or text styling, and
+/// nothing about it logged. The audio and the words are let go once the completion has them.
+enum WakeAudioTranscription {
+    @MainActor
+    static func transcribe(_ audio: [Float], with transcriber: Transcriber?, language: String,
+                           completion: @escaping @MainActor (Result<String, WakeConfirmFailure>) -> Void) {
+        guard let transcriber else { return completion(.failure(.noModel)) }
+        let engine = transcriber.engine
+        guard engine.isLoaded else {
+            // A cold load takes seconds, longer than a wake may wait: this one cannot be confirmed,
+            // and the model is on its way for the next (loads coalesce with one under way).
+            Task.detached(priority: .utility) { await transcriber.warmUp() }
+            return completion(.failure(.loading))
+        }
+        Task.detached(priority: .userInitiated) {
+            let result: Result<String, WakeConfirmFailure>
+            do {
+                result = .success(try await engine.transcribe(samples: audio, language: language, prompt: nil,
+                                                              suppressRegex: nil))
+            } catch {
+                result = .failure(.failed)
+            }
+            await completion(result)
+        }
+    }
+}
+
 /// The history plan the retention closure (off the main thread) and the filer (on it) share.
 /// The plan is resolved on the main thread, when the setting changes and as each take starts.
 private final class HistoryBox: @unchecked Sendable {

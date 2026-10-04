@@ -57,9 +57,9 @@ final class VoiceHost {
         let history = DictationHistoryLocator.live(
             machudFolder: environment.historyDirectory ?? voiceRoot.appendingPathComponent("History", isDirectory: true),
             speakFreeConfigDirectory: environment.speakFreeConfigDirectory)
-        dictation = environment.noMicrophone
-            ? SimulatedDictation()
-            : SpeakFreeDictation(directory: voiceRoot.appendingPathComponent("Dictation"), historyLocator: history)
+        let speakFree = environment.noMicrophone
+            ? nil : SpeakFreeDictation(directory: voiceRoot.appendingPathComponent("Dictation"), historyLocator: history)
+        dictation = speakFree ?? SimulatedDictation()
         brain = environment.noBrain ? nil : BrainConnection()
         let kokoroDirectory = KokoroModels.directory(in: modelsRoot)
         models = ["kokoro": ManifestModelStore(manifest: KokoroModels.manifest, directory: kokoroDirectory),
@@ -86,6 +86,8 @@ final class VoiceHost {
                 ? SilentSpeaker() : ReplySpeaker(kokoroDirectory: kokoroDirectory, secrets: secrets),
             wake: environment.noMicrophone ? nil : WakeWordListener(modelsRoot: modelsRoot),
             wakeModels: wakeModels,
+            // The wake phrase is confirmed with the dictation's speech model.
+            wakeConfirmer: speakFree,
             brainStateRoot: support.appendingPathComponent("Brain"),
             // The conversation is the brain's: kept only where a brain can run.
             conversationStore: environment.noBrain ? nil : ConversationFile(url: conversationFile),

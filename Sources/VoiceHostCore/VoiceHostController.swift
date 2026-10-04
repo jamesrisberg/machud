@@ -39,6 +39,10 @@ import VoiceKit
 /// on and cannot listen, `wakeProblem` says why, and turning it on shows that under the orb;
 /// a model installed later arms it at once (`wakeModelsChanged`). A listener that stops by
 /// itself is started again after `wakeRestartDelays` until it listens.
+///
+/// With `wakeConfirm` a detection starts nothing until `wakeConfirmer` has transcribed what woke
+/// the listener and the phrase is in the words: the take then starts as any wake's does; a wake
+/// whose phrase is not there leaves no trace but its journal line and log line.
 @MainActor
 public final class VoiceHostController: VoiceHostActing {
     public private(set) var state = VoiceHostState() {
@@ -77,6 +81,13 @@ public final class VoiceHostController: VoiceHostActing {
     static let wakeOff = "The wake word is off"
     static let otherWakePhrase = "Not the wake phrase listened for"
     static let staleWake = "From a wake listener stopped or replaced since"
+    static let wakeBeingConfirmed = "Another wake is being confirmed"
+    static let wakeNotConfirmed = "The wake phrase was not confirmed"
+    static let wakeConfirmNoModel = "Download the speech model to confirm the wake phrase."
+    static let wakeConfirmLoading = "The speech model was still loading, so the wake phrase could not be confirmed."
+    static let wakeConfirmFailed = "The speech model could not check the wake phrase."
+    static let wakeConfirmSlow = "Checking the wake phrase took longer than 1.5 s."
+    static let wakeConfirmUnavailable = "This voice host has no speech model to confirm the wake phrase with."
     static let wakeModelMissing = "The wake phrase's model is not installed"
     static let hostQuit = "The voice host quit"
     static let modelMissing = "Speech model not installed"
@@ -100,6 +111,8 @@ public final class VoiceHostController: VoiceHostActing {
     /// After a wake that starts no take the listener drops this many seconds of what it hears, so
     /// the rest of the sound that woke it cannot wake it again.
     static let wakeQuietPeriod: TimeInterval = 1
+    /// How long confirming a wake's phrase may take before the wake counts as not confirmed.
+    static let wakeConfirmTimeout: TimeInterval = 1.5
 
     private let dictation: DictationDriving
     private let keys: VoiceKeySource?
@@ -108,6 +121,8 @@ public final class VoiceHostController: VoiceHostActing {
     private let wake: WakeDriving?
     /// The wake phrases there are models for, in the order they are offered.
     let wakeModels: [WakePhraseModel]
+    /// Transcribes what woke the listener, to confirm the phrase; nil confirms none.
+    private let wakeConfirmer: WakeConfirming?
     private let brainStateRoot: URL
     /// Where the conversation is kept between launches; nil keeps it only in memory.
     private let conversationStore: ConversationStoring?
@@ -228,6 +243,21 @@ public final class VoiceHostController: VoiceHostActing {
     private var wakeRun = 0
     /// The listener was re-armed after a wake; its listening again continues the same run.
     private var wakeRearming = false
+
+    /// A wake whose phrase is being confirmed: its trigger, the phrase to find, when it came and
+    /// the listener run it came from. Never its audio.
+    private struct WakeConfirmation {
+        let id = UUID()
+        let trigger: VoiceTakeTrigger
+        let phrase: String
+        let startedAt: TimeInterval
+        let run: Int
+    }
+
+    private var wakeConfirmation: WakeConfirmation?
+    /// Why the latest wake's phrase could not be confirmed; `wakeProblem` while nothing else is,
+    /// until a wake's words are had, confirmation is turned off or the voice settings change.
+    private var wakeConfirmProblem: String?
     /// The conversation with the agent, every turn and snapshot reduced to rows.
     private(set) var conversation: ConversationLog
     private var conversationSaveScheduled = false
@@ -241,6 +271,7 @@ public final class VoiceHostController: VoiceHostActing {
     ///   - brain: nil when the brain can never run (`MACHUD_VOICE_NO_BRAIN`).
     ///   - wake: nil without a microphone for it.
     ///   - wakeModels: the wake phrases there are models for, and their files.
+    ///   - wakeConfirmer: transcribes what woke the listener, to confirm the phrase.
     ///   - brainStateRoot: the folder per-workspace brain state directories go under.
     ///   - conversationStore: where the conversation is kept; nil keeps it in memory only.
     ///   - sessions: MacHUD's session broker; nil leaves `openSession` unavailable.
@@ -252,7 +283,7 @@ public final class VoiceHostController: VoiceHostActing {
     ///   - homeDirectory: the brain's workspace while `brain.workspacePath` is empty.
     init(settings: VoiceHostSettings, dictation: DictationDriving, keys: VoiceKeySource?,
          brain: BrainDriving?, speaker: ReplySpeaking?, wake: WakeDriving?, wakeModels: [WakePhraseModel] = [],
-         brainStateRoot: URL, conversationStore: ConversationStoring? = nil,
+         wakeConfirmer: WakeConfirming? = nil, brainStateRoot: URL, conversationStore: ConversationStoring? = nil,
          sessions: SessionOpening? = nil, feed: TextFeeding? = nil,
          machudTools: MacHUDToolServer? = nil, machudStatus: MacHUDStatusReading? = nil,
          detectRuntimes: @escaping (BrainSettings) -> [BrainRuntimeDetection] = { BrainRuntimes.detect($0) },
@@ -269,6 +300,7 @@ public final class VoiceHostController: VoiceHostActing {
         self.speaker = speaker
         self.wake = wake
         self.wakeModels = wakeModels
+        self.wakeConfirmer = wakeConfirmer
         self.brainStateRoot = brainStateRoot
         self.conversationStore = conversationStore
         conversation = ConversationLog(record: conversationStore?.load())
@@ -329,8 +361,10 @@ public final class VoiceHostController: VoiceHostActing {
             speaker?.configure(settings.voice)
             // The wake listener starts afresh with them: what stopped it before is forgotten.
             wakeListenerProblem = nil
+            wakeConfirmProblem = nil
             wakeRestarts = 0
         }
+        if !settings.wakeConfirm { wakeConfirmProblem = nil }
         refreshKeys()
         refreshWake()
         refreshBrain()
@@ -442,6 +476,10 @@ public final class VoiceHostController: VoiceHostActing {
     /// journaled after.
     func prepareToQuit() {
         guard !quitting else { return }
+        if let pending = wakeConfirmation {
+            wakeConfirmation = nil
+            refused(pending.trigger, mode: .agent, reason: Self.hostQuit)
+        }
         reportTakeEnd(.cancelled)
         if let current = take { journal(current, outcome: .cancelled, reason: Self.hostQuit) }
         for ended in transcribing.values.sorted(by: { $0.startedAt < $1.startedAt }) {
@@ -576,11 +614,12 @@ public final class VoiceHostController: VoiceHostActing {
         return nil
     }
 
-    /// A detection starts an agent take. One that arrives after the listener was told to stop
-    /// (no listener is wanted: voice off, muted, the wake word off, a take recording), from a
-    /// listener stopped or replaced since, or not of the phrase listened for is refused before
-    /// anything else: it is journaled and logged and touches nothing, not the reply's speech, the
-    /// orb or the listener running now.
+    /// A detection starts an agent take once its phrase is confirmed (`confirmWake`), or at once
+    /// with confirmation off. One that arrives after the listener was told to stop (no listener is
+    /// wanted: voice off, muted, the wake word off, a take recording), from a listener stopped or
+    /// replaced since, not of the phrase listened for, or while another is being confirmed is
+    /// refused before anything else: it is journaled and logged and touches nothing, not the
+    /// reply's speech, the orb or the listener running now. Its audio is not kept.
     private func wakeDetected(_ detection: WakeDetection, current: Bool) {
         let trigger = VoiceTakeTrigger(detection)
         guard let listening = runningWake else {
@@ -590,10 +629,78 @@ public final class VoiceHostController: VoiceHostActing {
         guard TriggerPhrase.normalize(detection.phrase) == TriggerPhrase.normalize(listening.wakePhrase) else {
             return refused(trigger, mode: .agent, reason: Self.otherWakePhrase)
         }
-        let run = wakeRun
+        guard wakeConfirmation == nil else { return refused(trigger, mode: .agent, reason: Self.wakeBeingConfirmed) }
+        guard settings.wakeConfirm else { return startWakeTake(trigger, run: wakeRun) }
+        confirmWake(detection, trigger: trigger)
+    }
+
+    /// A wake that may start a take starts it as any take starts, refusals included; with no take
+    /// to pause it, the listener it came from listens again.
+    private func startWakeTake(_ trigger: VoiceTakeTrigger, run: Int) {
         startTake(.agent, handsFree: true, trigger: trigger)
-        // The listener stays quiet after a wake; with no take to pause it, it listens again.
         if take == nil, wakeRun == run { rearmWake() }
+    }
+
+    /// Hands what woke the listener to the speech model and waits, at most `wakeConfirmTimeout`,
+    /// for its words. Until they come nothing is shown, stopped, said or written; the listener
+    /// stays quiet meanwhile. The audio goes to `wakeConfirmer` and nowhere else.
+    private func confirmWake(_ detection: WakeDetection, trigger: VoiceTakeTrigger) {
+        let pending = WakeConfirmation(trigger: trigger, phrase: detection.phrase, startedAt: now(), run: wakeRun)
+        wakeConfirmation = pending
+        schedule(Self.wakeConfirmTimeout) { [weak self] in self?.wakeChecked(pending.id, .cannot(Self.wakeConfirmSlow)) }
+        guard let wakeConfirmer else { return wakeChecked(pending.id, .cannot(Self.wakeConfirmUnavailable)) }
+        wakeConfirmer.transcribe(detection.audio) { [weak self] result in
+            switch result {
+            case .success(let words): self?.wakeChecked(pending.id, .heard(words))
+            case .failure(let failure): self?.wakeChecked(pending.id, .cannot(Self.message(for: failure)))
+            }
+        }
+    }
+
+    private enum WakeCheck {
+        /// What the speech model heard.
+        case heard(String)
+        /// Why it could not say.
+        case cannot(String)
+    }
+
+    /// The first answer for the wake being confirmed, the time running out included; a later one
+    /// finds it gone. The words decide and go no further. A wake whose phrase is not in them, or
+    /// that could not be checked, is refused and its listener re-armed; one whose listener was
+    /// stopped or replaced meanwhile is refused and touches nothing.
+    private func wakeChecked(_ id: UUID, _ check: WakeCheck) {
+        guard let pending = wakeConfirmation, pending.id == id else { return }
+        wakeConfirmation = nil
+        let confirmed: Bool
+        let refusal: String
+        switch check {
+        case .heard(let words):
+            confirmed = TriggerPhrase.transcript(words, contains: pending.phrase)
+            refusal = Self.wakeNotConfirmed
+            wakeConfirmProblem = nil
+        case .cannot(let why):
+            confirmed = false
+            refusal = why
+            wakeConfirmProblem = why
+        }
+        refreshWakeProblem()
+        let trigger = pending.trigger.confirming(confirmed, ms: Int(((now() - pending.startedAt) * 1000).rounded()))
+        guard pending.run == wakeRun, runningWake != nil else {
+            return refused(trigger, mode: .agent, reason: runningWake == nil ? wakeStopReason : Self.staleWake)
+        }
+        guard confirmed else {
+            refused(trigger, mode: .agent, reason: refusal)
+            return rearmWake()
+        }
+        startWakeTake(trigger, run: pending.run)
+    }
+
+    static func message(for failure: WakeConfirmFailure) -> String {
+        switch failure {
+        case .noModel: wakeConfirmNoModel
+        case .loading: wakeConfirmLoading
+        case .failed: wakeConfirmFailed
+        }
     }
 
     private func handle(_ intent: KeyGestureRecognizer.Intent) {
@@ -1291,7 +1398,7 @@ public final class VoiceHostController: VoiceHostActing {
         } else if let model = wakeModel {
             let status = model.store.status
             if status.installed {
-                problem = wakeListenerProblem
+                problem = wakeListenerProblem ?? (settings.wakeConfirm ? wakeConfirmProblem : nil)
             } else if status.downloading {
                 problem = "The \(model.phrase) model is downloading."
             } else if let error = status.error {
