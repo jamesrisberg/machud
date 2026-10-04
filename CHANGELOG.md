@@ -85,6 +85,9 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   the pointer is on, switching desktops only to fetch a single-window app, `capture_loadout`
   saves the screen the user is looking at, and `list_loadouts` (and `machud_status`) count the
   loadouts held back as experimental instead of listing them.
+- A sound that reaches the wake word's threshold for a moment no longer wakes it: the phrase has
+  to hold for two 80 ms frames in a row (`voice.wakeFrames`, 1 to 4). Saying it still wakes the
+  agent, about 80 ms later.
 
 ### Fixed
 - One loadout is applied at a time. Asking for another while one is being applied (a hotkey, the

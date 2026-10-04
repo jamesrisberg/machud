@@ -894,6 +894,11 @@ or levels at or above the sensitivity's minimum for 0.3 s in all. Then the take 
 and ends by a pause from there. With `manual` silence never ends the take: a tap on the orb
 or the fn key, or `action stop`, sends it. Either way a take stops after 120 s.
 
+The wake word (`voice.wakeWordEnabled`) listens for `voice.wakePhrase` with that phrase's model.
+It wakes once `voice.wakeFrames` consecutive 80 ms frames (1 to 4, default 2) score at or above
+`voice.wakeThreshold` (0.05 to 0.95, default 0.5; higher wakes less often), so a sound that
+reaches the threshold for a single frame does not wake it.
+
 `lastTakeEnd` says how the latest hands-free take ended and what started it: `{reason, seconds,
 quietMs?, floor?, threshold?, pause?, grace, trigger}`. `reason` is `pause`, `maximum`,
 `nothingHeard`, `stop` (a tap or `action stop`), `cancelled`, `failed` (the dictation failed) or

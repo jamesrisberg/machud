@@ -56,7 +56,8 @@ final class WakeWordListener: WakeDriving {
             return unavailable("The \(model.phrase) model could not load: \(error.localizedDescription)")
         }
         let source = makeSource()
-        let listener = WakeListener(detector: detector, source: source, threshold: settings.wakeThreshold)
+        let listener = WakeListener(detector: detector, source: source, threshold: settings.wakeThreshold,
+                                    frames: settings.wakeFrames)
         (source as? WakeSourceFailing)?.onFailure = { [weak self, weak listener] reason in
             guard let self, let listener, self.listener === listener else { return }
             stop()

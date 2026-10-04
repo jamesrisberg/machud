@@ -1182,7 +1182,8 @@ public final class VoiceHostController: VoiceHostActing {
         wakeListeningSince = nil
         wakeFailureRun = nil
         guard let wanted else { return }
-        log("wake listener starting: \"\(wanted.wakePhrase)\", threshold \(String(format: "%.2f", wanted.wakeThreshold))")
+        log("wake listener starting: \"\(wanted.wakePhrase)\", threshold \(String(format: "%.2f", wanted.wakeThreshold)), "
+            + "\(wanted.wakeFrames) frame\(wanted.wakeFrames == 1 ? "" : "s")")
         wake.start(wanted)
     }
 

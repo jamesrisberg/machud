@@ -148,7 +148,7 @@ final class WakeWordTests: XCTestCase {
             XCTAssertEqual(controller.state.wakeProblem, denied, "the problem stays while it fails, at \(time) s")
             XCTAssertFalse(controller.state.wakeListening)
         }
-        XCTAssertEqual(lines("wake listener"), ["wake listener starting: \"Hey Jarvis\", threshold 0.50",
+        XCTAssertEqual(lines("wake listener"), ["wake listener starting: \"Hey Jarvis\", threshold 0.50, 2 frames",
                                                 "wake listener listening",
                                                 "wake listener failed: \(denied); restarting in 2 s"],
                        "the same failure again and again is logged once")
@@ -283,12 +283,12 @@ final class WakeWordTests: XCTestCase {
         controller.perform(.orbClicked)
         controller.perform(.setMuted(true))
         XCTAssertEqual(logged.filter { $0.hasPrefix("wake listener") }, [
-            #"wake listener starting: "Hey Jarvis", threshold 0.50"#,
+            #"wake listener starting: "Hey Jarvis", threshold 0.50, 2 frames"#,
             "wake listener listening",
             "wake listener stopped: A take is recording",
         ])
         controller.perform(.setMuted(false))
-        XCTAssertEqual(lines("wake listener").suffix(2), [#"wake listener starting: "Hey Jarvis", threshold 0.50"#,
+        XCTAssertEqual(lines("wake listener").suffix(2), [#"wake listener starting: "Hey Jarvis", threshold 0.50, 2 frames"#,
                                                           "wake listener listening"])
     }
 
@@ -390,6 +390,10 @@ final class WakeWordTests: XCTestCase {
         sources[0].send(Array(repeating: 0.01, count: 1600))
         await settle()
         XCTAssertTrue(dictation.starts.isEmpty, "quiet audio does not wake")
+        // One loud frame (the second chunk's first frame) is not a wake under the two-frame rule.
+        sources[0].send(Array(repeating: 0.9, count: 1600))
+        await settle()
+        XCTAssertTrue(dictation.starts.isEmpty, "a single loud frame does not wake")
         sources[0].send(Array(repeating: 0.9, count: 1600))
         await waitUntil { !self.dictation.starts.isEmpty }
         XCTAssertEqual(dictation.starts, [.caller], "an agent take")
@@ -404,7 +408,8 @@ final class WakeWordTests: XCTestCase {
         await controller.pendingWork?.value
         await waitUntil { controller.state.wakeListening }
         XCTAssertEqual(sources.count, 2)
-        XCTAssertTrue(sources[1].running, "listening again after the take")
+        let again = try XCTUnwrap(sources.last, "a source for listening again")
+        XCTAssertTrue(again.running, "listening again after the take")
         XCTAssertEqual(brain.submitted.map(\.text), ["what time is it"])
     }
 
