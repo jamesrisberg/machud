@@ -44,6 +44,10 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   deleted. A capture or HUD save cannot reuse a hidden loadout's name, and applying, previewing
   or editing one says why it cannot. Turning the setting on brings them back at once, with the
   every-display capture, the desktop walk and the desktop pictures in the settings tab.
+- `machud clear` minimises only the windows showing on the screen under the pointer (add
+  `screen=<display>` to name another), the same set **Clear This Screen + Apply** clears, instead
+  of every window on every desktop. With **Multi-desktop loadouts** on it still clears every
+  desktop. `machud restore` brings back what the last clear minimised in both cases.
 - The capture sheet's "Include the tool dock and the apps' panels (the HUD)" box starts unticked.
 - The Loadouts settings tab draws a one-screen loadout on one screen, without naming a display,
   since it goes on whichever screen you apply it to.
@@ -99,6 +103,9 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   with "opened its new window on another desktop".
 - `machud apply loadout=… screen=<display>` with a display that is not attached says so instead
   of arranging the screen under the pointer.
+- A copy of MacHUD started with only `MACHUD_SOCKET` (for tests) keeps its config, state and dock
+  registry beside the socket, in `<socket path without extension>-config/`, instead of reading and
+  saving `~/.config/machud`. `MACHUD_CONFIG` still names the file when it is set.
 - With multi-desktop loadouts on, the wheel says how many desktops a captured multi-desktop
   loadout covers (it said none).
 - After the first capture, onboarding points to the menu item that edits it (Loadouts › its name ›

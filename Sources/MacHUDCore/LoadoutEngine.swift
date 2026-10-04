@@ -825,6 +825,55 @@ final class LoadoutEngine {
         return clearOthers(keeping: [])
     }
 
+    /// The same for the windows showing on the display with `frame` (what `apply … clear=1`
+    /// clears for a screen).
+    @discardableResult
+    func clear(on frame: CGRect) -> Int {
+        minimizedByClear = []
+        return clearOthers(keeping: [], on: frame)
+    }
+
+    /// What a standalone `clear` covers.
+    enum ClearScope: Equatable {
+        /// Every window on every desktop (multi-desktop loadouts on, no screen named).
+        case everyDesktop
+        /// The windows showing on the display with this frame.
+        case screen(CGRect)
+        /// One screen was called for and there is none to name: nothing is cleared.
+        case noScreen
+    }
+
+    /// Multi-desktop loadouts off, a loadout is one screen and so is a clear: the display under
+    /// the pointer, on the desktop showing. On, it reaches every desktop. A screen the caller
+    /// names (`screen=`) is the one cleared either way.
+    nonisolated static func clearScope(multiDesktop: Bool, named: CGRect?, pointer: CGRect?) -> ClearScope {
+        if let named { return .screen(named) }
+        if multiDesktop { return .everyDesktop }
+        return pointer.map(ClearScope.screen) ?? .noScreen
+    }
+
+    /// The `clear` verb (see docs/API.md).
+    func handleClear(_ args: [String: String]) -> [String: Any] {
+        var named: NSScreen?
+        if let text = args["screen"] {
+            let ref = ScreenRef.parse(text)
+            guard let found = ref?.resolve() else {
+                return ["ok": false, "error": "no screen matching \(ref?.label ?? text)"]
+            }
+            named = found
+        }
+        let pointer = screen(nil)
+        switch Self.clearScope(multiDesktop: store.config.multiDesktopLoadouts, named: named?.frame, pointer: pointer?.frame) {
+        case .everyDesktop:
+            return ["ok": true, "cleared": clearAll()]
+        case .screen(let frame):
+            let target = named ?? pointer
+            return ["ok": true, "screen": target?.localizedName ?? "", "cleared": clear(on: frame)]
+        case .noScreen:
+            return ["ok": false, "error": "no screen to clear"]
+        }
+    }
+
     /// Windows the most recent clear minimized, so `restore` can undo it.
     private(set) var minimizedByClear: [AXWindow] = []
     var hasClearedWindows: Bool { minimizedByClear.contains { $0.exists && $0.isMinimized } }
@@ -845,16 +894,16 @@ final class LoadoutEngine {
     /// appends to `minimizedByClear`; `apply`/`clearAll` reset it. With `screen` it clears
     /// only the windows showing on that display now (the apply has already switched to the
     /// group's desktop), so an apply clears the screens the loadout covers and nothing else;
-    /// without it (`clearAll`) it reaches every window on every desktop. MacHUD's own
+    /// without it (`clearAll`, the standalone clear with multi-desktop loadouts on) it reaches
+    /// every window on every desktop. MacHUD's own
     /// windows, the windows of MacHUD sibling apps (external panels) and hidden apps are
     /// left alone.
     func clearOthers(keeping jobs: [SlotJob], on screen: CGRect? = nil) -> Int {
         let exempt = clearExemptPIDs()
-        var entries = AllSpacesWindows.list()
-        if let screen { entries = entries.filter { $0.onScreen && $0.frame.intersects(screen) } }
         let targets = AllSpacesWindows.clearTargets(
-            entries, exempt: exempt,
-            hidden: Set(NSWorkspace.shared.runningApplications.filter(\.isHidden).map(\.processIdentifier)))
+            AllSpacesWindows.list(), exempt: exempt,
+            hidden: Set(NSWorkspace.shared.runningApplications.filter(\.isHidden).map(\.processIdentifier)),
+            on: screen)
         var axByPID: [pid_t: [(window: AXWindow, number: Int?)]] = [:]
         func axWindows(_ pid: pid_t) -> [(window: AXWindow, number: Int?)] {
             if let known = axByPID[pid] { return known }

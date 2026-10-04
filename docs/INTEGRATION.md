@@ -37,7 +37,10 @@ MACHUD_SOCKET=/tmp/machud-test-int.sock build/MacHUD.app/Contents/MacOS/MacHUD c
 
 The config it writes: a layout `MacHUD` with regions `left` (left half), `right` and `strip`
 parked `left` from `strip`; `apps.searchPaths` at the three build directories with
-`{"mode": "parked", "edge": "left"}`.
+`{"mode": "parked", "edge": "left"}`. `Ecosystem` is a one-screen loadout (a loadout is the
+display under the pointer, on the desktop showing); the config leaves `experimental` out, so
+multi-desktop loadouts (`experimental.multiDesktopLoadouts`, off by default, see
+[API.md](API.md#multi-desktop-loadouts-experimental)) are off in the run.
 
 ## Recorded run (main display 1728 pt wide)
 

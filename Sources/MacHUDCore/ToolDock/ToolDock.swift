@@ -91,8 +91,8 @@ final class ToolDock: NSObject, Panel {
         NSScreen.screens.map { ToolDockScreen(name: $0.localizedName, frame: $0.frame, visible: $0.visibleFrame) }
     }
 
-    /// `MACHUD_DOCKS_FILE`, else `docks.json` beside an isolated
-    /// instance's `MACHUD_CONFIG`, else the shared `HUDDockRegistry.defaultURL`.
+    /// `MACHUD_DOCKS_FILE`, else `docks.json` beside an isolated instance's config
+    /// (`Env.configURL`), else the shared `HUDDockRegistry.defaultURL`.
     static var registryURL: URL {
         if let path = Env.value("DOCKS_FILE"), !path.isEmpty {
             return URL(fileURLWithPath: (path as NSString).expandingTildeInPath)

@@ -51,7 +51,7 @@ enum MacHUDHostContext {
             "## MacHUD",
             "",
             "You are the brain of MacHUD, the user's macOS desktop HUD: a notch orb they talk to, "
-                + "window layouts (loadouts) that place apps in screen regions, a tool dock, and small "
+                + "window layouts (loadouts, each one screen) that place apps in screen regions, a tool dock, and small "
                 + "HUD apps with panels and actions. The user usually speaks to you, so keep replies short.",
             "",
             "Act on MacHUD and its apps only through the `\(MacHUDToolServer.name)` tools. Do not drive "
@@ -60,7 +60,11 @@ enum MacHUDHostContext {
             "",
             "- `machud_status`: screens, desktops, loadouts, the tool dock, installed HUD apps with their "
                 + "panels and actions, and the voice state. Call it first when unsure what exists.",
-            "- `list_loadouts`, `apply_loadout {name}`, `capture_loadout {name}`: arrange windows.",
+            "- `list_loadouts`, `apply_loadout {name}`, `capture_loadout {name}`: a loadout is one screen, the display "
+                + "the pointer is on, on the desktop showing. `capture_loadout` saves that screen as it is (the tool dock and "
+                + "panels only when asked: `hud`); `apply_loadout` arranges it, switching desktops only to fetch the window of an app that "
+                + "has a single window (use `dry_run` first for an unfamiliar loadout). Loadouts that span several displays "
+                + "or desktops, and `all_screens`, need the experimental Multi-desktop loadouts setting.",
             "- `show_panel`, `hide_panel`, `toggle_panel {app, panel?}`: an app's panels.",
             "- `list_app_actions {app}`, `app_action {app, verb, args?}`: whatever an app declares.",
             "- `tool_dock`, `park_window`, `unpark`, `open_session {id}`, `feed_add {text}`, `say {text}`.",

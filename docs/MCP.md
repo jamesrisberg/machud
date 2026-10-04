@@ -57,8 +57,8 @@ Each tool carries `annotations` (`readOnlyHint`, `destructiveHint`, `idempotentH
 | `machud_status` | | `apps`, `panels`, `screens`, `loadouts`, `status`, `widgets`, `tooldock`, `park list`, `voice status` and `voice state`: `apps[] {app, name, health, running, outdated, outdatedReason?, olderContract, actions[], panels[] {id, title, kind, visible, capabilities, actions}, widgets?[]}` (`panels` hover and windowed only, `widgets` the widget types it serves), `screens[] {index, name, main, builtin, w, h, spaces, currentSpace}`, `loadouts` (as `list_loadouts`'s `loadouts`; `loadoutsHeldBack` and `loadoutsHeldBackNote` as its `heldBack` and `heldBackNote`), `widgets {editing, revealed, placed[] {instance, app, type, size, display, layer, missingType?, problem?}}`, `toolDock {enabled, position, visible, autoHide, screenName}`, `parked[]`, `voice {status, connected, muted, phase, brainAvailable, brainProblem, sessionKey, sessionProvider, wakeListening}`. A part MacHUD cannot give is named in `unavailable {part: why}`; MacHUD not running fails the call |
 | `machud_diagnose` | | `diagnose`: `{path, anomalies[]}`. Saves a snapshot of where every MacHUD-family window really is (the window server's and AppKit's view, displays and desktops, full-screen windows, and the tool dock's, widgets' and voice host's state without dictated or reply text) to `~/Library/Logs/MacHUD/diagnose-<timestamp>.json` and lists what looks wrong. Call it before restarting anything. Changes nothing on screen or in any setting (not `readOnlyHint`: it writes the file and keeps the newest 20). See API.md, Diagnostics |
 | `list_loadouts` | | `loadouts`, `status`: `loadouts[] {name, layout?, windows, screens?, hud, hotkey?, startup, lastApplied}` (`lastApplied` is `status`'s `activeLoadout`), and `heldBack` / `heldBackNote` when MacHUD leaves out loadouts that span several desktops or displays (multi-desktop loadouts off) |
-| `apply_loadout` | `name`, `clear?`, `screen?`, `dry_run?` | `apply loadout= [clear=1] [screen=] [plan=1]` |
-| `capture_loadout` | `name`, `all_screens?`, `screen?`, `hud?` (`none`, `include`, `only`) | `capture name= [screens=all \| screen=] [hud=1 \| hud=only]` |
+| `apply_loadout` | `name`, `clear?`, `screen?`, `dry_run?` | `apply loadout= [clear=1] [screen=] [plan=1]`: arranges one screen, the display the pointer is on (or `screen`), on the desktop showing, then the loadout's HUD part |
+| `capture_loadout` | `name`, `all_screens?` (experimental), `screen?`, `hud?` (`none` the default, `include`, `only`) | `capture name= [screens=all \| screen=] [hud=1 \| hud=only]`: saves the screen the user is looking at, the display the pointer is on (or `screen`), as it is on the desktop showing, replacing a loadout of that name |
 | `show_panel` / `hide_panel` | `app`, `panel?` | `summon` / `dismiss id=<app>/<panel>` (the tool dock's show and hide: remembered frames, hover panels by their button) |
 | `toggle_panel` | `app`, `panel?` | `panels`, then `summon` or `dismiss` by the panel's `visible` |
 | `list_app_actions` | `app` | none (the apps last read): `{app, name, health, running, outdated, outdatedReason?, olderContract, actions[], panels[] {id, title, kind, capabilities, actions}, widgets?[]}` |
@@ -80,6 +80,31 @@ panels count (an app that serves only widgets has none, and the panel tools say 
 its manifest panels' `verbs` minus the panel verbs every app handles through `panel` (`show`,
 `hide`, `toggle`, `frame`, `mode`). An app not in the list last read from MacHUD is looked up once
 more before the call fails.
+
+## Loadouts
+
+A loadout is one screen. `capture_loadout` saves the windows on the display the pointer is on (or
+`screen`), on the desktop showing, and optionally the HUD (the tool dock's position and the
+running apps' panels: `hud` `include` or `only`; the default `none` leaves them out).
+`apply_loadout` arranges that display on the desktop showing; it switches desktops only to fetch
+the window of an app that has a single window and cannot open another, and `dry_run` returns the
+placement plan without moving anything (see [API.md](API.md#placement-plan)). An apply moves the
+user's windows, and its reply lists each slot's result.
+
+### Multi-desktop loadouts (experimental)
+
+Loadouts that span several displays or desktops are experimental and off by default. The setting
+is `experimental.multiDesktopLoadouts`, titled **Multi-desktop loadouts**, in the Experimental
+section of MacHUD's settings window (or `settings set experimental.multiDesktopLoadouts=true` over
+the socket); it takes effect at once. It turns on, for these tools: loadouts that span several
+displays or desktops (listed, applied and previewed), and `capture_loadout` with `all_screens`
+(every display into one loadout). With it off:
+
+- `list_loadouts` leaves such loadouts out and says how many in `heldBack` and `heldBackNote`;
+  `machud_status` carries the same as `loadoutsHeldBack` and `loadoutsHeldBackNote`.
+- `apply_loadout` (and its `dry_run`) of one by name, `capture_loadout` with `all_screens`, and
+  a capture into the name of a hidden loadout are tool errors that name the setting
+  (`isError: true`).
 
 ## The tool list follows the apps
 

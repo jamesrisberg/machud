@@ -1,7 +1,7 @@
 import AppKit
 import HUDKit
 
-/// "Preview Loadout": draws, on every display, where each slot of a loadout would go and
+/// A loadout's "Preview…": draws, on every display, where each slot of a loadout would go and
 /// what apply would do to get it there, coloured by action. The regions on the desktops
 /// that are showing can be dragged and resized in place (snapping to the layout grid);
 /// Apply saves those edits into the loadout's layout first. Slots bound to other desktops

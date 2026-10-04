@@ -7,9 +7,9 @@ extension LoadoutEngine {
         control.register("restore") { [weak self] _, done in
             done(["ok": true, "restored": self?.restore() ?? 0])
         }
-        control.register("clear") { [weak self] _, done in
+        control.register("clear") { [weak self] args, done in
             guard let self else { done(["ok": false, "error": "engine gone"]); return }
-            done(["ok": true, "cleared": self.clearAll()])
+            done(self.handleClear(args))
         }
         control.register("place") { [weak self] args, done in
             guard let self else { done(["ok": false, "error": "engine gone"]); return }

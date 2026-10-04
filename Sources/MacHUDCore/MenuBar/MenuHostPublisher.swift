@@ -9,18 +9,15 @@ import HUDKit
 final class MenuHostPublisher {
     static let refreshInterval: TimeInterval = 60
 
-    /// `MACHUD_HOST_FILE`, else `host.json` beside an isolated
-    /// instance's `MACHUD_CONFIG`, else `<socket>.host.json` beside its `MACHUD_SOCKET`, else
-    /// the shared `HUDMenuHost.defaultURL`: an isolated instance never tells the real
-    /// siblings to hide their icons.
+    /// `MACHUD_HOST_FILE`, else `host.json` beside an isolated instance's config (`Env.configURL`:
+    /// its `MACHUD_CONFIG`, or the folder beside its `MACHUD_SOCKET`), else the shared
+    /// `HUDMenuHost.defaultURL`: an isolated instance never tells the real siblings to hide
+    /// their icons.
     nonisolated static var fileURL: URL {
         if let path = Env.value("HOST_FILE"), !path.isEmpty {
             return URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
         }
         if let config = Env.configURL { return config.deletingLastPathComponent().appendingPathComponent("host.json") }
-        if let socket = Env.socketPath, !socket.isEmpty {
-            return URL(fileURLWithPath: (socket as NSString).expandingTildeInPath + ".host.json")
-        }
         return HUDMenuHost.defaultURL
     }
 

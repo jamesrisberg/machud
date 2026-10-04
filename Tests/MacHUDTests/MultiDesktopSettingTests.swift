@@ -19,8 +19,12 @@ final class MultiDesktopSettingTests: XCTestCase {
         XCTAssertEqual(field.default, .bool(false))
         XCTAssertEqual(field.group, "Experimental")
         let help = try XCTUnwrap(field.help)
-        XCTAssertTrue(help.contains("desktops"), help)
         XCTAssertTrue(help.lowercased().contains("still being worked on"), help)
+        for covered in ["span several desktops or displays", "capturing every screen", "walking desktops",
+                        "slots bound to a desktop", "spaces.policy", "spaces action=switch"] {
+            XCTAssertTrue(help.contains(covered), "the help names \(covered): \(help)")
+        }
+        XCTAssertFalse(help.contains(". "), "one sentence a user can read: \(help)")
         XCTAssertEqual(MacHUDSettings.values(config: .defaults, enabled: true, orbsHidden: false)[key] as? Bool, false)
     }
 

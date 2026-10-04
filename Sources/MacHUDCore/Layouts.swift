@@ -404,7 +404,7 @@ struct Config: Codable, Equatable {
     /// What apply does with windows on desktops that are not showing (default `bring`).
     var spaces: SpacesConfig? = nil
     /// Name of a loadout applied about two seconds after launch, once the sibling apps it
-    /// names are reachable (typically one saved with "Save Current HUD as Loadout…").
+    /// names are reachable (typically one saved with "Save Dock and Panels as HUD Loadout…").
     var startupLoadout: String? = nil
     /// The app catalog (Settings → Apps): its URL and the install directory.
     var catalog: CatalogConfig? = nil
@@ -451,8 +451,14 @@ struct Config: Codable, Equatable {
 final class LayoutStore {
     /// Config directory under the home folder; `state/` (parking) lives inside it.
     static let configSubpath = ".config/machud"
-    static let configURL: URL = Env.configURL ?? FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(configSubpath).appendingPathComponent("layouts.json")
+    static let configURL: URL = defaultConfigURL()
+    /// `layouts.json` for an environment: an isolated instance's (`Env.configURL`), else under
+    /// the home folder.
+    static func defaultConfigURL(environment: [String: String] = ProcessInfo.processInfo.environment,
+                                 home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
+        Env.configURL(in: environment)
+            ?? home.appendingPathComponent(configSubpath).appendingPathComponent("layouts.json")
+    }
     static let configDirectory = configURL.deletingLastPathComponent()
 
     private(set) var config: Config = .defaults
