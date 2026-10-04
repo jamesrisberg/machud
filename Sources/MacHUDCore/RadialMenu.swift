@@ -306,8 +306,9 @@ final class RadialMenu {
     /// How far the pointer goes from its first report before the wheel follows it.
     static let pointerTravel: CGFloat = 6
 
-    /// Moves the pointer to a point in display coordinates (y down from the primary display's
-    /// top), without a pause before it moves again. Tests record it instead.
+    /// Moves the pointer to a point in display coordinates, which are AX coordinates (y down
+    /// from the primary display's top), without a pause before it moves again. Tests record it
+    /// instead.
     var warpPointer: (CGPoint) -> Void = { point in
         CGWarpMouseCursorPosition(point)
         CGAssociateMouseAndMouseCursorPosition(1)
@@ -316,7 +317,8 @@ final class RadialMenu {
     var modifiers: () -> NSEvent.ModifierFlags = { NSEvent.modifierFlags }
 
     /// The screen a wheel opens on, in screen coordinates; `primaryHeight` is the height of the
-    /// primary display (the one at the origin), which turns screen points into display points.
+    /// primary display (the one at the origin), which turns screen points into display points
+    /// (`ScreenCoords.axPoint(fromCocoa:primaryHeight:)`).
     struct Display: Equatable {
         var frame: CGRect
         var visibleFrame: CGRect
@@ -333,12 +335,6 @@ final class RadialMenu {
             hypot(max(r.minX - point.x, 0, point.x - r.maxX), max(r.minY - point.y, 0, point.y - r.maxY))
         }
         return frames.indices.min { distance(frames[$0]) < distance(frames[$1]) }
-    }
-
-    /// `point` in screen coordinates (y up from the primary display's bottom) as a display
-    /// point (y down from its top), which is what moving the pointer takes.
-    nonisolated static func displayPoint(_ point: CGPoint, primaryHeight: CGFloat) -> CGPoint {
-        CGPoint(x: point.x, y: primaryHeight - point.y)
     }
 
     // MARK: Lifecycle
@@ -382,7 +378,7 @@ final class RadialMenu {
         wheel.selection = .cancel
         applyField()
         if movesPointer, hypot(center.x - origin.x, center.y - origin.y) > 0.5 {
-            warpPointer(Self.displayPoint(center, primaryHeight: display.primaryHeight))
+            warpPointer(ScreenCoords.axPoint(fromCocoa: center, primaryHeight: display.primaryHeight))
         }
     }
 

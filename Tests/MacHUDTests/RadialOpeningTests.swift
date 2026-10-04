@@ -65,7 +65,7 @@ final class RadialOpeningTests: XCTestCase {
                     XCTAssertEqual(menu.selection, .cancel, "\(what), within a few points of the first event")
                     XCTAssertEqual(menu.releaseOutcome, .cancelled, what)
                     if hypot(menu.center.x - pointer.x, menu.center.y - pointer.y) > 0.5 {
-                        XCTAssertEqual(warps, [RadialMenu.displayPoint(menu.center, primaryHeight: display.primaryHeight)], what)
+                        XCTAssertEqual(warps, [ScreenCoords.axPoint(fromCocoa: menu.center, primaryHeight: display.primaryHeight)], what)
                     } else {
                         XCTAssertEqual(warps, [], what)
                     }
@@ -109,8 +109,8 @@ final class RadialOpeningTests: XCTestCase {
     /// Screen points (y up from the primary display's bottom) become display points (y down
     /// from its top), which is what moving the pointer takes.
     func testThePointerIsMovedInDisplayPoints() {
-        XCTAssertEqual(RadialMenu.displayPoint(CGPoint(x: 300, y: 40), primaryHeight: 640), CGPoint(x: 300, y: 600))
-        XCTAssertEqual(RadialMenu.displayPoint(CGPoint(x: 1500, y: -60), primaryHeight: 640), CGPoint(x: 1500, y: 700))
+        XCTAssertEqual(ScreenCoords.axPoint(fromCocoa: CGPoint(x: 300, y: 40), primaryHeight: 640), CGPoint(x: 300, y: 600))
+        XCTAssertEqual(ScreenCoords.axPoint(fromCocoa: CGPoint(x: 1500, y: -60), primaryHeight: 640), CGPoint(x: 1500, y: 700))
     }
 
     /// A wheel opened by a script at a given point does not move the user's pointer; nothing is

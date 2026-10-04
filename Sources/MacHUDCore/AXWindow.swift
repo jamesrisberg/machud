@@ -24,6 +24,11 @@ enum ScreenCoords {
     static var primaryHeight: CGFloat { NSScreen.screens.first?.frame.height ?? 0 }
 
     static func axPoint(fromCocoa p: CGPoint) -> CGPoint {
+        axPoint(fromCocoa: p, primaryHeight: primaryHeight)
+    }
+
+    /// `p` as an AX point, given the primary display's height (tests give their own).
+    static func axPoint(fromCocoa p: CGPoint, primaryHeight: CGFloat) -> CGPoint {
         CGPoint(x: p.x, y: primaryHeight - p.y)
     }
 
