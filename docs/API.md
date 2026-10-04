@@ -396,8 +396,9 @@ catalog with the bundled tools selected (see Onboarding).
 
 ## Tool dock
 
-MacHUD's dock: a Dock-like strip (Liquid Glass on macOS 26, a behind-window blur
-before it; 18 pt corners, hairline border) with one button per discovered sibling app,
+MacHUD's dock: a Dock-like strip (the family's blurred, tinted backdrop: the window
+server's blur under a tint, dark in a dark appearance and light in a light one; 18 pt
+corners, hairline border) with one button per discovered sibling app,
 showing its real icon and a running dot. **One list**: hover apps first, then windowed
 apps (`HUDManifest.dockSorted`: by the manifest's `order` within each group, apps
 without one after, then by name), with a thin divider between the groups; a Parked
