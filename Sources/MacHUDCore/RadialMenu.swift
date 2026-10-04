@@ -725,14 +725,15 @@ final class RadialWheelView: NSView {
         for i in highlight.indices { highlight[i].target = (selection.index == i) ? 1 : 0 }
     }
 
+    /// Steps the springs; redraws only while something moves.
     func tick() {
         let dt = 1.0 / 120.0
-        var settled = appear.step(dt: dt, stiffness: 320, damping: 0.62, epsilon: 0.002)
+        let before = (appear.value, highlight.map(\.value))
+        _ = appear.step(dt: dt, stiffness: 320, damping: 0.62, epsilon: 0.002)
         for i in highlight.indices {
-            settled = highlight[i].step(dt: dt, stiffness: 420, damping: 0.66, epsilon: 0.002) && settled
+            _ = highlight[i].step(dt: dt, stiffness: 420, damping: 0.66, epsilon: 0.002)
         }
-        needsDisplay = true
-        _ = settled
+        if appear.value != before.0 || highlight.map(\.value) != before.1 { needsDisplay = true }
     }
 
     private func highlightValue(_ index: Int) -> Double {
