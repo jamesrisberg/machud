@@ -61,6 +61,7 @@ final class LoadoutMenu {
             return .init(focused: engine.focusedWindowLabel(), parked: engine.parking.parked.map(\.record.label))
         }
         radial.onCommit = { [weak self] outcome in self?.handle(outcome) }
+        radial.parkTargets = { [weak self] in self?.parkTargets() ?? .init() }
         radial.onDismiss = { [weak self] in
             guard let self, self.registrationDeferred else { return }
             self.registrationDeferred = false
@@ -76,7 +77,8 @@ final class LoadoutMenu {
     var widgetsState: (() -> RadialMenu.Wedge.WidgetsState?)?
     var onWidgets: ((Bool) -> Void)?
 
-    /// What the park wedge acts on, read as the wheel opens: the focused window and the parked ones.
+    /// What the park wedge acts on, read as the wheel opens and again as the park wedge becomes
+    /// highlighted: the focused window and the parked ones.
     var parkTargets: () -> RadialMenu.Wedge.ParkTargets
 
     func wedges() -> [RadialMenu.Wedge] {

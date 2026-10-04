@@ -252,6 +252,26 @@ final class RadialGeometryTests: XCTestCase {
         XCTAssertEqual(RadialMenu.ringCount(for: .widgets(.init(revealed: true, editing: true))), 2)
     }
 
+    /// The park wedge's targets are read again when it becomes highlighted, so the hint names
+    /// the window a release would park even after a click under the wheel changed the focus.
+    @MainActor
+    func testTheParkWedgeRereadsItsTargetsWhenHighlighted() {
+        let wedges = [RadialMenu.Wedge(name: "Code", kind: .loadout("Code")),
+                      RadialMenu.Wedge(name: "Park", kind: .park(.init(focused: "Safari · Docs")))]
+        let now = RadialMenu.Wedge.ParkTargets(focused: "Notes · Groceries", parked: ["Mail · Inbox"])
+        var reads = 0
+        let read: () -> RadialMenu.Wedge.ParkTargets = { reads += 1; return now }
+        XCTAssertNil(RadialMenu.refreshed(wedges, highlighting: 0, from: nil, parkTargets: read))
+        XCTAssertNil(RadialMenu.refreshed(wedges, highlighting: 1, from: 1, parkTargets: read), "only on becoming highlighted")
+        XCTAssertEqual(reads, 0)
+        let fresh = RadialMenu.refreshed(wedges, highlighting: 1, from: 0, parkTargets: read)
+        XCTAssertEqual(reads, 1)
+        XCTAssertEqual(fresh?[1].kind, .park(now))
+        XCTAssertEqual(fresh?[0].kind, wedges[0].kind)
+        XCTAssertEqual(fresh.map { RadialMenu.hint(for: .wedge(index: 1, ring: .inner), in: $0) }, "Park Notes · Groceries")
+        XCTAssertNil(RadialMenu.refreshed(fresh ?? [], highlighting: 1, from: nil, parkTargets: { now }), "unchanged targets")
+    }
+
     /// `menu` lists each wedge's name, its rings' labels and the hint each ring shows, and the
     /// selection with the hint showing now.
     @MainActor

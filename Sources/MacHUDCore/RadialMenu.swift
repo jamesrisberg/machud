@@ -119,7 +119,8 @@ struct RadialGeometry: Equatable {
 @MainActor
 final class RadialMenu {
     struct Wedge {
-        /// What the park wedge's rings act on, read as the wheel opens.
+        /// What the park wedge's rings act on, read as the wheel opens and again whenever the
+        /// park wedge becomes highlighted.
         struct ParkTargets: Equatable {
             /// The focused window's label ("Safari · Page title"); nil when nothing in front
             /// can be parked.
@@ -246,12 +247,29 @@ final class RadialMenu {
         }
     }
 
+    /// `wedges` with the park wedge's targets read again by `parkTargets`, when wedge `index`
+    /// has just become highlighted (it was `previous`) and is the park wedge; nil when nothing
+    /// changes. The wheel is click-through, so a click under it can change the focused window
+    /// while it is open: this keeps the hint naming the window a release would park.
+    static func refreshed(_ wedges: [Wedge], highlighting index: Int, from previous: Int?,
+                          parkTargets: (() -> Wedge.ParkTargets)?) -> [Wedge]? {
+        guard index != previous, wedges.indices.contains(index), case .park(let old) = wedges[index].kind,
+              let parkTargets else { return nil }
+        let now = parkTargets()
+        guard now != old else { return nil }
+        var out = wedges
+        out[index].kind = .park(now)
+        return out
+    }
+
     /// Applied when the hotkey is released.
     var onCommit: ((Outcome) -> Void)?
     /// False when the menu's own hotkey already uses shift, so it cannot double as "clear".
     var shiftSelectsOuter = true
     /// Called whenever a visible wheel goes away, however it was dismissed.
     var onDismiss: (() -> Void)?
+    /// Reads the park wedge's targets now (`refreshed`).
+    var parkTargets: (() -> Wedge.ParkTargets)?
 
     private(set) var wedges: [Wedge] = []
     private(set) var layout = RadialLayout(wedges: [])
@@ -332,9 +350,11 @@ final class RadialMenu {
         guard wedges.indices.contains(index) else { return }
         keyboardIndex = index
         if let ring {
+            let previous = selection.index
             let ring = RadialGeometry.Ring.allCases[min(ring.position, geometry.ringCount(of: index) - 1)]
             selection = .wedge(index: index, ring: ring)
             pointerOffset = offset(index: index, ring: ring)
+            noteHighlight(from: previous)
         } else {
             refreshSelection()
         }
@@ -436,6 +456,7 @@ final class RadialMenu {
     private var shiftHeld: Bool { shiftSelectsOuter && NSEvent.modifierFlags.contains(.shift) }
 
     private func refreshSelection() {
+        let previous = selection.index
         let pointer = geometry.selection(at: pointerOffset, shift: shiftHeld)
         if let k = keyboardIndex {
             let ring = pointer.ring ?? (shiftHeld ? geometry.lastRing(of: k) : .inner)
@@ -443,7 +464,16 @@ final class RadialMenu {
         } else {
             selection = pointer
         }
+        noteHighlight(from: previous)
         wheel.selection = selection
+    }
+
+    /// The park wedge reads its targets again as it becomes highlighted (`refreshed`).
+    private func noteHighlight(from previous: Int?) {
+        guard let i = selection.index,
+              let fresh = Self.refreshed(wedges, highlighting: i, from: previous, parkTargets: parkTargets) else { return }
+        wedges = fresh
+        wheel.update(wedges: fresh)
     }
 
     private func pointerMoved(to location: CGPoint) {
@@ -724,6 +754,13 @@ final class RadialWheelView: NSView {
         if highlight.count != wedges.count { highlight = wedges.map { _ in Spring(0) } }
         if lit.count != roles.count { lit = roles.map { _ in Spring(0) } }
         retarget()
+        needsDisplay = true
+    }
+
+    /// The same wheel with wedges whose kinds changed but whose labels did not (the park
+    /// wedge's targets): only the hint changes.
+    func update(wedges: [RadialMenu.Wedge]) {
+        self.wedges = wedges
         needsDisplay = true
     }
 
