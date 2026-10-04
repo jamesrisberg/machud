@@ -90,6 +90,8 @@ public final class VoiceHostController: VoiceHostActing {
     static let wakeConfirmLoading = "The speech model was still loading, so the wake phrase could not be confirmed."
     static let wakeConfirmFailed = "The speech model could not check the wake phrase."
     static let wakeConfirmSlow = "Checking the wake phrase took longer than 1.5 s."
+    static let wakeConfirmBusy =
+        "The speech model was still transcribing the last take, so the wake phrase could not be confirmed."
     static let wakeConfirmUnavailable = "This voice host has no speech model to confirm the wake phrase with."
     static let wakeModelMissing = "The wake phrase's model is not installed"
     static let hostQuit = "The voice host quit"
@@ -257,7 +259,12 @@ public final class VoiceHostController: VoiceHostActing {
         let run: Int
     }
 
-    private var wakeConfirmation: WakeConfirmation?
+    private var wakeConfirmation: WakeConfirmation? {
+        didSet { if wakeConfirmation == nil { wakeAudioWaiting = nil } }
+    }
+    /// The audio of the wake being confirmed while it waits for a take's transcription to end;
+    /// let go once it goes to the speech model or the wake is decided.
+    private var wakeAudioWaiting: [Float]?
     /// Why the latest wake's phrase could not be confirmed; `wakeProblem` while nothing else is,
     /// until a wake's words are had, confirmation is turned off or the voice settings change.
     private var wakeConfirmProblem: String?
@@ -654,12 +661,34 @@ public final class VoiceHostController: VoiceHostActing {
     /// Hands what woke the listener to the speech model and waits, at most `wakeConfirmTimeout`,
     /// for its words. Until they come nothing is shown, stopped, said or written; the listener
     /// stays quiet meanwhile. The audio goes to `wakeConfirmer` and nowhere else.
+    ///
+    /// The speech model transcribes one thing at a time, as SpeakFree uses it (its engine is not
+    /// made to run two at once): while a take is being transcribed the wake waits for it, within
+    /// the same time limit (`confirmWaitingWake`).
     private func confirmWake(_ detection: WakeDetection, trigger: VoiceTakeTrigger) {
         let pending = WakeConfirmation(trigger: trigger, phrase: detection.phrase, startedAt: now(), run: wakeRun)
         wakeConfirmation = pending
-        schedule(Self.wakeConfirmTimeout) { [weak self] in self?.wakeChecked(pending.id, .cannot(Self.wakeConfirmSlow)) }
+        schedule(Self.wakeConfirmTimeout) { [weak self] in
+            guard let self else { return }
+            wakeChecked(pending.id, .cannot(wakeAudioWaiting == nil ? Self.wakeConfirmSlow : Self.wakeConfirmBusy))
+        }
+        guard transcribing.isEmpty else {
+            wakeAudioWaiting = detection.audio
+            return
+        }
+        transcribeWake(detection.audio, pending)
+    }
+
+    /// The take that was being transcribed is done: the wake waiting for it goes to the speech model.
+    private func confirmWaitingWake() {
+        guard transcribing.isEmpty, let audio = wakeAudioWaiting, let pending = wakeConfirmation else { return }
+        wakeAudioWaiting = nil
+        transcribeWake(audio, pending)
+    }
+
+    private func transcribeWake(_ audio: [Float], _ pending: WakeConfirmation) {
         guard let wakeConfirmer else { return wakeChecked(pending.id, .cannot(Self.wakeConfirmUnavailable)) }
-        wakeConfirmer.transcribe(detection.audio) { [weak self] result in
+        wakeConfirmer.transcribe(audio) { [weak self] result in
             switch result {
             case .success(let words): self?.wakeChecked(pending.id, .heard(words))
             case .failure(let failure): self?.wakeChecked(pending.id, .cannot(Self.message(for: failure)))
@@ -804,6 +833,8 @@ public final class VoiceHostController: VoiceHostActing {
     }
 
     private func handle(_ update: DictationUpdate, take id: UUID) {
+        // A take's transcription that ended may let a wake waiting for it be confirmed.
+        defer { confirmWaitingWake() }
         let isCurrent = take.map { $0.id == nil || $0.id == id } ?? false
         if isCurrent, take?.id == nil {
             take?.id = id

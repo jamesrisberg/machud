@@ -903,13 +903,16 @@ true) a wake starts nothing until the dictation's speech model, on this Mac, has
 the listener heard (up to the last 2.5 s) and the phrase's words are in it, in order, as whole
 words (case and punctuation ignored: "Hey, Jarvis." is the phrase, "Hey Javier", "Jarvis" or
 "Hey Javis" is not). Meanwhile nothing shows, a reply being spoken goes on and the listener is
-quiet; this takes about 130 ms. Confirmed, the take starts as any wake's does, stopping a reply
+quiet; this takes about 130 ms. The speech model transcribes one thing at a time, so a wake that
+comes while a take is still being transcribed waits for that first, within the same time limit. Confirmed, the take starts as any wake's does, stopping a reply
 being spoken. Not confirmed, nothing shows or stops and nothing is said: the wake writes its
 journal line and its log line (`The wake phrase was not confirmed`, never the words) and the
 listener listens again with its quiet period. A wake that cannot be confirmed counts as not
 confirmed and says why in its journal line and in `wakeProblem`: no speech model (`Download the
 speech model to confirm the wake phrase.`), one still loading after launch (it is loaded for the
-next wake), a transcription that failed, or no answer within 1.5 s. The audio is used for this
+next wake), a transcription that failed, a take still being transcribed at the end of the 1.5 s
+(`The speech model was still transcribing the last take, so the wake phrase could not be
+confirmed.`), or no answer within 1.5 s. The audio is used for this
 and let go: it is never kept, written, logged or sent, and neither are the words. With
 `voice.wakeConfirm` false the detection alone starts the take. `voice.wakeConfirm` is the voice
 host's own key, kept inside `voice` beside VoiceKit's.

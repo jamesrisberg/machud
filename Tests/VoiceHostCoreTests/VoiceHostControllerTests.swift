@@ -1264,6 +1264,82 @@ final class VoiceHostControllerTests: XCTestCase {
         assertTheWakeWordIsNotDeaf(controller)
     }
 
+    /// An fn dictation that stopped recording and is being transcribed; the wake word listens again.
+    private func transcribeADictation(_ controller: VoiceHostController, file: StaticString = #filePath,
+                                      line: UInt = #line) {
+        keys.send(.begin(.primary))
+        keys.send(.end)
+        XCTAssertEqual(controller.state.phase, .transcribing(.dictation), file: file, line: line)
+    }
+
+    /// The speech model transcribes one thing at a time, as SpeakFree uses it: a wake that comes
+    /// while a take is being transcribed waits for it, then goes to the model.
+    func testAWakeWhileATakeIsTranscribedWaitsForItThenIsConfirmed() {
+        var settings = VoiceHostSettings()
+        settings.voice.wakeWordEnabled = true
+        let controller = makeController(settings)
+        confirmer.immediate = nil
+        clock.now = 10
+        transcribeADictation(controller)
+        XCTAssertTrue(wake.listening)
+        wake.detect(audio: [0.4])
+        XCTAssertTrue(confirmer.heard.isEmpty, "not while the take is transcribed")
+        clock.now = 10.5
+        dictation.finish("a note")
+        XCTAssertEqual(dictation.inserted, [], "typed by the dictation itself")
+        XCTAssertEqual(journal.records.map(\.outcome), [.typed])
+        XCTAssertEqual(confirmer.heard, [[0.4]], "sent once the transcription is done")
+        clock.now = 10.6
+        confirmer.answer("Hey Jarvis")
+        XCTAssertEqual(dictation.starts, [.cursor, .caller])
+        controller.perform(.stop)
+        XCTAssertEqual(controller.state.lastTakeEnd?.trigger,
+                       .wake(score: 0.973, phrase: "Hey Jarvis", frames: 2, peak: 0.973, confirmed: true, confirmMs: 600))
+        clock.advance(to: 20)
+        XCTAssertEqual(journal.records.count, 1, "the time limit passed unused")
+    }
+
+    func testAWakeStillWaitingForATakesTranscriptionAtTheLimitCannotBeConfirmed() {
+        var settings = VoiceHostSettings()
+        settings.voice.wakeWordEnabled = true
+        let controller = makeController(settings)
+        confirmer.immediate = nil
+        clock.now = 10
+        transcribeADictation(controller)
+        wake.detect()
+        clock.advance(to: 11.5)
+        XCTAssertEqual(VoiceHostController.wakeConfirmBusy,
+                       "The speech model was still transcribing the last take, so the wake phrase could not be confirmed.")
+        XCTAssertEqual(journal.records.last?.reason, VoiceHostController.wakeConfirmBusy)
+        XCTAssertEqual(journal.records.last?.trigger,
+                       .wake(score: 0.973, phrase: "Hey Jarvis", frames: 2, peak: 0.973, confirmed: false, confirmMs: 1500))
+        XCTAssertEqual(controller.state.wakeProblem, VoiceHostController.wakeConfirmBusy)
+        XCTAssertEqual(wake.rearms, [VoiceHostController.wakeQuietPeriod])
+        assertTheWakeWordIsNotDeaf(controller)
+        dictation.finish("a note")
+        XCTAssertTrue(confirmer.heard.isEmpty, "never sent")
+        XCTAssertTrue(dictation.starts.allSatisfy { $0 == .cursor })
+    }
+
+    /// A wake waiting for a take's transcription whose listener stops (a script starts a take) is
+    /// refused then, and never sent.
+    func testAWakeWaitingForATakesTranscriptionIsRefusedWhenItsListenerStops() {
+        var settings = VoiceHostSettings()
+        settings.voice.wakeWordEnabled = true
+        let controller = makeController(settings)
+        confirmer.immediate = nil
+        let first = dictation.takeID
+        transcribeADictation(controller)
+        let transcribed = dictation.takeID
+        XCTAssertNotEqual(first, transcribed)
+        wake.detect()
+        controller.perform(.start(.agent), trigger: .socket(action: "ask"))
+        XCTAssertEqual(journal.records.last?.reason, VoiceHostController.takeRecording)
+        dictation.finish("a note", take: transcribed, at: .cursor)
+        XCTAssertTrue(confirmer.heard.isEmpty)
+        XCTAssertEqual(controller.state.phase, .listening(.agent))
+    }
+
     func testAWakeBeingConfirmedWhenTheHostQuitsIsJournaled() {
         var settings = VoiceHostSettings()
         settings.voice.wakeWordEnabled = true
