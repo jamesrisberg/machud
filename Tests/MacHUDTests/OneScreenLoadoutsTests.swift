@@ -1,4 +1,5 @@
 import AppKit
+import HUDKit
 import XCTest
 @testable import MacHUDCore
 
@@ -441,5 +442,143 @@ final class LoadoutVerbRefusalTests: XCTestCase {
         XCTAssertEqual(toasts.count, 1)
         XCTAssertEqual(toasts.first?.0, "Displays changed")
         XCTAssertEqual(toasts.first?.1, "Did not re-apply Studio. " + (ExperimentalLoadouts.refusal(for: studio, in: engine.store.config) ?? ""))
+    }
+}
+
+/// One apply at a time: a second one while an apply runs is refused, loudly, and touches
+/// nothing; the running one is never interrupted. The slots are MacHUD panels of the test's own,
+/// so these applies move only the test's windows.
+@MainActor
+final class OneApplyAtATimeTests: XCTestCase {
+    /// A panel whose window is the test's own; `hasWindow` false keeps its slot waiting.
+    private final class TestPanel: Panel {
+        let id: String
+        var title: String { id }
+        var symbol: String { "square" }
+        let hasWindow: Bool
+        private(set) var shows = 0
+        lazy var made = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 50, height: 50), styleMask: [.borderless],
+                                 backing: .buffered, defer: true)
+        var window: NSWindow? { hasWindow ? made : nil }
+        var isVisible: Bool { false }
+
+        init(id: String, hasWindow: Bool) {
+            self.id = id
+            self.hasWindow = hasWindow
+        }
+
+        func show() { shows += 1 }
+        func hide() {}
+    }
+
+    private var quick: TestPanel!
+    private var stuck: TestPanel!
+
+    private func engine() throws -> LoadoutEngine {
+        let json = """
+        {"gap": 0, "layouts": [{"name": "Main", "regions": [{"id": "a", "name": "A", "x": 0, "y": 0, "w": 0.5, "h": 0.5}]}],
+         "loadouts": [
+            {"name": "Quick", "layout": "Main", "slots": [{"regionID": "a", "occupant": {"kind": "panel", "id": "test.quick"}}]},
+            {"name": "Stuck", "layout": "Main", "slots": [{"regionID": "a", "occupant": {"kind": "panel", "id": "test.stuck"}}]},
+            {"name": "Studio", "layout": "Main", "slots": [],
+             "screens": [{"screen": {"main": true}, "layout": "Main",
+                          "slots": [{"regionID": "a", "occupant": {"kind": "panel", "id": "test.quick"}}]}]}]}
+        """
+        guard try TestConfig.write(json) else {
+            throw XCTSkip("LayoutStore.configURL was already fixed to \(LayoutStore.configURL.path)")
+        }
+        let registry = PanelRegistry()
+        quick = TestPanel(id: "test.quick", hasWindow: true)
+        stuck = TestPanel(id: "test.stuck", hasWindow: false)
+        registry.register(quick)
+        registry.register(stuck)
+        return LoadoutEngine(store: LayoutStore(), panels: registry)
+    }
+
+    private func loadout(_ engine: LoadoutEngine, _ name: String) throws -> Loadout {
+        try XCTUnwrap(engine.store.loadout(named: name))
+    }
+
+    func testASecondApplyDuringOneIsRefusedAndTouchesNothing() throws {
+        let engine = try engine()
+        engine.placementTimeLimit = 0.5
+        var first: LoadoutEngine.ApplyReport?
+        engine.apply(try loadout(engine, "Stuck"), clear: false) { first = $0 }
+        XCTAssertNil(first, "still running: its panel has no window yet")
+        var second: LoadoutEngine.ApplyReport?
+        engine.apply(try loadout(engine, "Quick"), clear: false) { second = $0 }
+        XCTAssertEqual(second?.refused, "Stuck is still being applied")
+        XCTAssertEqual(second?.json["error"] as? String, "Stuck is still being applied")
+        XCTAssertEqual(quick.shows, 0, "the refused apply touched nothing")
+        XCTAssertEqual(engine.activeLoadout, "Stuck")
+        XCTAssertTrue(spin(until: { first != nil }))
+        XCTAssertNil(first?.refused, "the running one was not interrupted")
+        // Done: the next one runs.
+        var third: LoadoutEngine.ApplyReport?
+        engine.apply(try loadout(engine, "Quick"), clear: false) { third = $0 }
+        XCTAssertTrue(spin(until: { third != nil }))
+        XCTAssertNil(third?.refused)
+        XCTAssertEqual(third?.placed, ["a"])
+    }
+
+    func testAnApplyThatRunsOutOfTimeEndsAndTheNextRuns() throws {
+        let engine = try engine()
+        engine.placementTimeLimit = 0.3
+        var stuckReport: LoadoutEngine.ApplyReport?
+        engine.apply(try loadout(engine, "Stuck"), clear: false) { stuckReport = $0 }
+        XCTAssertTrue(spin(until: { stuckReport != nil }))
+        XCTAssertEqual(stuckReport?.failed["a"], "timed out")
+        var next: LoadoutEngine.ApplyReport?
+        engine.apply(try loadout(engine, "Quick"), clear: false) { next = $0 }
+        XCTAssertTrue(spin(until: { next != nil }))
+        XCTAssertNil(next?.refused)
+    }
+
+    func testARefusedApplyLeavesNothingRunning() throws {
+        let engine = try engine()
+        var refused: LoadoutEngine.ApplyReport?
+        engine.apply(try loadout(engine, "Studio"), clear: false) { refused = $0 }
+        XCTAssertNotNil(refused?.refused)
+        var next: LoadoutEngine.ApplyReport?
+        engine.apply(try loadout(engine, "Quick"), clear: false) { next = $0 }
+        XCTAssertTrue(spin(until: { next != nil }))
+        XCTAssertNil(next?.refused)
+    }
+
+    /// A sibling app named by the HUD part that never starts listening holds its commands: the
+    /// apply still ends, at `hudTimeLimit`, so it cannot block every later apply.
+    func testAHUDPartThatNeverAnswersEndsTheApplyInTime() throws {
+        let engine = try engine()
+        engine.hudTimeLimit = 0.3
+        let workspace = FakeWorkspace()
+        workspace.installed = ["dev.test.quiet"]
+        let supervisor = AppSupervisor(workspace: workspace, connector: FakeConnector(), schedule: ManualClock().schedule)
+        let externals = ExternalPanels(registry: PanelRegistry(), supervisor: supervisor) { AppsConfig() }
+        let manifest = HUDManifest(id: "dev.test.quiet", name: "Quiet", socket: "/tmp/machud-quiet-\(getpid()).sock",
+                                   panels: [HUDManifest.Panel(id: "p", title: "P")])
+        externals.install([ExternalApp(manifest: manifest, bundleURL: URL(fileURLWithPath: "/tmp/Quiet.app"))], autoLaunch: [])
+        engine.hudEngine = HUDLoadoutEngine(externals: externals, dockPosition: { nil }, setDockPosition: { _ in })
+        var hudOnly = Loadout(name: "HUD", layout: "", slots: [], hotkey: nil)
+        hudOnly.hud = HUDLoadout(apps: ["dev.test.quiet": .init(panels: ["p": .init(visible: true)])])
+        var report: LoadoutEngine.ApplyReport?
+        engine.apply(hudOnly, clear: false) { report = $0 }
+        XCTAssertTrue(spin(until: { report != nil }, timeout: 3))
+        XCTAssertEqual(report?.hud?.apps["dev.test.quiet"], "no answer in time")
+        XCTAssertNil(engine.applying)
+    }
+
+    func testAnAutomaticApplyDuringOneIsSkippedWithOneToast() throws {
+        let engine = try engine()
+        engine.placementTimeLimit = 0.5
+        var toasts: [(String, String?)] = []
+        engine.notify = { title, detail, _ in toasts.append((title, detail)) }
+        var first: LoadoutEngine.ApplyReport?
+        engine.apply(try loadout(engine, "Stuck"), clear: false) { first = $0 }
+        engine.applyAutomatically(try loadout(engine, "Quick"), .displaysChanged)
+        engine.applyAutomatically(try loadout(engine, "Quick"), .startup)
+        XCTAssertEqual(toasts.map(\.0), ["Displays changed", "Startup loadout not applied"])
+        XCTAssertEqual(toasts.map(\.1), ["Did not re-apply Quick. Stuck is still being applied", "Stuck is still being applied"])
+        XCTAssertEqual(quick.shows, 0)
+        XCTAssertTrue(spin(until: { first != nil }))
     }
 }

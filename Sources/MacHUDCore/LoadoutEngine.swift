@@ -55,7 +55,8 @@ final class LoadoutEngine {
         var actual: [String: CGRect] = [:]
         /// What became of the loadout's `hud` part, if it has one.
         var hud: HUDLoadoutEngine.Report?
-        /// Why the loadout was not applied at all (see `ExperimentalLoadouts`); nothing moved.
+        /// Why the loadout was not applied at all, nothing having moved: it spans desktops or
+        /// displays while that is off (`ExperimentalLoadouts`), or another apply is still running.
         var refused: String?
 
         var json: [String: Any] {
@@ -138,6 +139,9 @@ final class LoadoutEngine {
     let panels: PanelRegistry
     /// Name of the most recently applied loadout.
     private(set) var activeLoadout: String?
+    /// The loadout being applied now. One apply runs at a time: two would each record the desktop
+    /// showing and switch back to it, and whichever finished last would win.
+    private(set) var applying: String?
     /// Redirections the most recent apply made, so `status` can report them.
     var redirects: [Redirect] = []
     /// The loadout those redirections belong to.
@@ -243,18 +247,23 @@ final class LoadoutEngine {
     /// Apply `loadout` on `screen` (default: screen under the mouse).
     /// `clear`: minimize every other window (and close MacHUD-owned web windows) first.
     /// A loadout's `hud` part (tool dock and sibling panels) goes after its windows, so it
-    /// has the last word on a sibling panel that is in both. A loadout that spans desktops or
-    /// displays while that is off is refused before anything moves (`ApplyReport.refused`).
+    /// has the last word on a sibling panel that is in both. Refused before anything moves
+    /// (`ApplyReport.refused`): a loadout that spans desktops or displays while that is off, and
+    /// any apply while another is still running (never queued).
     func apply(_ loadout: Loadout, clear: Bool, screen: NSScreen? = nil, completion: @escaping (ApplyReport) -> Void) {
-        if let refusal = ExperimentalLoadouts.refusal(for: loadout, in: store.config) {
+        let refusal = ExperimentalLoadouts.refusal(for: loadout, in: store.config)
+            ?? applying.map { "\($0) is still being applied" }
+        if let refusal {
             NSLog("MacHUD: not applying '%@': %@", loadout.name, refusal)
             var report = ApplyReport(loadout: loadout.name)
             report.refused = refusal
             completion(report)
             return
         }
+        applying = loadout.name
         activeLoadout = loadout.name
         let completion: (ApplyReport) -> Void = { [weak self] report in
+            self?.applying = nil
             completion(report)
             self?.onApplied?(report)
         }
@@ -263,17 +272,44 @@ final class LoadoutEngine {
             applyAcrossScreens(loadout, clear: clear, screen: screen, completion: completion)
             return
         }
-        let applyHUD: (ApplyReport) -> Void = { report in
-            hudEngine.apply(hud) { hudReport in
+        // A sibling that never starts listening would hold its commands, and this apply (with
+        // every later one), for good: the HUD part gets `hudTimeLimit`.
+        let applyHUD: (ApplyReport) -> Void = { [hudTimeLimit] report in
+            let finish = Once<HUDLoadoutEngine.Report> { hudReport in
                 var report = report
                 report.hud = hudReport
                 completion(report)
+            }
+            hudEngine.apply(hud) { finish.give($0) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + hudTimeLimit) {
+                MainActor.assumeIsolated {
+                    var late = HUDLoadoutEngine.Report(dock: hud.dock?.position.rawValue)
+                    for id in (hud.apps ?? [:]).keys { late.apps[id] = "no answer in time" }
+                    finish.give(late)
+                }
             }
         }
         if loadout.allSlots.isEmpty && !clear {
             applyHUD(ApplyReport(loadout: loadout.name))
         } else {
             applyAcrossScreens(loadout, clear: clear, screen: screen, completion: applyHUD)
+        }
+    }
+
+    /// How long a group's slots may take to be placed once their windows are asked for.
+    var placementTimeLimit: TimeInterval = 15
+    /// How long the sibling apps of a loadout's HUD part may take to answer.
+    var hudTimeLimit: TimeInterval = 30
+
+    /// Passes on the first value only.
+    @MainActor
+    final class Once<Value> {
+        private var body: ((Value) -> Void)?
+        init(_ body: @escaping (Value) -> Void) { self.body = body }
+        func give(_ value: Value) {
+            guard let body else { return }
+            self.body = nil
+            body(value)
         }
     }
 
@@ -455,7 +491,7 @@ final class LoadoutEngine {
     /// each window is placed on the main thread as soon as it shows up.
     func run(_ jobs: [SlotJob], report: ApplyReport, completion: @escaping (ApplyReport) -> Void) {
         var report = report
-        let deadline = Date().addingTimeInterval(15)
+        let deadline = Date().addingTimeInterval(placementTimeLimit)
 
         func finish() {
             browsers.finishOpening()

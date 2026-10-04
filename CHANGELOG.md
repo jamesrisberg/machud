@@ -82,6 +82,10 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   loadouts held back as experimental instead of listing them.
 
 ### Fixed
+- One loadout is applied at a time. Asking for another while one is being applied (a hotkey, the
+  menu, a script, the voice agent, the startup loadout or a display change) says "<name> is
+  still being applied" instead of running both, which could leave a desktop switched. A HUD
+  part whose app never answers no longer keeps the apply going: it is given 30 seconds.
 - MacHUD no longer freezes while macOS asks whether it may control System Events (which it uses
   to switch desktops when the plain keystroke is ignored), and never asks that in the middle of
   applying a loadout: without that permission the switch fails at once and says how to allow it
