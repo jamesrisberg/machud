@@ -123,32 +123,6 @@ struct AXWindow {
 
     func setCocoaFrame(_ r: CGRect) { setAXFrame(ScreenCoords.axRect(fromCocoa: r)) }
 
-    /// Ask a running app to open a window by pressing its ⌘N menu item (apps like
-    /// TextEdit launch with no window at all). True once the item was pressed.
-    static func openNewWindow(pid: pid_t) -> Bool {
-        guard let item = newWindowItem(pid: pid) else { return false }
-        return AXUIElementPerformAction(item, kAXPressAction as CFString) == .success
-    }
-
-    /// The app's enabled ⌘N menu item (plain ⌘N, which beats matching a localized "New"
-    /// title), if its menu bar is reachable without activating it.
-    static func newWindowItem(pid: pid_t) -> AXUIElement? {
-        let app = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(app, 0.5)
-        guard let bar = app.elementAttribute(kAXMenuBarAttribute),
-              let menus = bar.rawAttribute(kAXChildrenAttribute) as? [AXUIElement] else { return nil }
-        for menu in menus {
-            guard let submenu = (menu.rawAttribute(kAXChildrenAttribute) as? [AXUIElement])?.first,
-                  let items = submenu.rawAttribute(kAXChildrenAttribute) as? [AXUIElement] else { continue }
-            for item in items where item.stringAttribute(kAXMenuItemCmdCharAttribute) == "n"
-                && item.rawAttribute(kAXMenuItemCmdModifiersAttribute) as? Int == 0
-                && item.rawAttribute(kAXEnabledAttribute) as? Bool != false {
-                return item
-            }
-        }
-        return nil
-    }
-
     /// Bring the window to the front of the window stack without activating its app.
     @discardableResult
     func raise() -> Bool {

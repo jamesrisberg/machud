@@ -145,13 +145,6 @@ final class PlacementPlanTests: XCTestCase {
         XCTAssertEqual(step(input).action, .cannot)
     }
 
-    func testNewWindowClasses() {
-        XCTAssertEqual(NewWindowClass.of(bundleID: "com.apple.MobileSMS", hasNewWindowMenu: true), .single)
-        XCTAssertEqual(NewWindowClass.of(bundleID: "com.google.Chrome", hasNewWindowMenu: false), .browser)
-        XCTAssertEqual(NewWindowClass.of(bundleID: "com.apple.TextEdit", hasNewWindowMenu: true), .menu)
-        XCTAssertEqual(NewWindowClass.of(bundleID: "com.example.unknown", hasNewWindowMenu: false), .single)
-    }
-
     func testPlanJSONShape() {
         let s = step(slot([win(7, screen: 1, space: 1, visible: true)]))
         let json = s.json

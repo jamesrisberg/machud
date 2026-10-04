@@ -176,10 +176,14 @@ switch fails), its slot reports `cannot`, naming the app and saying it is on ano
 An app whose windows are all on other desktops and that would not open a window without being
 brought forward is not brought forward (that would show its desktop); its slot reports `cannot`
 too. A window showing on another display is still moved over, and a minimised one restored.
-Whether an app can open another window: browsers can; the chat and media apps MacHUD lists as
-single-window (Messages, Signal, Beeper, Slack, Discord, WhatsApp, Telegram, Spotify, Music,
-FaceTime, Zoom, Teams, System Settings, App Store) cannot; any other app can when its menus have
-an enabled ⌘N item.
+Whether an app can open another window: browsers can; any other app can when its menus hold an
+enabled item titled "New Window" or "New <something> Window" ("New Finder Window", Mail's "New
+Viewer Window"; a private or incognito one only when there is no other), in a menu or one submenu
+down (Xcode's File › New › Window counts as "New Window"; the Window menu's list of open windows
+is not read), and MacHUD presses that item whatever its shortcut. ⌘N is never pressed (in Notes or Mail it makes a note or a message); an app with no
+window at all is asked to reopen, which shows a document app's window. Titles are matched in
+English: under another system language no item matches, so the app counts as single-window and
+its window is fetched.
 
 While they are on, `spaces.policy` in layouts.json decides what happens to a window on a
 desktop that is not showing:
@@ -190,8 +194,8 @@ desktop that is not showing:
   With a single display macOS 26 offers no way across, so it falls back to
   `launchNew`.
 - `launchNew`: leave it, and open a new window here without activating the app:
-  browsers by Apple event, apps with a plain ⌘N menu item through that item.
-  Single-window apps (Messages, Signal, Beeper, Slack, Discord, …) report `cannot`.
+  browsers by Apple event, other apps through their New Window menu item (above).
+  Apps without one (Messages, Signal, Notes, …) report `cannot`.
 - `leave`: report `leave`.
 
 The apply toast lists every move, desktop switch and launch with its reason, every

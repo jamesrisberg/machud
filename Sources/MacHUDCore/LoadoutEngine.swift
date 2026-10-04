@@ -550,16 +550,20 @@ final class LoadoutEngine {
             }
             return .waiting
         }
-        // Running but window-less (TextEdit and friends): ask it for one. An app with
+        // Running but window-less: the launch above asked it to reopen, which shows a document
+        // app's window (TextEdit); ask by its New Window item too. ⌘N is never pressed (in Notes
+        // or Mail it makes a note or a message). An app with
         // no window often has no reachable menu bar either until it is frontmost, so
         // activate it once and hand focus back as soon as its window is placed.
         if !job.askedForWindow, let app = running.first {
-            job.askedForWindow = AXWindow.openNewWindow(pid: app.processIdentifier)
+            let pid = app.processIdentifier
+            job.askedForWindow = NewWindowMenu.press(pid: pid)
             if !job.askedForWindow, !job.activated {
+                let windows = AllSpacesWindows.list().filter { $0.pid == pid }
                 // Bringing forward an app whose windows are all on desktops that are not showing
                 // shows one of them. With multi-desktop loadouts off the only desktop switch is the
                 // plan's fetch of a single-window app (`SpacesPolicy.oneScreenSingleWindow`).
-                if !store.config.multiDesktopLoadouts, Self.windowsOnlyOnOtherDesktops(pid: app.processIdentifier) {
+                if !store.config.multiDesktopLoadouts, !windows.isEmpty, !windows.contains(where: \.onScreen) {
                     return .failed("cannot: \(job.occupant.label) has windows only on another desktop "
                                    + "and would not open one here without coming forward")
                 }
@@ -572,12 +576,6 @@ final class LoadoutEngine {
             }
         }
         return .waiting
-    }
-
-    /// The window server lists windows for `pid` and none of them is on a desktop showing now.
-    private static func windowsOnlyOnOtherDesktops(pid: pid_t) -> Bool {
-        let mine = AllSpacesWindows.list().filter { $0.pid == pid }
-        return !mine.isEmpty && !mine.contains(where: \.onScreen)
     }
 
     private func resolveBuiltinWeb(url: String) -> Resolution {

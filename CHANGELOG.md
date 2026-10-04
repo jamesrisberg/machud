@@ -62,6 +62,11 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   cannot (one display, the switch fails), the window is left where it is and the toast names the
   app. Windows on another display are still moved over, and minimised ones restored.
   `spaces.policy` in layouts.json applies only with the setting on.
+- An app can open another window when its menus have a **New Window** item (or "New Finder
+  Window", Mail's "New Viewer Window" and the like), which MacHUD presses, not when it merely has
+  ⌘N: applying a loadout no longer makes a new note in Notes or a new message in Mail when it
+  wants another of their windows. Menu titles are read in English; with macOS in another
+  language such apps count as single-window.
 - The MCP tools tell an agent that a loadout is one screen: `apply_loadout` arranges the display
   the pointer is on, switching desktops only to fetch a single-window app, `capture_loadout`
   saves the screen the user is looking at, and `list_loadouts` (and `machud_status`) count the

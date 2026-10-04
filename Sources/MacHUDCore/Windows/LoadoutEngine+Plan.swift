@@ -128,12 +128,10 @@ extension LoadoutEngine {
             input.running = !running.isEmpty
             input.installed = input.running || NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) != nil
             input.candidates = locator.candidates(pids: running.map(\.processIdentifier), titleMatch: titleMatch)
-            // Only worth the menu walk when the window is out of reach.
-            let menu = running.first.map { app in
-                input.candidates.contains { $0.visible || $0.minimized } ? true
-                    : AXWindow.newWindowItem(pid: app.processIdentifier) != nil
-            } ?? false
-            input.newWindow = NewWindowClass.of(bundleID: bundleID, hasNewWindowMenu: menu)
+            // Only worth the menu walk when the window is out of reach; in reach it is not read.
+            if let app = running.first, !input.candidates.contains(where: { $0.visible || $0.minimized }) {
+                input.newWindow = NewWindowClass.of(bundleID: bundleID, pid: app.processIdentifier)
+            }
         case .web(let url, let host):
             input.kind = .web
             input.running = true
@@ -227,8 +225,7 @@ extension LoadoutEngine {
         var canOpen = false
         if case .app(let bundleID, _) = job.occupant,
            let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first {
-            canOpen = NewWindowClass.of(bundleID: bundleID,
-                                        hasNewWindowMenu: AXWindow.newWindowItem(pid: app.processIdentifier) != nil).canOpenAnother
+            canOpen = NewWindowClass.of(bundleID: bundleID, pid: app.processIdentifier).canOpenAnother
         }
         let index = report.steps.firstIndex { $0.regionID == job.regionID }
         if canOpen {
@@ -315,7 +312,7 @@ extension LoadoutEngine {
     }
 
     /// `launchNew`: ask the running app for another window without activating it (a browser
-    /// by Apple event, anything else through its ⌘N menu item) and adopt the window it opens.
+    /// by Apple event, anything else through its New Window menu item) and adopt the window it opens.
     func resolveNewWindow(_ job: SlotJob, bundleID: String, running: [NSRunningApplication]) -> Resolution {
         guard let app = running.first else { return .failed("\(job.occupant.label) is not running") }
         if !job.askedForWindow {
@@ -323,12 +320,15 @@ extension LoadoutEngine {
             job.baseline = NewWindow.baseline(bundleID: bundleID)
             job.askedAt = Date()
             let asked: Bool
-            if NewWindowClass.browsers.contains(bundleID), bundleID != "org.mozilla.firefox" {
+            switch NewWindowClass.of(bundleID: bundleID, pid: app.processIdentifier) {
+            case .browser where bundleID != "org.mozilla.firefox":
                 let verb = bundleID == "com.apple.Safari" ? "make new document" : "make new window"
                 asked = (try? AppleScriptRunner.run("tell application id \(AppleScriptRunner.quote(bundleID)) to \(verb)",
                                                     timeout: 4).get()) != nil
-            } else {
-                asked = AXWindow.openNewWindow(pid: app.processIdentifier)
+            case .browser, .menu:
+                asked = NewWindowMenu.press(pid: app.processIdentifier)
+            case .single:
+                asked = false
             }
             return asked ? .waiting : .failed("cannot: \(job.occupant.label) would not open a new window without coming forward")
         }

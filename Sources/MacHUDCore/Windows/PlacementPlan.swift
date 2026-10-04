@@ -41,19 +41,11 @@ struct SpacesConfig: Codable, Equatable {
 enum NewWindowClass: String, Equatable {
     /// A browser: asked by Apple event (`make new window`), or a new `--app` window.
     case browser
-    /// Its menus have a plain ⌘N item that opens a window (TextEdit, Finder, terminals).
+    /// Its menus have a New Window item, found by title (`NewWindowMenu`): Finder, Mail, terminals.
     case menu
-    /// One window per app (Messages, Signal, Slack…): there is no second window to open.
+    /// No such item (Messages, Signal, Notes…, or a menu in another language): there is no
+    /// second window to open.
     case single
-
-    /// Chat and media apps whose ⌘N does not open a window (it starts a conversation or
-    /// does nothing) or that refuse a second instance.
-    static let singleWindowApps: Set<String> = [
-        "com.apple.MobileSMS", "org.whispersystems.signal-desktop", "com.automattic.beeper.desktop",
-        "com.tinyspeck.slackmacgap", "com.hnc.Discord", "net.whatsapp.WhatsApp", "ru.keepcoder.Telegram",
-        "com.spotify.client", "com.apple.Music", "com.apple.FaceTime", "us.zoom.xos", "com.microsoft.teams2",
-        "com.apple.systempreferences", "com.apple.AppStore",
-    ]
 
     static let browsers: Set<String> = [
         "com.google.Chrome", "com.google.Chrome.canary", "com.brave.Browser", "com.microsoft.edgemac",
@@ -61,9 +53,9 @@ enum NewWindowClass: String, Equatable {
         "org.mozilla.firefox",
     ]
 
+    /// `hasNewWindowMenu`: `NewWindowMenu` found an item to press.
     static func of(bundleID: String, hasNewWindowMenu: Bool) -> NewWindowClass {
         if browsers.contains(bundleID) { return .browser }
-        if singleWindowApps.contains(bundleID) { return .single }
         return hasNewWindowMenu ? .menu : .single
     }
 
