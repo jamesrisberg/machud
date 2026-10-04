@@ -59,8 +59,10 @@ displays are experimental and off by default (see Multi-desktop loadouts below).
   the display under the pointer (`screen=<display>` picks another), one region per window, plus
   the loadout that fills it. Add `layout=<name>` to only record what sits in an existing
   layout's regions. The tool dock and panels are saved only with `hud=1` or `hud=only`.
-- Clear the desk: `machud clear` (every desktop; sibling MacHUD apps and hidden apps are
-  left alone); undo with `machud restore`.
+- Clear the desk: `machud clear` minimises the windows showing on the screen under the pointer
+  (`screen=<display>` picks another; windows on other displays and desktops stay; sibling MacHUD
+  apps and hidden apps are left alone); with multi-desktop loadouts on and no `screen` it clears
+  every desktop. Undo with `machud restore` (either way).
 - Switch which layout Shift-drag snapping uses: `machud select-layout name=<name>`.
 - Another display: `machud status screen=builtin`; `machud screens` lists them.
 - Open the visual editor for the user: `machud edit` (`loadout=<name>` on that loadout,

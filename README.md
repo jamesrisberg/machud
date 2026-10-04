@@ -210,7 +210,9 @@ Apply never closes a window. One loadout is applied at a time: a second apply wh
 refused ("<name> is still being applied"). `clear=1` (the wheel's outer ring, the menu's
 **Clear This Screen + Apply**) first minimises the other windows showing on that screen and
 closes the web windows MacHUD opened that the loadout does not want; `machud restore` or
-Loadouts › Restore Cleared Windows brings the minimised ones back.
+Loadouts › Restore Cleared Windows brings the minimised ones back. `machud clear` on its own
+does the same without applying: it clears the screen under the pointer, on the desktop
+showing (`screen=<display>` picks another), and leaves windows on other displays and desktops.
 
 **Preview** (a loadout's Preview…, the wheel's inner ring, or `machud
 apply loadout=Work plan=1` for the JSON) shows every region coloured by what
@@ -254,7 +256,8 @@ loadout by name is refused with a message that names the setting. The startup lo
 re-apply after a display change skip one and say so in a toast. A capture or HUD save will not
 reuse a hidden loadout's name. Nothing is converted or deleted: turn the setting on and they
 are back. Capturing every screen, walking desktops and `spaces action=switch` answer with an
-error that names the setting.
+error that names the setting. With the setting on, `machud clear` without `screen=` minimises
+the windows on every desktop of every display.
 
 ### Layouts and the visual editor
 

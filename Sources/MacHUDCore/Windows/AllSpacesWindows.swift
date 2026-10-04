@@ -54,9 +54,17 @@ enum AllSpacesWindows {
     }
 
     /// Which windows a clear should consider, per process: everything but MacHUD's own,
-    /// the MacHUD siblings' (their panels are HUD, not clutter) and hidden apps'.
-    static func clearTargets(_ entries: [Entry], exempt: Set<pid_t>, hidden: Set<pid_t>) -> [pid_t: [Entry]] {
-        Dictionary(grouping: entries.filter { !exempt.contains($0.pid) && !hidden.contains($0.pid) }, by: \.pid)
+    /// the MacHUD siblings' (their panels are HUD, not clutter) and hidden apps'. With `screen`
+    /// (a display's frame) only the windows showing on it now: those on its other desktops and
+    /// on other displays are left. `apply … clear=1` and a standalone clear on one screen share
+    /// this rule.
+    static func clearTargets(_ entries: [Entry], exempt: Set<pid_t>, hidden: Set<pid_t>,
+                             on screen: CGRect? = nil) -> [pid_t: [Entry]] {
+        Dictionary(grouping: entries.filter { entry in
+            guard !exempt.contains(entry.pid), !hidden.contains(entry.pid) else { return false }
+            guard let screen else { return true }
+            return entry.onScreen && entry.frame.intersects(screen)
+        }, by: \.pid)
     }
 
     /// An app's AX windows paired with their window numbers, including windows on other

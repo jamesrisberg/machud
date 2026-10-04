@@ -44,6 +44,10 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   deleted. A capture or HUD save cannot reuse a hidden loadout's name, and applying, previewing
   or editing one says why it cannot. Turning the setting on brings them back at once, with the
   every-display capture, the desktop walk and the desktop pictures in the settings tab.
+- `machud clear` minimises only the windows showing on the screen under the pointer (add
+  `screen=<display>` to name another), the same set **Clear This Screen + Apply** clears, instead
+  of every window on every desktop. With **Multi-desktop loadouts** on it still clears every
+  desktop. `machud restore` brings back what the last clear minimised in both cases.
 - The capture sheet's "Include the tool dock and the apps' panels (the HUD)" box starts unticked.
 - The Loadouts settings tab draws a one-screen loadout on one screen, without naming a display,
   since it goes on whichever screen you apply it to.

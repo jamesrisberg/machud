@@ -63,8 +63,8 @@ setting and everything it turns on are under [Multi-desktop loadouts
 | `capture` | `name`, `hud=only` | **the HUD only**: the tool dock's position and every running sibling's panels into the loadout `name` (created with no layout or slots if it does not exist; an existing one keeps its windows). Returns `loadout` |
 | `capture` | `name`, a form above plus `hud=1` | the windows as above, then the HUD added to the same loadout; the reply also carries `hud`. Re-capturing windows without `hud=` keeps a loadout's existing `hud` |
 | `spaces` | `action=switch`, `n=<desktop>`, `screen=<ref>` (optional) | multi-desktop loadouts only (see [Multi-desktop loadouts (experimental)](#multi-desktop-loadouts-experimental)) |
-| `clear` | | minimise every user window **on every desktop** except MacHUD's own, running sibling apps' (external panels) and hidden apps' |
-| `restore` | | un-minimise everything the last `clear` (or `apply … clear=1`) minimised; returns `restored` |
+| `clear` | `screen=<ref>` (optional) | minimise the windows showing on one screen, the display under the pointer (or `screen`; one that matches no display is an error), except MacHUD's own, running sibling apps' (external panels) and hidden apps'; windows on its other desktops and on other displays stay. It is the set `apply … clear=1` clears for that screen, and it also closes the web windows MacHUD opened. Returns `cleared` and `screen`. With multi-desktop loadouts on and no `screen`, it reaches every window on every desktop (see [Multi-desktop loadouts (experimental)](#multi-desktop-loadouts-experimental)) |
+| `restore` | | un-minimise everything the last `clear` (or `apply … clear=1`) minimised, whichever mode; returns `restored` |
 | `place` | `window` (CGWindow number from `windows`), `region` (region id, name, or index) | move one window into one region |
 | `radial` | `action=show\|hide\|cancel\|select\|commit`, `index`, `ring=inner\|middle\|outer` | drive the loadout wheel without the hotkey; a ring a wedge does not have selects its last one |
 
@@ -197,6 +197,7 @@ While it is off:
   included, into the name of a hidden loadout, which it would replace unseen. `spaces
   action=switch` is refused too; `spaces`, `screens` and `status` still report the desktops.
 - `edit loadout=` and `preview loadout=` refuse a spanning loadout as `apply` does.
+- `clear` takes one screen, as `apply … clear=1` does, instead of every desktop.
 
 ### While it is on
 
@@ -224,7 +225,8 @@ automatically (on load and whenever displays change) for displays that are
 attached and unambiguous; `main`, `builtin` and `index` stay roles.
 
 `apply` with `clear` minimises the other windows showing on each screen the loadout covers, on
-each desktop it visits, and answers `redirected[]` when a display was missing (below). `edit
+each desktop it visits, and answers `redirected[]` when a display was missing (below). `clear`
+without `screen` minimises every user window on every desktop. `edit
 loadout=` on a per-display loadout opens the layout of the display under the mouse.
 
 Capture forms:
