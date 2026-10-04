@@ -47,6 +47,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   since it goes on whichever screen you apply it to.
 - The layout editor's and the loadout preview's floating panels use the classic frosted material,
   so the desktop behind their dimmed screen stays sharp.
+- The setup guide's cards use the classic frosted material, since the guide already blurs the
+  desktop behind them.
 
 ### Fixed
 - With multi-desktop loadouts on, the wheel says how many desktops a captured multi-desktop

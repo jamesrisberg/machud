@@ -79,7 +79,10 @@ enum OnboardingStyle {
     static func cardFill(live: Bool) -> Color { Color.black.opacity(live ? 0.24 : 0.5) }
 }
 
-/// A glass card: the HUD's frosted glass with a light dark fill, rounded.
+/// A glass card: the HUD's frosted glass with a light dark fill, rounded. The window already
+/// blurs the screen with its own `NSVisualEffectView` (and not at all as the compact card), so
+/// the card is on the classic material, which blurs only the card, rather than the family's
+/// window-wide blur.
 struct OnboardingGlass: ViewModifier {
     var radius: CGFloat = 24
     @Environment(\.onboardingLive) private var live
@@ -87,7 +90,8 @@ struct OnboardingGlass: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background(OnboardingStyle.cardFill(live: live))
-            .hudGlass(HUDGlassView.Style(cornerRadius: radius, borderWidth: 1, borderAlpha: 0.22))
+            .hudGlass(HUDGlassView.Style(cornerRadius: radius, borderWidth: 1, borderAlpha: 0.22,
+                                         material: .visualEffect))
     }
 }
 
