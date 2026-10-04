@@ -181,7 +181,7 @@ loadout names a layout and assigns an occupant per region:
 ```
 
 **Capture**: arrange the windows on the screen you are looking at, then **Capture This Screen
-as Loadout…** from the menu bar, **Capture…** on the wheel, or `machud capture name=Work`
+as Loadout…** from the menu bar, **Capture** on the wheel, or `machud capture name=Work`
 (`screen=<display>` picks another display). Capture derives the layout from the windows
 themselves (one region per window at its exact frame, overlapping windows kept
 overlapping and in stacking order)
