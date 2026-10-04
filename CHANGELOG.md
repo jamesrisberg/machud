@@ -130,6 +130,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   agent, about 80 ms later.
 
 ### Fixed
+- Park on the loadout wheel says when the front app did not answer ("Safari did not answer")
+  instead of saying it has no window to park.
 - After a wake word that starts nothing (the agent busy or the brain off), the rest of the sound
   that woke it can no longer wake it again: the wake word ignores the next second and listens on
   without reopening the microphone or reloading its model. A wake word heard by a listener that

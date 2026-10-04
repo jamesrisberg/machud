@@ -340,6 +340,21 @@ final class RadialGeometryTests: XCTestCase {
 }
 
 final class ParkWedgeTests: XCTestCase {
+    /// Park's release says the front app did not answer when its Accessibility call timed out,
+    /// and otherwise why there was nothing to park.
+    @MainActor
+    func testAnAppThatDoesNotAnswerIsSaidToNotAnswer() {
+        XCTAssertEqual(LoadoutEngine.parkRefusal(.cannotComplete, otherwise: "no focused window", appName: "Safari"),
+                       "Safari did not answer")
+        XCTAssertEqual(LoadoutEngine.parkRefusal(.cannotComplete, otherwise: "window is not placeable", appName: nil),
+                       "The app did not answer")
+        XCTAssertEqual(LoadoutEngine.parkRefusal(.noValue, otherwise: "no focused window", appName: "Safari"), "no focused window")
+        XCTAssertEqual(LoadoutEngine.parkRefusal(.attributeUnsupported, otherwise: "window is not placeable", appName: "Finder"),
+                       "window is not placeable")
+        XCTAssertEqual(LoadoutEngine.parkRefusal(.success, otherwise: "window is not placeable", appName: "Finder"),
+                       "window is not placeable")
+    }
+
     @MainActor
     func testParkWedgeHasTwoRings() {
         XCTAssertEqual(RadialMenu.ringCount(for: .park(.init())), 2)

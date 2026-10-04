@@ -198,8 +198,16 @@ extension AXUIElement {
     }
 
     func elementAttribute(_ name: String) -> AXUIElement? {
-        guard let raw = rawAttribute(name), CFGetTypeID(raw) == AXUIElementGetTypeID() else { return nil }
-        return (raw as! AXUIElement)
+        elementAttributeAnswer(name).element
+    }
+
+    /// The element attribute `name`, and what the call answered (`.cannotComplete` when the
+    /// app did not answer within the messaging timeout).
+    func elementAttributeAnswer(_ name: String) -> (element: AXUIElement?, error: AXError) {
+        var value: CFTypeRef?
+        let error = AXUIElementCopyAttributeValue(self, name as CFString, &value)
+        guard error == .success, let raw = value, CFGetTypeID(raw) == AXUIElementGetTypeID() else { return (nil, error) }
+        return ((raw as! AXUIElement), error)
     }
 
     func value<T>(_ name: String, _ type: AXValueType) -> T? {
@@ -225,9 +233,14 @@ extension AXUIElement {
     }
 
     func isSettable(_ name: String) -> Bool {
+        settableAnswer(name).settable
+    }
+
+    /// Whether attribute `name` can be set, and what the call answered.
+    func settableAnswer(_ name: String) -> (settable: Bool, error: AXError) {
         var settable = DarwinBoolean(false)
-        guard AXUIElementIsAttributeSettable(self, name as CFString, &settable) == .success else { return false }
-        return settable.boolValue
+        let error = AXUIElementIsAttributeSettable(self, name as CFString, &settable)
+        return (error == .success && settable.boolValue, error)
     }
 
     func set(_ name: String, size: CGSize) {

@@ -133,21 +133,26 @@ extension LoadoutEngine {
         return .success(ParkTarget(target: .ax(window), id: id, label: label, rest: window.cocoaFrame ?? info.frame))
     }
 
-    /// The frontmost app's focused window: what the Park wedge parks.
-    func focusedWindow() -> (app: NSRunningApplication, window: AXWindow)? {
-        guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != getpid(),
-              let window = Self.focusedWindow(pid: app.processIdentifier) else { return nil }
-        return (app, window)
-    }
-
     /// The focused window of the app with `pid`. Every Accessibility call on the app and on the
     /// window is bounded by `timeout` seconds, so a hung app holds its caller at most that long a call.
     nonisolated static func focusedWindow(pid: pid_t, timeout: Float = 0.5) -> AXWindow? {
+        readFocusedWindow(pid: pid, timeout: timeout).window
+    }
+
+    /// `focusedWindow(pid:timeout:)`, and what the app answered when it gave no window.
+    nonisolated static func readFocusedWindow(pid: pid_t, timeout: Float = 0.5) -> (window: AXWindow?, error: AXError) {
         let element = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(element, timeout)
-        guard let focused = element.elementAttribute(kAXFocusedWindowAttribute) else { return nil }
+        let answer = element.elementAttributeAnswer(kAXFocusedWindowAttribute)
+        guard let focused = answer.element else { return (nil, answer.error) }
         AXUIElementSetMessagingTimeout(focused, timeout)
-        return AXWindow(element: focused, pid: pid)
+        return (AXWindow(element: focused, pid: pid), answer.error)
+    }
+
+    /// Why Park's release could not take the front app's window: that the app (`appName`) did
+    /// not answer, when its Accessibility call timed out (`.cannotComplete`), else `otherwise`.
+    nonisolated static func parkRefusal(_ error: AXError, otherwise: String, appName: String?) -> String {
+        error == .cannotComplete ? "\(appName ?? "The app") did not answer" : otherwise
     }
 
     /// "Safari · Page title", or nil when there is nothing Park could park.
@@ -169,8 +174,17 @@ extension LoadoutEngine {
     /// The radial menu's park wedge: the frontmost app's focused window goes to its
     /// nearest edge. Returns why it could not, if it could not.
     func parkFocusedWindow() -> String? {
-        guard let (app, window) = focusedWindow() else { return "no focused window" }
-        guard window.isPlaceable, let rest = window.cocoaFrame else { return "window is not placeable" }
+        guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != getpid() else { return "no focused window" }
+        let read = Self.readFocusedWindow(pid: app.processIdentifier)
+        guard let window = read.window else {
+            return Self.parkRefusal(read.error, otherwise: "no focused window", appName: app.localizedName)
+        }
+        let position = window.element.settableAnswer(kAXPositionAttribute)
+        let size = window.element.settableAnswer(kAXSizeAttribute)
+        guard position.settable, size.settable, let rest = window.cocoaFrame else {
+            let error = [position.error, size.error].first { $0 != .success } ?? .success
+            return Self.parkRefusal(error, otherwise: "window is not placeable", appName: app.localizedName)
+        }
         let screen = NSScreen.screens.max { $0.frame.intersection(rest).area < $1.frame.intersection(rest).area }
         let number = WindowList.onScreen().first {
             $0.pid == app.processIdentifier && Geometry.matches($0.frame, rest, tolerance: 3)
