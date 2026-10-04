@@ -38,8 +38,9 @@ final class WakeConfirmationModelTests: XCTestCase {
 
         let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("wake-confirm-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: scratch) }
+        let configDirectory = Config.configDirOverride
         Config.configDirOverride = scratch.appendingPathComponent("speakfree")
-        defer { Config.configDirOverride = nil }
+        defer { Config.configDirOverride = configDirectory }
 
         let model = WakeModels.heyJarvis
         let wakeDirectory = scratch.appendingPathComponent("wake")
