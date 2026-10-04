@@ -87,7 +87,7 @@ once. It is the user's setting: ask before changing it. It turns on:
   **Walking desktops is visible to the user: keep it short and only when asked.**
   `screens=Thirds@main,Full@builtin` is the fill-only form.
 - Slots that carry `"space": N`, and `screens[]` with `whenScreenMissing: desktop|skip` in a
-  loadout written by hand. A loadout captured on a now-unplugged display still applies: it is
+  loadout written by hand. A loadout captured on a display that is unplugged still applies: it is
   redirected to its `fallback`, else the main display. `apply`/`status` report `redirected[]`;
   `reason: needsDesktops` means the user must add desktops in Mission Control.
 - `machud spaces action=switch n=2`. (`machud spaces` alone reports the desktops and shortcuts
