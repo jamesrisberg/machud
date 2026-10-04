@@ -980,7 +980,8 @@ moved it to the other target).
 
 Every take is journaled once it is known what became of it, one JSON object per line, in
 `takes.jsonl` beside the conversation file (`~/Library/Application Support/MacHUD/Voice/takes.jsonl`,
-or `<name>-takes.jsonl` beside a `$MACHUD_VOICE_CONVERSATION_FILE` named `<name>-conversation.json`),
+or `<name>-takes.jsonl` beside a `$MACHUD_VOICE_CONVERSATION_FILE` named `<name>-conversation.json`,
+or `<file name without its extension>-takes.jsonl` beside one with any other name),
 whether or not the brain can run. The newest 1,000 lines are kept, readable by the user only; a
 file there that is not a journal (not text, or no line in it is a take) is never written over:
 the next take moves it aside as `takes.jsonl.unreadable-<yyyyMMddTHHmmss>` and starts a new one.
