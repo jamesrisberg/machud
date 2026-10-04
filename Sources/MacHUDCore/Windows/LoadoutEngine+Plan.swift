@@ -143,7 +143,7 @@ extension LoadoutEngine {
             input.kind = .web
             input.running = true
             input.newWindow = NewWindowClass.forWeb(host: host, configuredBrowser: store.config.browser)
-            let window: AXWindow? = host == .builtin ? nil : browsers.window(url: url)
+            let window: AXWindow? = host == .builtin ? nil : browsers.reusable(url: url, newWindowOnly: false, onScreen: [])?.window
             if let window, let frame = window.cocoaFrame {
                 let number = window.windowNumber ?? 0
                 let visible = WindowList.onScreen().contains { $0.number == number }

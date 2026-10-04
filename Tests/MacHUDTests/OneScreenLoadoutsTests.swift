@@ -296,3 +296,29 @@ final class MultiDesktopVerbTests: XCTestCase {
         XCTAssertNil(MultiDesktopVerbs.refusal(spaces: ["action": "switch", "n": "2"], in: on))
     }
 }
+
+/// A web slot asked for a new window here (its page's window is on another desktop) does not
+/// reuse that window: it opens one, and the next apply reuses the newest.
+@MainActor
+final class WebWindowReuseTests: XCTestCase {
+    private func window() -> AXWindow { AXWindow(element: AXUIElementCreateApplication(getpid()), pid: getpid()) }
+
+    func testANewWindowIsNotTheOneOnAnotherDesktop() {
+        let browsers = BrowserWindows()
+        browsers.add(url: "https://a.test", host: .chromeApp, window: window(), number: 11, bundleID: "com.google.Chrome")
+        XCTAssertNil(browsers.reusable(url: "https://a.test", newWindowOnly: true, onScreen: [5]),
+                     "the page's window is on another desktop: open one")
+        XCTAssertEqual(browsers.reusable(url: "https://a.test", newWindowOnly: true, onScreen: [11])?.number, 11,
+                       "on a desktop showing it is reused")
+        XCTAssertEqual(browsers.reusable(url: "https://a.test", newWindowOnly: false, onScreen: [])?.number, 11,
+                       "without a new window asked for, as before")
+        XCTAssertNil(browsers.reusable(url: "https://b.test", newWindowOnly: false, onScreen: [11]))
+    }
+
+    func testTheNewestWindowForAPageIsReused() {
+        let browsers = BrowserWindows()
+        browsers.add(url: "https://a.test", host: .chromeApp, window: window(), number: 11, bundleID: "com.google.Chrome")
+        browsers.add(url: "https://a.test", host: .chromeApp, window: window(), number: 12, bundleID: "com.google.Chrome")
+        XCTAssertEqual(browsers.reusable(url: "https://a.test", newWindowOnly: false, onScreen: [])?.number, 12)
+    }
+}

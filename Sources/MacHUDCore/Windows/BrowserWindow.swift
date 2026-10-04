@@ -256,8 +256,6 @@ final class BrowserWindows {
         entries.append(Entry(url: url, host: host, window: window, number: number, bundleID: bundleID))
     }
 
-    func window(url: String) -> AXWindow? { entries.first { $0.url == url }?.window }
-
     /// The occupant a window on screen came from.
     func entry(number: Int) -> Entry? { entries.first { $0.number == number } }
 

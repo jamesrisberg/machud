@@ -209,7 +209,8 @@ desktop that is not showing:
   fetched (`launchNew` when the app can, else `cannot`).
 - `launchNew`: leave it, and open a new window here without activating the app:
   browsers by Apple event, other apps through their New Window menu item (above).
-  Apps without one (Messages, Signal, Notes, Arc, …) report `cannot`. A window MacHUD asked
+  Apps without one (Messages, Signal, Notes, Arc, …) report `cannot`. A web page whose window
+  MacHUD opened is on another desktop gets a new window here, not that one. A window MacHUD asked
   for that opens on another desktop all the same is left there (MacHUD never closes a window),
   and the slot says so.
 - `leave`: report `leave`.

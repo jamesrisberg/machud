@@ -594,11 +594,15 @@ final class LoadoutEngine {
         return panel
     }
 
-    /// A web page in a browser window. Re-applying a loadout reuses the window
-    /// MacHUD already opened for that url.
+    /// A web page in a browser window. Re-applying a loadout reuses the window MacHUD already
+    /// opened for that url, unless the plan asked for a new one here and that window is on
+    /// another desktop: a new one is opened then.
     private func resolveWeb(_ job: SlotJob, url: String, host: WebHost) -> Resolution {
         browsers.prune()
-        if let existing = browsers.window(url: url) { return .ready(.ax(existing)) }
+        let onScreen = job.newWindowOnly ? Set(WindowList.onScreen().map(\.number)) : []
+        if let existing = browsers.reusable(url: url, newWindowOnly: job.newWindowOnly, onScreen: onScreen) {
+            return .ready(.ax(existing.window))
+        }
         if let reason = browsers.takeFailure(job.regionID) { return .failed(reason) }
         if let kind = BrowserWindow.Kind(host: host) { return resolveBrowserWindow(job, url: url, kind: kind) }
         // `.chromeApp` with Arc or Safari configured as the browser: they have no
@@ -902,5 +906,13 @@ enum Geometry {
     static func matches(_ a: CGRect, _ b: CGRect, tolerance: CGFloat) -> Bool {
         abs(a.minX - b.minX) <= tolerance && abs(a.minY - b.minY) <= tolerance
             && abs(a.width - b.width) <= tolerance && abs(a.height - b.height) <= tolerance
+    }
+}
+
+extension BrowserWindows {
+    /// The window MacHUD opened for `url` that a slot reuses: the newest, and, when the slot was
+    /// planned a new window here, only one on a desktop showing (`onScreen`, window numbers).
+    func reusable(url: String, newWindowOnly: Bool, onScreen: Set<Int>) -> Entry? {
+        entries.last { $0.url == url && (!newWindowOnly || onScreen.contains($0.number)) }
     }
 }
