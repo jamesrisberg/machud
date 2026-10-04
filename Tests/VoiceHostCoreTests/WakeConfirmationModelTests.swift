@@ -20,6 +20,11 @@ import XCTest
 /// are padded with a second of silence on each side. SpeakFree's configuration is pointed at a
 /// temporary folder, so nothing of the user's is read. Nothing opens the microphone.
 ///
+/// It refuses, before reading anything, an audio folder that holds the owner's recordings
+/// (SpeakFree's `~/.config/speakfree`, MacHUD's `~/Library/Application Support/MacHUD`), and prints
+/// what the model wrote only for the repository's fixture and the synthetic sets' `positives/` and
+/// `confusables/`.
+///
 ///     MACHUD_WAKE_CONFIRM_MODELS=<folder> MACHUD_WAKE_CONFIRM_AUDIO=<folder> \
 ///         swift test --filter WakeConfirmationModelTests
 @MainActor
@@ -29,6 +34,9 @@ final class WakeConfirmationModelTests: XCTestCase {
 
     func testTheSpeechModelConfirmsWhatTheWakeWordHeard() async throws {
         let environment = ProcessInfo.processInfo.environment
+        if let folder = environment["MACHUD_WAKE_CONFIRM_AUDIO"], let refusal = Self.refusal(for: URL(fileURLWithPath: folder)) {
+            return XCTFail(refusal)
+        }
         guard let wakeFiles = environment["MACHUD_WAKE_CONFIRM_MODELS"].map(URL.init(fileURLWithPath:)) else {
             throw XCTSkip("set MACHUD_WAKE_CONFIRM_MODELS to a folder with the Hey Jarvis files")
         }
@@ -81,7 +89,8 @@ final class WakeConfirmationModelTests: XCTestCase {
                                                        with: transcriber))
                 }
             }
-            rows.append(Row(clip: Self.name(clip), wake: woke?.detection, words: words, ms: ms, phrase: model.phrase,
+            rows.append(Row(clip: Self.name(clip), showsWords: Self.showsWords(clip), wake: woke?.detection, words: words,
+                            ms: ms, phrase: model.phrase,
                             toCome: woke.map { Int((Double(silence.count + speech.count - $0.end) / 16).rounded()) },
                             later: later))
         }
@@ -89,11 +98,32 @@ final class WakeConfirmationModelTests: XCTestCase {
         XCTAssertNotNil(rows.first?.wake, "the repository's Hey Jarvis fixture wakes the detector")
     }
 
+    /// The measurement never transcribes the owner's recordings, and shows the words only for clips
+    /// whose content is known: the repository's fixture and the synthetic sets. Nothing is read.
+    func testTheOwnersRecordingsAreNeverMeasuredAndOnlyKnownClipsShowTheirWords() {
+        let home = URL(fileURLWithPath: "/Users/someone")
+        for path in ["/Users/someone/.config/speakfree", "/Users/someone/.config/speakfree/recordings",
+                     "/Users/someone/.config/SpeakFree/recordings", "/Users/someone/.config/x/../speakfree/recordings",
+                     "/Users/someone/Library/Application Support/MacHUD/Voice/History"] {
+            XCTAssertNotNil(Self.refusal(for: URL(fileURLWithPath: path), home: home), path)
+        }
+        for path in ["/tmp/synthetic", "/Users/someone/.config/speakfree-renders", "/Users/someone/scratch/positives"] {
+            XCTAssertNil(Self.refusal(for: URL(fileURLWithPath: path), home: home), path)
+        }
+        XCTAssertTrue(Self.showsWords(Self.fixture))
+        XCTAssertTrue(Self.showsWords(URL(fileURLWithPath: "/tmp/synthetic/positives/hey-jarvis-Moira-140.wav")))
+        XCTAssertTrue(Self.showsWords(URL(fileURLWithPath: "/tmp/synthetic/confusables/Hey-Travis-Karen.wav")))
+        XCTAssertFalse(Self.showsWords(URL(fileURLWithPath: "/tmp/synthetic/extras/Jarvis-Moira.wav")))
+        XCTAssertFalse(Self.showsWords(URL(fileURLWithPath: "/tmp/clips/take-1.wav")))
+    }
+
     /// The more audio, after the wake, the speech model is also given for a clip that woke.
     static let extraSeconds: [Double] = [0.3, 0.6]
 
     struct Row {
         let clip: String
+        /// What the model wrote may be printed (`showsWords`).
+        let showsWords: Bool
         let wake: WakeDetection?
         let words: Result<String, WakeConfirmFailure>
         let ms: Int
@@ -111,7 +141,7 @@ final class WakeConfirmationModelTests: XCTestCase {
             return TriggerPhrase.transcript(words, contains: phrase)
         }
 
-        var text: String { Self.quote(words) }
+        var text: String { showsWords ? Self.quote(words) : "(words not shown)" }
 
         static func quote(_ words: Result<String, WakeConfirmFailure>) -> String {
             switch words {
@@ -162,6 +192,27 @@ final class WakeConfirmationModelTests: XCTestCase {
     }
 
     // MARK: Files
+
+    /// Why the clips in `folder` may not be measured, or nil: SpeakFree's and MacHUD's folders
+    /// hold the owner's dictation recordings, which are never transcribed here.
+    static func refusal(for folder: URL, home: URL = FileManager.default.homeDirectoryForCurrentUser) -> String? {
+        func path(_ url: URL) -> String { url.standardizedFileURL.resolvingSymlinksInPath().path.lowercased() }
+        let audio = path(folder)
+        for owner in [".config/speakfree", "Library/Application Support/MacHUD"] {
+            let protected = path(home.appendingPathComponent(owner))
+            if audio == protected || audio.hasPrefix(protected + "/") {
+                return "MACHUD_WAKE_CONFIRM_AUDIO is \(folder.path), inside \(owner): the owner's recordings are never "
+                    + "transcribed by this test"
+            }
+        }
+        return nil
+    }
+
+    /// The repository's fixture and the synthetic sets' own clips, whose words are known.
+    static func showsWords(_ clip: URL) -> Bool {
+        clip.standardizedFileURL == fixture.standardizedFileURL
+            || ["positives", "confusables"].contains(clip.deletingLastPathComponent().lastPathComponent)
+    }
 
     static var fixture: URL {
         URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -231,7 +282,7 @@ final class WakeConfirmationModelTests: XCTestCase {
                 row.toCome.map { String(format: "%4d ms", $0) } ?? "      -",
                 row.later.count > 0 ? (row.contains(row.later[0]) ? "yes   " : "no    ") : "-     ",
                 row.later.count > 1 ? (row.contains(row.later[1]) ? "yes   " : "no    ") : "-     ",
-                row.text + (row.later.isEmpty ? "" : " / " + row.later.map { Row.quote($0) }.joined(separator: " / ")),
+                row.text + (row.later.isEmpty || !row.showsWords ? "" : " / " + row.later.map { Row.quote($0) }.joined(separator: " / ")),
             ].joined(separator: "  "))
         }
         func summary(_ title: String, _ subset: [Row]) {
