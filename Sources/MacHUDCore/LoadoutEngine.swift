@@ -281,6 +281,67 @@ final class LoadoutEngine {
     /// startup, a display change): the onboarding's radial practice waits for it.
     var onApplied: ((ApplyReport) -> Void)?
 
+    /// Says what an automatic apply did: a toast, or a recorder in tests.
+    var notify: (_ title: String, _ detail: String?, _ seconds: TimeInterval) -> Void = { title, detail, seconds in
+        Toast.show(title, detail: detail, seconds: seconds)
+    }
+
+    /// An apply nobody asked for just now.
+    enum AutomaticApply {
+        /// `startupLoadout`, about two seconds after launch.
+        case startup
+        /// The active loadout again, after the set of displays changed.
+        case displaysChanged
+    }
+
+    /// Apply `loadout` without `clear` because of `why`, and say so: a refused loadout (one that
+    /// spans desktops or displays while that is off) in one toast, the engine having logged it.
+    func applyAutomatically(_ loadout: Loadout, _ why: AutomaticApply) {
+        if why == .startup { NSLog("MacHUD: applying startup loadout '%@'", loadout.name) }
+        apply(loadout, clear: false) { [weak self] report in
+            guard let self else { return }
+            switch why {
+            case .startup:
+                if let refused = report.refused {
+                    self.notify("Startup loadout not applied", refused, 8)
+                } else {
+                    NSLog("MacHUD: startup loadout '%@': %@", loadout.name, "\(report.json)")
+                }
+            case .displaysChanged:
+                if let refused = report.refused {
+                    self.notify("Displays changed", "Did not re-apply \(loadout.name). \(refused)", 8)
+                } else {
+                    NSLog("MacHUD: displays changed, re-applied %@: %d placed, %d failed",
+                          loadout.name, report.placed.count, report.failed.count)
+                    self.notify("Displays changed", "Re-applied \(loadout.name)", 2.5)
+                }
+            }
+        }
+    }
+
+    /// The `apply` verb (see docs/API.md).
+    func handleApply(_ args: [String: String], done: @escaping ([String: Any]) -> Void) {
+        guard let name = args["loadout"], let loadout = store.loadout(named: name) else {
+            done(["ok": false, "error": "no such loadout"]); return
+        }
+        let yes = ["1", "true", "yes"]
+        let ref = args["screen"].flatMap { ScreenRef.parse($0) }
+        let screen = ref?.resolve()
+        if let ref, screen == nil {
+            done(["ok": false, "error": "no screen matching \(ref.label)"]); return
+        }
+        if yes.contains((args["plan"] ?? "0").lowercased()) {
+            done(planJSON(loadout, screen: screen)); return
+        }
+        apply(loadout, clear: yes.contains((args["clear"] ?? "0").lowercased()), screen: screen) { report in done(report.json) }
+    }
+
+    /// Why `edit loadout=<name>` may not open the editor, as the verb's reply; nil when it may.
+    func editRefusal(loadout name: String) -> [String: Any]? {
+        guard let loadout = store.loadout(named: name) else { return ["ok": false, "error": "no such loadout"] }
+        return ExperimentalLoadouts.refusal(for: loadout, in: store.config).map { ["ok": false, "error": $0] }
+    }
+
     /// Captures and applies loadouts' `hud` part; set by the app once the tool dock exists.
     var hudEngine: HUDLoadoutEngine?
 

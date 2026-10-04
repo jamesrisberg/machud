@@ -376,3 +376,70 @@ final class WindowlessAppTests: XCTestCase {
         XCTAssertEqual(report.steps[1].action, .launch)
     }
 }
+
+/// The verbs and automatic applies that answer before anything moves. None of these reaches a
+/// real apply: each is refused or rejected first.
+@MainActor
+final class LoadoutVerbRefusalTests: XCTestCase {
+    private func engine() throws -> LoadoutEngine {
+        LoadoutEngine(store: try OneScreenFixture.store(multiDesktop: nil), panels: PanelRegistry())
+    }
+
+    private func apply(_ engine: LoadoutEngine, _ args: [String: String]) -> [String: Any]? {
+        var reply: [String: Any]?
+        engine.handleApply(args) { reply = $0 }
+        return reply
+    }
+
+    func testApplyWithAScreenThatIsNotAttachedSaysSo() throws {
+        let engine = try engine()
+        for args in [["loadout": "Desk", "screen": "No Such Display"], ["loadout": "Desk", "screen": "No Such Display", "plan": "1"]] {
+            let reply = apply(engine, args)
+            XCTAssertEqual(reply?["ok"] as? Bool, false, "\(args)")
+            XCTAssertEqual(reply?["error"] as? String, "no screen matching No Such Display", "\(args)")
+        }
+        XCTAssertNil(engine.activeLoadout)
+        XCTAssertEqual(apply(engine, ["loadout": "Nope"])?["error"] as? String, "no such loadout")
+    }
+
+    func testApplyRefusesAHiddenLoadout() throws {
+        let engine = try engine()
+        let studio = try XCTUnwrap(engine.store.loadout(named: "Studio"))
+        let reply = apply(engine, ["loadout": "Studio", "clear": "1"])
+        XCTAssertEqual(reply?["ok"] as? Bool, false)
+        XCTAssertEqual(reply?["error"] as? String, ExperimentalLoadouts.refusal(for: studio, in: engine.store.config))
+    }
+
+    func testEditRefusesAHiddenLoadout() throws {
+        let engine = try engine()
+        let studio = try XCTUnwrap(engine.store.loadout(named: "Studio"))
+        XCTAssertEqual(engine.editRefusal(loadout: "Studio")?["error"] as? String,
+                       ExperimentalLoadouts.refusal(for: studio, in: engine.store.config))
+        XCTAssertEqual(engine.editRefusal(loadout: "Studio")?["ok"] as? Bool, false)
+        XCTAssertEqual(engine.editRefusal(loadout: "Nope")?["error"] as? String, "no such loadout")
+        XCTAssertNil(engine.editRefusal(loadout: "Desk"))
+    }
+
+    func testTheStartupLoadoutIsNotAppliedAndSaysSoOnce() throws {
+        let engine = try engine()
+        var toasts: [(String, String?)] = []
+        engine.notify = { title, detail, _ in toasts.append((title, detail)) }
+        let studio = try XCTUnwrap(engine.store.loadout(named: "Studio"))
+        engine.applyAutomatically(studio, .startup)
+        XCTAssertEqual(toasts.count, 1)
+        XCTAssertEqual(toasts.first?.0, "Startup loadout not applied")
+        XCTAssertEqual(toasts.first?.1, ExperimentalLoadouts.refusal(for: studio, in: engine.store.config))
+        XCTAssertNil(engine.activeLoadout)
+    }
+
+    func testADisplayChangeDoesNotReapplyAHiddenLoadoutAndSaysSoOnce() throws {
+        let engine = try engine()
+        var toasts: [(String, String?)] = []
+        engine.notify = { title, detail, _ in toasts.append((title, detail)) }
+        let studio = try XCTUnwrap(engine.store.loadout(named: "Studio"))
+        engine.applyAutomatically(studio, .displaysChanged)
+        XCTAssertEqual(toasts.count, 1)
+        XCTAssertEqual(toasts.first?.0, "Displays changed")
+        XCTAssertEqual(toasts.first?.1, "Did not re-apply Studio. " + (ExperimentalLoadouts.refusal(for: studio, in: engine.store.config) ?? ""))
+    }
+}
