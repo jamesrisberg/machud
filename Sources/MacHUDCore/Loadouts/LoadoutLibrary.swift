@@ -16,12 +16,15 @@ enum LoadoutEditError: Error, Equatable, CustomStringConvertible {
     case noSuchLoadout(String)
     case nameTaken(String)
     case emptyName
+    /// The loadout is held back while multi-desktop loadouts are off; the foundation's sentence.
+    case heldBack(String)
 
     var description: String {
         switch self {
         case .noSuchLoadout(let name): return "no loadout named \(name)"
         case .nameTaken(let name): return "a loadout named \(name) already exists"
         case .emptyName: return "a loadout needs a name"
+        case .heldBack(let refusal): return refusal
         }
     }
 }
@@ -77,7 +80,12 @@ extension Config {
         case .delete(let name): return try delete(name)
         case .startup(let name):
             if let name, !name.isEmpty {
-                guard loadout(named: name) != nil else { throw LoadoutEditError.noSuchLoadout(name) }
+                guard let loadout = loadout(named: name) else { throw LoadoutEditError.noSuchLoadout(name) }
+                // It would only be refused at launch. Renaming, copying and deleting a held-back
+                // loadout stay allowed: they are explicit and refuse nothing later.
+                if let refusal = ExperimentalLoadouts.refusal(for: loadout, in: self) {
+                    throw LoadoutEditError.heldBack(refusal)
+                }
                 startupLoadout = name
                 return LoadoutEditResult(loadout: name)
             }

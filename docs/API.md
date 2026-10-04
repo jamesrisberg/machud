@@ -46,7 +46,7 @@ display). Region geometry in `layouts` is fractions of the screen's visible area
 | `loadouts rename` | `name`, `to` | rename a loadout. The layouts a capture made for it alone (hidden ones no other loadout uses, named `<name>`, `<name> · <display>`, …) are renamed with it, and `startupLoadout` follows. Returns `loadout`, `renamedLayouts {old: new}` |
 | `loadouts duplicate` | `name`, `to` (optional, default `<name> copy`) | copy a loadout. The layouts it owns are copied too (new names, new region ids) so the two can be edited apart; shared layouts stay shared. The copy has no hotkey. Returns `loadout`, `addedLayouts[]` |
 | `loadouts delete` | `name` | delete a loadout and the hidden layouts it owns; clears `startupLoadout` if it was this one. Returns `removedLayouts[]` |
-| `loadouts startup` | `name` (omit, or `name=none`, to clear) | set `startupLoadout`, the loadout applied at launch |
+| `loadouts startup` | `name` (omit, or `name=none`, to clear) | set `startupLoadout`, the loadout applied at launch. One that spans several desktops or displays while multi-desktop loadouts are off is refused (it would be refused at launch); `rename`, `duplicate` and `delete` act on it by name as on any other |
 | `reload` | | re-read `~/.config/machud/layouts.json` |
 | `apply` | `loadout`, `clear=1`, `screen=<ref>` (optional) | launch/find each occupant and place it in its region; with `clear`, first minimise the other windows showing on each screen the loadout covers (on the desktops it visits); then the loadout's `hud` part, if any (see HUD loadouts). `screen` picks the display for the one-screen form (default: under the mouse; one that matches no display is an error). A loadout that spans several desktops or displays while multi-desktop loadouts are off is refused before anything moves: `ok: false` and `error` say why. Returns `placed[]`, `failed{}`, `cleared`, `redirected[]` when a display was missing, `hud {dock?, apps {id: "applied" or why not}}`, and `slots[]`: the plan step per slot plus `result` (`placed`/`failed`), `error`, and `actual` {x, y, w, h} when the app kept a different frame. See [Placement plan](#placement-plan) |
 | `apply` | `loadout`, `plan=1` (+ optional `screen`) | **dry run**: `plan[]` of `{slot, region, occupant, action, from?, to, reason, window?}` without moving anything, plus `policy` (`oneScreen`, or `spaces.policy` while multi-desktop loadouts are on), `failed{}` / `redirected[]` for missing displays and layouts. Refused like `apply` |
@@ -104,7 +104,8 @@ loadouts**, or `settings set experimental.multiDesktopLoadouts=true`). It is off
 takes effect at once. While it is off:
 
 - `loadouts` lists only the one-screen loadouts and counts the others in `heldBack`. Nothing
-  is converted or deleted: turning the setting on brings them back.
+  is converted or deleted: turning the setting on brings them back. `loadouts startup` refuses
+  one; `rename`, `duplicate` and `delete` still act on it by name.
 - `apply` (and `plan=1`, and the preview) refuses a spanning loadout by name before anything
   moves, saying how to turn the setting on. The startup loadout and the re-apply after a
   display change do not run one either; a toast says so.

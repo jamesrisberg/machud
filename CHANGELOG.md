@@ -49,8 +49,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   since it goes on whichever screen you apply it to.
 - From scripts too: while **Multi-desktop loadouts** is off, `machud loadouts` leaves out the
   loadouts that span several desktops or displays (and says how many), and `machud apply` refuses
-  one by name, saying how to turn the setting on, before anything moves. The startup loadout and
-  the re-apply when displays change skip one too, with a toast.
+  one by name, saying how to turn the setting on, before anything moves, as does `machud loadouts
+  startup`. The startup loadout and the re-apply when displays change skip one too, with a toast.
 - `machud capture name=…` saves the display under the pointer as it looks on the desktop showing.
   Capturing every screen (`screens=all`), walking desktops (`desktops=`), filling a layout per
   display (`screens=<layout>@<display>`) and `machud spaces action=switch` are experimental: while

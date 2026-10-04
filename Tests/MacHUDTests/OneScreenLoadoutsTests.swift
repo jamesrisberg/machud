@@ -53,6 +53,39 @@ final class OneScreenLoadoutListTests: XCTestCase {
         XCTAssertEqual(reply["heldBackNote"] as? String, ExperimentalLoadouts.heldBackNote(count: 2))
     }
 
+    /// A hidden loadout as the startup loadout would only be refused at launch, so naming one is
+    /// refused now; clearing it, and an offered one, are not.
+    func testAHiddenLoadoutCannotBecomeTheStartupLoadout() throws {
+        let store = try OneScreenFixture.store(multiDesktop: nil)
+        let library = LoadoutLibrary(store: store)
+        let studio = try XCTUnwrap(store.loadout(named: "Studio"))
+        let reply = library.handle(["_": "startup", "startup": "1", "name": "Studio"])
+        XCTAssertEqual(reply["ok"] as? Bool, false)
+        XCTAssertEqual(reply["error"] as? String, ExperimentalLoadouts.refusal(for: studio, in: store.config))
+        XCTAssertNil(store.config.startupLoadout)
+        XCTAssertEqual(library.handle(["action": "startup", "name": "Desk"])["ok"] as? Bool, true)
+        XCTAssertEqual(store.config.startupLoadout, "Desk")
+        XCTAssertEqual(library.handle(["action": "startup", "name": "none"])["ok"] as? Bool, true)
+        XCTAssertNil(store.config.startupLoadout)
+    }
+
+    func testWithTheSettingOnAnyLoadoutCanBeTheStartupLoadout() throws {
+        let store = try OneScreenFixture.store(multiDesktop: true)
+        XCTAssertEqual(LoadoutLibrary(store: store).handle(["action": "startup", "name": "Studio"])["ok"] as? Bool, true)
+        XCTAssertEqual(store.config.startupLoadout, "Studio")
+    }
+
+    /// Renaming, copying and deleting a hidden loadout by name are the owner's explicit acts.
+    func testAHiddenLoadoutCanStillBeRenamedCopiedAndDeleted() throws {
+        let store = try OneScreenFixture.store(multiDesktop: nil)
+        let library = LoadoutLibrary(store: store)
+        XCTAssertEqual(library.handle(["action": "rename", "name": "Studio", "to": "Studio 2"])["ok"] as? Bool, true)
+        XCTAssertEqual(library.handle(["action": "duplicate", "name": "Studio 2"])["loadout"] as? String, "Studio 2 copy")
+        XCTAssertEqual(library.handle(["action": "delete", "name": "Pinned"])["ok"] as? Bool, true)
+        XCTAssertEqual(store.loadouts.map(\.name), ["Desk", "Studio 2", "Studio 2 copy"])
+        XCTAssertEqual(ExperimentalLoadouts.heldBack(in: store.config), 2)
+    }
+
     func testWithTheSettingOnEveryLoadoutIsListed() throws {
         let library = LoadoutLibrary(store: try OneScreenFixture.store(multiDesktop: true))
         let reply = library.handle(["action": "list"])
