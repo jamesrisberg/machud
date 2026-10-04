@@ -112,6 +112,42 @@ final class RadialOpeningTests: XCTestCase {
         XCTAssertEqual(hint(), "Park Safari · Docs", "an answer from an earlier opening is not used")
     }
 
+    /// Park left and highlighted again while a read is still out: that read's answer is older
+    /// than the highlight, so it is not used, and the wheel asks again as it lands.
+    func testARehighlightAsksAgainRatherThanUseAnOlderAnswer() {
+        let menu = menu()
+        var asked: [(RadialMenu.Wedge.ParkTargets) -> Void] = []
+        menu.readParkTargets = { answer in asked.append(answer) }
+        let display = Self.displays[1]
+        var wedges = RadialLayoutTests.wedges(8, RadialLayoutTests.short)
+        wedges[6].kind = .park(.init(focused: "Safari · Docs"))
+        menu.prepare(wedges: wedges, at: CGPoint(x: display.frame.midX, y: display.frame.midY), on: display, movesPointer: true)
+        func hint() -> String { RadialMenu.hint(for: menu.selection, in: menu.wedges) }
+        menu.select(index: 6, ring: .inner)
+        menu.select(index: 0, ring: .inner)
+        menu.select(index: 6, ring: .inner)
+        XCTAssertEqual(asked.count, 1, "one read out at a time")
+        asked[0](.init(focused: "Notes · Groceries"))
+        XCTAssertEqual(hint(), "Park Safari · Docs", "the older answer is not used")
+        XCTAssertEqual(asked.count, 2, "asked again as it landed")
+        asked[1](.init(focused: "Terminal"))
+        XCTAssertEqual(hint(), "Park Terminal")
+
+        // Left again before the older answer lands: it is not used, and nothing is asked until
+        // Park is highlighted again.
+        menu.select(index: 0, ring: .inner)
+        menu.select(index: 6, ring: .inner)
+        XCTAssertEqual(asked.count, 3)
+        menu.select(index: 0, ring: .inner)
+        menu.select(index: 6, ring: .inner)
+        menu.select(index: 0, ring: .inner)
+        asked[2](.init(focused: "Mail · Inbox"))
+        XCTAssertEqual(asked.count, 3)
+        menu.select(index: 6, ring: .inner)
+        XCTAssertEqual(asked.count, 4)
+        XCTAssertEqual(hint(), "Park Terminal")
+    }
+
     /// A wheel opened again with the same words in the same room reuses its layout; any other
     /// words (a widgets button that reads Lower now) or room lay it out anew.
     func testALayoutIsReusedOnlyForTheSameWordsAndRoom() {

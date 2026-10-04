@@ -279,6 +279,9 @@ final class RadialMenu {
     private var opening = 0
     /// A read of the park wedge's targets has been asked for and not answered.
     private var parkTargetsAsked = false
+    /// The park wedge was highlighted again while a read was out: that read's answer is older
+    /// than the highlight, so it is not used, and the wheel asks again as it lands.
+    private var parkTargetsStale = false
 
     private(set) var wedges: [Wedge] = []
     private(set) var layout = RadialLayout(wedges: [])
@@ -393,6 +396,7 @@ final class RadialMenu {
         firstReport = nil
         opening += 1
         parkTargetsAsked = false
+        parkTargetsStale = false
         keyboardIndex = nil
         selection = .cancel
         wheel.selection = .cancel
@@ -562,15 +566,29 @@ final class RadialMenu {
 
     /// The park wedge asks for its targets again as it becomes highlighted (`asksForParkTargets`).
     private func noteHighlight(from previous: Int?) {
-        guard let i = selection.index, Self.asksForParkTargets(highlighting: i, from: previous, in: wedges),
-              let read = readParkTargets, !parkTargetsAsked else { return }
+        guard let i = selection.index, Self.asksForParkTargets(highlighting: i, from: previous, in: wedges) else { return }
+        // One read out at a time: a highlight while one is out makes its answer too old to use.
+        if parkTargetsAsked { parkTargetsStale = true } else { askForParkTargets(i) }
+    }
+
+    /// Asks for the park wedge's targets; the answer replaces them while the park wedge (at
+    /// `index`) is still highlighted in the same opening, unless it was highlighted again
+    /// meanwhile, when the wheel asks again instead.
+    private func askForParkTargets(_ index: Int) {
+        guard let read = readParkTargets else { return }
         parkTargetsAsked = true
         let asked = opening
         read { [weak self] targets in
             guard let self, self.opening == asked else { return }
             self.parkTargetsAsked = false
+            let highlighted = self.selection.index == index
+            if self.parkTargetsStale {
+                self.parkTargetsStale = false
+                if highlighted { self.askForParkTargets(index) }
+                return
+            }
             // Only while the park wedge is still highlighted: its hint is the one that shows.
-            guard self.selection.index == i, let fresh = Self.refreshed(self.wedges, park: i, with: targets) else { return }
+            guard highlighted, let fresh = Self.refreshed(self.wedges, park: index, with: targets) else { return }
             self.wedges = fresh
             self.wheel.update(wedges: fresh)
         }
