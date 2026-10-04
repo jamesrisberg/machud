@@ -66,7 +66,7 @@ setting and everything it turns on are under [Multi-desktop loadouts
 | `clear` | `screen=<ref>` (optional) | minimise the windows showing on one screen, the display under the pointer (or `screen`; one that matches no display is an error), except MacHUD's own, running sibling apps' (external panels) and hidden apps'; windows on its other desktops and on other displays stay. It is the set `apply … clear=1` clears for that screen, and it also closes the web windows MacHUD opened. Returns `cleared` and `screen`. With multi-desktop loadouts on and no `screen`, it reaches every window on every desktop (see [Multi-desktop loadouts (experimental)](#multi-desktop-loadouts-experimental)) |
 | `restore` | | un-minimise everything the last `clear` (or `apply … clear=1`) minimised, whichever mode; returns `restored` |
 | `place` | `window` (CGWindow number from `windows`), `region` (region id, name, or index) | move one window into one region |
-| `radial` | `action=show\|hide\|cancel\|select\|commit`, `index`, `ring=inner\|middle\|outer` | drive the loadout wheel without the hotkey; a ring a wedge does not have selects its last one |
+| `radial` | `action=show\|hide\|cancel\|select\|commit`, `index`, `ring=inner\|middle\|outer` | drive the loadout wheel without the hotkey; a ring a wedge does not have selects its last one. The reply is the same object as `menu`'s, after the action |
 
 Screen references (`<ref>` above): a display name (`"DELL S2722QC"`), `main`, `builtin`, or an
 index into the display list.
