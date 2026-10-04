@@ -197,18 +197,25 @@ struct WakePhraseModel {
     }
 }
 
-/// The wake word listener.
+/// The wake word listener: one per wake model and settings, kept while it is stopped.
 @MainActor
 protocol WakeDriving: AnyObject {
-    /// A detection: its score and the phrase. The listener stays quiet until started again.
-    var onWake: ((WakeDetection) -> Void)? { get set }
+    /// A detection, and whether it came from the listener running now (false: it was on its way
+    /// when its listener was stopped or replaced). The listener stays quiet until re-armed or
+    /// started again.
+    var onWake: ((WakeDetection, _ current: Bool) -> Void)? { get set }
     var onListeningChanged: ((Bool) -> Void)? { get set }
     /// Listening could not start or stopped by itself. Nothing reports it again until the next
     /// start.
     var onProblem: ((WakeFailure) -> Void)? { get set }
-    /// Start (or restart) listening for `settings.wakePhrase`.
+    /// Listen for `settings.wakePhrase`: the listener kept for the same model, threshold and
+    /// frames starts again (also after it failed), other settings replace it.
     func start(_ settings: VoiceSettings)
+    /// Stops listening (the microphone closes); the listener is kept for the next `start`.
     func stop()
+    /// Listens again after a wake that started nothing, dropping what it hears for `quietFor`
+    /// seconds. Nothing happens while it is stopped.
+    func rearm(quietFor: TimeInterval)
 }
 
 /// Why the wake listener could not start or stopped by itself.

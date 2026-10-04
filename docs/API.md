@@ -935,12 +935,13 @@ A take the host refuses before it records is a line too, with no `seconds` or `e
 muted (the socket's `ask` and `dictate`), the brain off or unable to take a turn, the agent still
 working, a take already recording, or the dictation refusing to start. So is each wake detection
 that starts no take, with its score. A detection that arrives when no listener is wanted (voice
-off, muted, the wake word off, a take recording) or that is not of the phrase listened for (`Not
-the wake phrase listened for`, from a listener replaced since) is refused before anything else:
-it writes its line and its log line and changes nothing, not the reply being spoken, the orb or
-the listener. A detection the listener running now makes is refused as any other take start is:
-the brain off or unable to take a turn, or the agent still working (`The agent is still
-working`), which stops a reply being spoken and shows on the orb.
+off, muted, the wake word off, a take recording), that was on its way from a listener stopped or
+replaced since (`From a wake listener stopped or replaced since`) or that is not of the phrase
+listened for (`Not the wake phrase listened for`) is refused before anything else: it writes its
+line and its log line and changes nothing, not the reply being spoken, the orb or the listener.
+A detection the listener running now makes is refused as any other take start is: the brain off
+or unable to take a turn, or the agent still working (`The agent is still working`), which stops
+a reply being spoken and shows on the orb.
 
 The voice host logs each take's start, end and outcome (counts, never words), and the wake
 listener's start, stop and failures, to the unified log at notice level with every value public:
@@ -953,7 +954,11 @@ changes), and its end once the listener listens again, with how many restarts it
 brainProblem?, sessionKey?, sessionProvider?, activeRuntime?, wakeListening, wakeProblem?, muted,
 gesturePending, cardMode, lastTakeEnd?}`; `cardMode` is the reply card's state (see above). `activeRuntime` is the runtime the brain companion reports running (`codex`,
 `wakeListening` is true while the wake word is armed; it pauses while a take records and listens
-again after. While the wake word is on (and voice is on and not muted) but not listening,
+again after. There is one listener for the phrase's model, `voice.wakeThreshold` and
+`voice.wakeFrames`: it keeps its model loaded while paused (the microphone closes) and other
+settings replace it. After a wake that starts no take the same listener is re-armed at once, with
+the microphone kept open, and drops the next second of what it hears, so the rest of the sound
+that woke it cannot wake it again; the re-arm is not logged on its own. While the wake word is on (and voice is on and not muted) but not listening,
 `wakeProblem` says why: its phrase's model is not downloaded (`Download the Hey Jarvis model to
 use the wake word.`), is downloading or failed to, the microphone is not allowed, or listening
 stopped (an audio device change it could not recover from); turning the wake word on shows it

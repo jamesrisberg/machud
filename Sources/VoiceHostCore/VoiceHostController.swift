@@ -76,6 +76,7 @@ public final class VoiceHostController: VoiceHostActing {
     static let voiceMuted = "Voice is muted"
     static let wakeOff = "The wake word is off"
     static let otherWakePhrase = "Not the wake phrase listened for"
+    static let staleWake = "From a wake listener stopped or replaced since"
     static let wakeModelMissing = "The wake phrase's model is not installed"
     static let hostQuit = "The voice host quit"
     static let modelMissing = "Speech model not installed"
@@ -96,6 +97,9 @@ public final class VoiceHostController: VoiceHostActing {
     /// How long a wake listener that stopped by itself waits before each restart: the first,
     /// the second, then every one after.
     static let wakeRestartDelays: [TimeInterval] = [2, 10, 60]
+    /// After a wake that starts no take the listener drops this many seconds of what it hears, so
+    /// the rest of the sound that woke it cannot wake it again.
+    static let wakeQuietPeriod: TimeInterval = 1
 
     private let dictation: DictationDriving
     private let keys: VoiceKeySource?
@@ -219,6 +223,11 @@ public final class VoiceHostController: VoiceHostActing {
     /// The listener failed in a way starting it again cannot fix (`WakeFailure.retryable` false):
     /// it waits for a change to its model or to the voice settings.
     private var wakeWaitsForChange = false
+    /// Counts the listener's starts and stops: a wake re-arms the listener only if it is still
+    /// the run the wake came from.
+    private var wakeRun = 0
+    /// The listener was re-armed after a wake; its listening again continues the same run.
+    private var wakeRearming = false
     /// The conversation with the agent, every turn and snapshot reduced to rows.
     private(set) var conversation: ConversationLog
     private var conversationSaveScheduled = false
@@ -301,7 +310,7 @@ public final class VoiceHostController: VoiceHostActing {
             state.phase = .idle
         }
         speaker?.onChunkStarted = { [weak self] chunk in self?.chunkStarted(chunk) }
-        wake?.onWake = { [weak self] in self?.wakeDetected($0) }
+        wake?.onWake = { [weak self] in self?.wakeDetected($0, current: $1) }
         wake?.onListeningChanged = { [weak self] in self?.wakeListeningChanged($0) }
         wake?.onProblem = { [weak self] in self?.wakeListenerFailed($0) }
         apply(settings)
@@ -344,7 +353,7 @@ public final class VoiceHostController: VoiceHostActing {
             wakeWaitsForChange = false
             wakeFailureRun?.attempts += 1
             log("wake listener restarting: its model changed")
-            wake.start(settings)
+            startWake(wake, settings)
         }
         refreshWakeProblem()
     }
@@ -568,21 +577,23 @@ public final class VoiceHostController: VoiceHostActing {
     }
 
     /// A detection starts an agent take. One that arrives after the listener was told to stop
-    /// (no listener is wanted: voice off, muted, the wake word off, a take recording) or that is
-    /// not of the phrase listened for (a listener replaced since) is refused before anything
-    /// else: it is journaled and logged and touches nothing, not the reply's speech, the orb or
-    /// the listener running now.
-    private func wakeDetected(_ detection: WakeDetection) {
+    /// (no listener is wanted: voice off, muted, the wake word off, a take recording), from a
+    /// listener stopped or replaced since, or not of the phrase listened for is refused before
+    /// anything else: it is journaled and logged and touches nothing, not the reply's speech, the
+    /// orb or the listener running now.
+    private func wakeDetected(_ detection: WakeDetection, current: Bool) {
         let trigger = VoiceTakeTrigger(detection)
         guard let listening = runningWake else {
             return refused(trigger, mode: .agent, reason: wakeStopReason)
         }
+        guard current else { return refused(trigger, mode: .agent, reason: Self.staleWake) }
         guard TriggerPhrase.normalize(detection.phrase) == TriggerPhrase.normalize(listening.wakePhrase) else {
             return refused(trigger, mode: .agent, reason: Self.otherWakePhrase)
         }
+        let run = wakeRun
         startTake(.agent, handsFree: true, trigger: trigger)
-        // The listener stays quiet after a wake; with no take to pause it, listen again now.
-        if take == nil { restartWake() }
+        // The listener stays quiet after a wake; with no take to pause it, it listens again.
+        if take == nil, wakeRun == run { rearmWake() }
     }
 
     private func handle(_ intent: KeyGestureRecognizer.Intent) {
@@ -1173,6 +1184,8 @@ public final class VoiceHostController: VoiceHostActing {
         let wanted = wakeWanted && take == nil && wakeModel?.store.status.installed == true ? settings.voice : nil
         guard wanted != runningWake else { return }
         if runningWake != nil {
+            wakeRun += 1
+            wakeRearming = false
             wake.stop()
             log("wake listener stopped: \(wanted == nil ? wakeStopReason : "its settings changed")")
         }
@@ -1184,7 +1197,14 @@ public final class VoiceHostController: VoiceHostActing {
         guard let wanted else { return }
         log("wake listener starting: \"\(wanted.wakePhrase)\", threshold \(String(format: "%.2f", wanted.wakeThreshold)), "
             + "\(wanted.wakeFrames) frame\(wanted.wakeFrames == 1 ? "" : "s")")
-        wake.start(wanted)
+        startWake(wake, wanted)
+    }
+
+    /// Every start of the listener begins a run of its own.
+    private func startWake(_ wake: WakeDriving, _ settings: VoiceSettings) {
+        wakeRun += 1
+        wakeRearming = false
+        wake.start(settings)
     }
 
     /// Why no wake listener is wanted now: for the log, and for a detection that arrives anyway.
@@ -1202,6 +1222,11 @@ public final class VoiceHostController: VoiceHostActing {
         let was = state.wakeListening
         state.wakeListening = listening
         guard listening, !was else { return }
+        // Listening again after a re-arm: the same run, still listening since it started.
+        if wakeRearming {
+            wakeRearming = false
+            return
+        }
         wakeListeningSince = now()
         if let run = wakeFailureRun {
             log("wake listener listening again after \(run.attempts) attempt\(run.attempts == 1 ? "" : "s")")
@@ -1224,6 +1249,7 @@ public final class VoiceHostController: VoiceHostActing {
     private func wakeListenerFailed(_ failure: WakeFailure) {
         let listened = wakeListeningSince.map { now() - $0 }
         wakeListeningSince = nil
+        wakeRearming = false
         if let listened, let longest = Self.wakeRestartDelays.last, listened >= longest { wakeRestarts = 0 }
         wakeListenerProblem = failure.reason
         refreshWakeProblem()
@@ -1252,7 +1278,7 @@ public final class VoiceHostController: VoiceHostActing {
         guard let wake, let settings = runningWake, wakeListenerProblem != nil, take == nil else { return }
         wakeRestarts += 1
         wakeFailureRun?.attempts += 1
-        wake.start(settings)
+        startWake(wake, settings)
     }
 
     /// Why the wake word is on and not listening; nil while it is off, muted or able to listen.
@@ -1279,14 +1305,13 @@ public final class VoiceHostController: VoiceHostActing {
         if problem != state.wakeProblem { state.wakeProblem = problem }
     }
 
-    /// Listens again after a wake that started no take.
-    private func restartWake() {
-        if runningWake != nil {
-            wake?.stop()
-            log("wake listener stopped: re-arming after a wake that started no take")
-        }
-        runningWake = nil
-        refreshWake()
+    /// Listens again after a wake that started no take, with the listener running now, dropping
+    /// the rest of the sound that woke it (`wakeQuietPeriod`). Not logged: the wake's own line says
+    /// what happened.
+    private func rearmWake() {
+        guard let wake, runningWake != nil else { return }
+        wakeRearming = true
+        wake.rearm(quietFor: Self.wakeQuietPeriod)
     }
 
     /// The brain settings with the workspace resolved: the home folder while none is chosen.

@@ -90,6 +90,10 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   agent, about 80 ms later.
 
 ### Fixed
+- After a wake word that starts nothing (the agent busy or the brain off), the rest of the sound
+  that woke it can no longer wake it again: the wake word ignores the next second and listens on
+  without reopening the microphone or reloading its model. A wake word heard by a listener that
+  was being replaced (its settings had just changed) no longer starts a take.
 - One loadout is applied at a time. Asking for another while one is being applied (a hotkey, the
   menu, a script, the voice agent, the startup loadout or a display change) says "<name> is
   still being applied" instead of running both, which could leave a desktop switched. A HUD

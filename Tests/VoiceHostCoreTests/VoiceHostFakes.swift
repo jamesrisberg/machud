@@ -222,12 +222,16 @@ final class FakeModels: VoiceModelProviding {
 
 @MainActor
 final class FakeWake: WakeDriving {
-    var onWake: ((WakeDetection) -> Void)?
+    var onWake: ((WakeDetection, Bool) -> Void)?
     var onListeningChanged: ((Bool) -> Void)?
     var onProblem: ((WakeFailure) -> Void)?
     var starts: [VoiceSettings] = []
     var stops = 0
+    /// The quiet period of each `rearm`, in order.
+    var rearms: [TimeInterval] = []
     var listening = false
+    /// Started and not stopped since (a failure leaves it so, as the live listener does).
+    private(set) var running = false
     /// Each start fails with this (the microphone still refuses) while it is set.
     var startFailure: WakeFailure?
     /// A start listens at once; false leaves it starting until `listen()`.
@@ -235,6 +239,7 @@ final class FakeWake: WakeDriving {
 
     func start(_ settings: VoiceSettings) {
         starts.append(settings)
+        running = true
         if let startFailure {
             onProblem?(startFailure)
             return
@@ -248,9 +253,21 @@ final class FakeWake: WakeDriving {
         onListeningChanged?(true)
     }
 
-    /// A detection of the wake phrase.
-    func detect(score: Double = 0.973, phrase: String = "Hey Jarvis") {
-        onWake?(WakeDetection(score: score, phrase: phrase))
+    /// A detection of the wake phrase. One from the listener running now leaves it quiet (not
+    /// listening) until it is re-armed or started again, as VoiceKit's does; `current` false is
+    /// one in flight from a listener stopped or replaced since.
+    func detect(score: Double = 0.973, phrase: String = "Hey Jarvis", frames: Int = 2, peak: Double? = nil,
+                audio: [Float] = [], current: Bool = true) {
+        if current, listening {
+            listening = false
+            onListeningChanged?(false)
+        }
+        onWake?(WakeDetection(score: score, phrase: phrase, frames: frames, peak: peak, audio: audio), current)
+    }
+
+    func rearm(quietFor seconds: TimeInterval) {
+        rearms.append(seconds)
+        if running { listen() }
     }
 
     /// Listening stops by itself: the microphone (retryable) or the model (not).
@@ -262,6 +279,7 @@ final class FakeWake: WakeDriving {
 
     func stop() {
         stops += 1
+        running = false
         listening = false
         onListeningChanged?(false)
     }

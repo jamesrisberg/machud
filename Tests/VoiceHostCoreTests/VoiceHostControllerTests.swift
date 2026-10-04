@@ -985,12 +985,51 @@ final class VoiceHostControllerTests: XCTestCase {
         settings.brainEnabled = false
         let controller = makeController(settings)
         let starts = wake.starts.count
+        let stops = wake.stops
+        let listenerLines = lines("wake listener")
         wake.detect()
         XCTAssertEqual(controller.state.phase, .failed("The brain is off"))
-        XCTAssertEqual(wake.starts.count, starts + 1)
+        XCTAssertEqual(wake.starts.count, starts, "the listener running now, not a new one")
+        XCTAssertEqual(wake.stops, stops)
+        XCTAssertEqual(VoiceHostController.wakeQuietPeriod, 1)
+        XCTAssertEqual(wake.rearms, [1], "re-armed, dropping the next second of what it hears")
         XCTAssertTrue(wake.listening)
+        XCTAssertTrue(controller.state.wakeListening)
+        XCTAssertEqual(lines("wake listener"), listenerLines, "re-arming is not a listener stop and start")
         XCTAssertEqual(journal.records.map(\.outcome), [.refused])
         XCTAssertEqual(journal.records.last?.reason, VoiceHostController.brainOff)
+    }
+
+    func testADetectionFromAListenerStoppedOrReplacedSinceTouchesNothingButTheJournal() {
+        var settings = VoiceHostSettings()
+        settings.voice.wakeWordEnabled = true
+        let controller = makeController(settings)
+        let before = controller.state
+        let starts = wake.starts.count
+        wake.detect(score: 0.88, current: false)
+        XCTAssertTrue(dictation.starts.isEmpty)
+        XCTAssertEqual(controller.state, before, "nothing shows")
+        XCTAssertEqual(wake.starts.count, starts)
+        XCTAssertTrue(wake.rearms.isEmpty, "the listener running now is left alone")
+        XCTAssertTrue(wake.listening)
+        XCTAssertEqual(journal.records.map(\.outcome), [.refused])
+        XCTAssertEqual(journal.records.last?.reason, VoiceHostController.staleWake)
+        XCTAssertEqual(lines("take refused").count, 1)
+    }
+
+    func testAWakeThatDoesNotStartATakeWhileTheListenerRestartsIsNotReArmed() {
+        var settings = VoiceHostSettings()
+        settings.voice.wakeWordEnabled = true
+        let controller = makeController(settings)
+        // The dictation refuses to start: the take ends at once and the listener, paused for it,
+        // starts again by itself.
+        dictation.unavailable = .modelMissing(recordingKept: false)
+        let starts = wake.starts.count
+        wake.detect()
+        XCTAssertEqual(controller.state.phase, .failed(VoiceHostController.modelMissing))
+        XCTAssertEqual(wake.starts.count, starts + 1)
+        XCTAssertTrue(wake.rearms.isEmpty, "started afresh, so no re-arm")
+        XCTAssertTrue(controller.state.wakeListening)
     }
 
     func testSnapshotsDoNotTakeOverARecordingTake() async {
