@@ -7,18 +7,25 @@ struct WindowLocator {
     let screens: [NSScreen]
     let monitors: [Spaces.Monitor]
     let entries: [AllSpacesWindows.Entry]
+    /// The Mission Control shortcuts, read once.
+    let hotkeys: [String: Any]
 
     init() {
         screens = NSScreen.screens
         monitors = Spaces.monitors()
         entries = AllSpacesWindows.list()
+        hotkeys = Spaces.readDomain("com.apple.symbolichotkeys") ?? [:]
     }
 
     var planScreens: [PlacementPlan.Screen] {
         screens.map { screen in
             let monitor = Spaces.monitor(for: screen, in: monitors)
-            return PlacementPlan.Screen(name: screen.localizedName, frame: screen.frame,
-                                        currentSpace: monitor?.currentIndex, spaces: monitor?.count ?? 1)
+            var plan = PlacementPlan.Screen(name: screen.localizedName, frame: screen.frame,
+                                            currentSpace: monitor?.currentIndex, spaces: monitor?.count ?? 1)
+            plan.switchable = PlacementPlan.Screen.switchable(current: plan.currentSpace, count: plan.spaces) {
+                Spaces.shortcut(from: hotkeys, key: $0)
+            }
+            return plan
         }
     }
 

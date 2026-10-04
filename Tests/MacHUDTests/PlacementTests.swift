@@ -249,6 +249,38 @@ final class PlacementPlanTests: XCTestCase {
         XCTAssertEqual(oneScreen(slot([win(1, screen: 0, space: 3, visible: true, frame: rect)])).action, .stay)
     }
 
+    /// The owner's shortcuts: "Move left/right a space" on, "Switch to Desktop N" off.
+    func testWhichDesktopsADisplayCanReachAndComeBackFrom() {
+        let on = Spaces.Shortcut(enabled: true, keyCode: 123, modifiers: 262_144)
+        let off = Spaces.Shortcut(enabled: false, keyCode: 18, modifiers: 262_144)
+        func shortcuts(_ moves: Bool) -> (Int) -> Spaces.Shortcut? {
+            { key in [Spaces.Key.moveLeft, Spaces.Key.moveRight].contains(key) ? (moves ? on : off) : off }
+        }
+        XCTAssertEqual(P.Screen.switchable(current: 3, count: 4, shortcuts: shortcuts(true)), [1, 2, 3, 4])
+        XCTAssertEqual(P.Screen.switchable(current: 3, count: 4, shortcuts: shortcuts(false)), [3])
+        XCTAssertNil(P.Screen.switchable(current: nil, count: 4, shortcuts: shortcuts(true)))
+    }
+
+    /// With the switch shortcuts off the plan does not promise a desktop switch: it says the app
+    /// is left, and why.
+    func testNoFetchIsPlannedWhenDesktopsCannotBeSwitched() {
+        var screens = self.screens
+        screens[0].switchable = [3]
+        let single = oneScreen(slot([win(1, screen: 0, space: 1, visible: false)], newWindow: .single), screens: screens)
+        XCTAssertEqual(single.action, .cannot)
+        XCTAssertNil(single.bring)
+        XCTAssertTrue(single.reason.hasPrefix("Signal has one window, on another desktop (desktop 1 of DELL; "), single.reason)
+        XCTAssertTrue(single.reason.contains(Spaces.SwitchError.shortcutDisabled.message), single.reason)
+        // With the feature on, `bring` falls back as it does without a second display.
+        let menu = P.step(for: slot([win(1, screen: 0, space: 1, visible: false)], newWindow: .menu), screens: screens,
+                          mode: .multiDesktop(.bring))
+        XCTAssertEqual(menu.action, .launch)
+        XCTAssertTrue(menu.newWindow)
+        // A desktop it can reach is fetched as before.
+        screens[0].switchable = [1, 2, 3, 4]
+        XCTAssertNotNil(oneScreen(slot([win(1, screen: 0, space: 1, visible: false)], newWindow: .single), screens: screens).bring)
+    }
+
     func testThePlanNamesItsMode() {
         XCTAssertEqual(P.Mode.oneScreen.name, "oneScreen")
         XCTAssertEqual(P.Mode.multiDesktop(.bring).name, "bring")

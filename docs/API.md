@@ -175,7 +175,9 @@ desktop that is not showing gets a new window here when it can open one (as `lau
 A single-window app's window is fetched instead (as `bring` below: `switchSpace`, with the
 reason saying which desktop is shown and how the window comes over); this is the one time an
 apply switches desktops with the setting off. When it cannot be fetched (one display, the
-switch fails), its slot reports `cannot`, naming the app and saying it is on another desktop.
+Mission Control shortcuts that would reach its desktop are off, the switch fails), its slot
+reports `cannot`, naming the app, saying it is on another desktop and why; the plan says so
+before anything moves.
 An app whose windows are all on other desktops and that would not open a window without being
 brought forward is not brought forward (that would show its desktop); its slot reports `cannot`
 too. A window showing on another display is still moved over, and a minimised one restored.

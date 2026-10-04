@@ -89,6 +89,23 @@ enum PlacementPlan {
         /// 1-based desktop showing now.
         var currentSpace: Int?
         var spaces: Int = 1
+        /// The desktops this display can be switched to from the one showing and back again with
+        /// the Mission Control shortcuts that are on; nil when that is not known.
+        var switchable: Set<Int>? = nil
+
+        func canSwitch(to desktop: Int) -> Bool { switchable?.contains(desktop) ?? true }
+
+        /// The desktops reachable there and back from `current` (`Spaces.route`); nil when the
+        /// showing desktop is unknown.
+        static func switchable(current: Int?, count: Int, shortcuts: (Int) -> Spaces.Shortcut?) -> Set<Int>? {
+            guard let current else { return nil }
+            return Set((1...max(count, 1)).filter { n in
+                guard case .success = Spaces.route(to: n, current: current, count: count, shortcuts: shortcuts),
+                      case .success = Spaces.route(to: current, current: n, count: count, shortcuts: shortcuts)
+                else { return false }
+                return true
+            })
+        }
     }
 
     /// A window the occupant could use.
@@ -315,6 +332,9 @@ enum PlacementPlan {
         case .bring:
             guard let space = window.space, let from = window.screen else {
                 return launchNew("its desktop is unknown; ")
+            }
+            guard screens[from].canSwitch(to: space) else {
+                return launchNew("MacHUD cannot switch desktops there: \(Spaces.SwitchError.shortcutDisabled.message); ")
             }
             if from != slot.screen {
                 step.action = .switchSpace
