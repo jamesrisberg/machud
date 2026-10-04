@@ -273,9 +273,46 @@ struct RadialLayout {
 ///
 /// It is a disc a little past the names' anchors united with a rounded box around each word
 /// that reaches outside it (the names, the hint's zone), joined smoothly, full inside and
-/// fading over `fade` outside; the middle is a little stronger than the rim. With Reduce transparency on it is a plain soft
-/// disc around every word.
+/// fading over `fade` outside; the middle is a little stronger than the rim. With Reduce
+/// transparency on it is a plain soft disc around every word.
 struct RadialField {
+    /// What the field is made from: two layouts with the same shape have the same field.
+    struct Shape: Equatable {
+        var disc: CGFloat
+        var boxes: [CGRect]
+        var reach: CGFloat
+        var fade: CGFloat
+        var pad: CGFloat
+        var smoothing: CGFloat
+        var reduced: Bool
+
+        init(layout: RadialLayout, reduced: Bool) {
+            let s = layout.scale
+            pad = RadialField.pad * s
+            fade = RadialField.fade * s
+            smoothing = RadialField.smoothing * s
+            let frames = layout.words.map(\.frame) + [layout.hintZone]
+            let farthest = { (r: CGRect) in hypot(max(abs(r.minX), abs(r.maxX)), max(abs(r.minY), abs(r.maxY))) }
+            reach = max(1, frames.map(farthest).max() ?? 1)
+            disc = reduced ? reach + pad : layout.geometry.nameRadius + RadialField.discReach * s
+            let (disc, pad) = (disc, pad)
+            boxes = reduced ? [] : frames.filter { farthest($0) + pad > disc }
+            self.reduced = reduced
+        }
+
+        func alpha(at p: CGPoint) -> CGFloat {
+            let r = hypot(p.x, p.y)
+            var d = r - disc
+            for box in boxes { d = RadialField.smoothMin(d, RadialField.distance(p, to: box) - pad, smoothing) }
+            guard d < fade else { return 0 }
+            let t = max(0, d / fade)
+            let out = 1 - t * t * t * (t * (t * 6 - 15) + 10)
+            let u = min(1, r / reach)
+            let core = 1 - RadialField.rim * u * u * (3 - 2 * u)
+            return out * core
+        }
+    }
+
     /// The total darkness over the blur where the field is full: the backdrop's own tint and the
     /// wheel's together, black. Where a word sits (the field at least `readable`) a white word
     /// on a white desktop reads at better than 4.5 to 1.
@@ -298,67 +335,40 @@ struct RadialField {
         max(0, 1 - (1 - darkness * f) / (1 - RadialBackdrop.ownTint * f))
     }
 
-    let reduced: Bool
+    let shape: Shape
+    var reduced: Bool { shape.reduced }
     /// The field is 0 on and outside this rectangle's edge (whole points).
     let support: CGRect
     let maskImage: CGImage
     let tintImage: CGImage
-
-    private let disc: CGFloat
-    private let boxes: [CGRect]
-    private let reach: CGFloat
-    private let fade: CGFloat
-    private let pad: CGFloat
-    private let smoothing: CGFloat
 
     var canvas: RadialMenu.Canvas {
         RadialMenu.Canvas(size: support.size, center: CGPoint(x: -support.minX, y: -support.minY))
     }
 
     init(layout: RadialLayout, reduced: Bool) {
-        self.reduced = reduced
-        let s = layout.scale
-        let pad = Self.pad * s, fade = Self.fade * s, smoothing = Self.smoothing * s
-        let frames = layout.words.map(\.frame) + [layout.hintZone]
-        let farthest = { (r: CGRect) in hypot(max(abs(r.minX), abs(r.maxX)), max(abs(r.minY), abs(r.maxY))) }
-        let reach = max(1, frames.map(farthest).max() ?? 1)
-        let disc = reduced ? reach + pad : layout.geometry.nameRadius + Self.discReach * s
-        let boxes = reduced ? [] : frames.filter { farthest($0) + pad > disc }
-        (self.pad, self.fade, self.smoothing, self.reach, self.disc, self.boxes) = (pad, fade, smoothing, reach, disc, boxes)
-        let extent = boxes.reduce(CGRect(x: -disc, y: -disc, width: 2 * disc, height: 2 * disc)) {
-            $0.union($1.insetBy(dx: -pad, dy: -pad))
-        }
-        let room = extent.insetBy(dx: -(fade + smoothing * 2), dy: -(fade + smoothing * 2)).integral
-        (support, maskImage, tintImage) = Self.images(over: room) { p in
-            Self.alpha(at: p, disc: disc, boxes: boxes, reach: reach, fade: fade, pad: pad, smoothing: smoothing)
-        }
+        self.init(shape: Shape(layout: layout, reduced: reduced))
     }
 
-    func alpha(at p: CGPoint) -> CGFloat {
-        Self.alpha(at: p, disc: disc, boxes: boxes, reach: reach, fade: fade, pad: pad, smoothing: smoothing)
+    init(shape: Shape) {
+        self.shape = shape
+        let extent = shape.boxes.reduce(CGRect(x: -shape.disc, y: -shape.disc, width: 2 * shape.disc, height: 2 * shape.disc)) {
+            $0.union($1.insetBy(dx: -shape.pad, dy: -shape.pad))
+        }
+        let margin = shape.fade + shape.smoothing
+        (support, maskImage, tintImage) = Self.images(over: extent.insetBy(dx: -margin, dy: -margin).integral, alpha: shape.alpha)
     }
 
-    private static func alpha(at p: CGPoint, disc: CGFloat, boxes: [CGRect], reach: CGFloat, fade: CGFloat,
-                              pad: CGFloat, smoothing: CGFloat) -> CGFloat {
-        let r = hypot(p.x, p.y)
-        var d = r - disc
-        for box in boxes { d = smoothMin(d, distance(p, to: box) - pad, smoothing) }
-        guard d < fade else { return 0 }
-        let t = max(0, d / fade)
-        let out = 1 - t * t * t * (t * (t * 6 - 15) + 10)
-        let u = min(1, r / reach)
-        let core = 1 - rim * u * u * (3 - 2 * u)
-        return out * core
-    }
+    func alpha(at p: CGPoint) -> CGFloat { shape.alpha(at: p) }
 
     /// Signed distance from `p` to `box`: negative inside.
-    private static func distance(_ p: CGPoint, to box: CGRect) -> CGFloat {
+    static func distance(_ p: CGPoint, to box: CGRect) -> CGFloat {
         let dx = abs(p.x - box.midX) - box.width / 2
         let dy = abs(p.y - box.midY) - box.height / 2
         return hypot(max(dx, 0), max(dy, 0)) + min(max(dx, dy), 0)
     }
 
-    private static func smoothMin(_ a: CGFloat, _ b: CGFloat, _ k: CGFloat) -> CGFloat {
+    static func smoothMin(_ a: CGFloat, _ b: CGFloat, _ k: CGFloat) -> CGFloat {
         let h = max(k - abs(a - b), 0) / k
         return min(a, b) - h * h * k / 4
     }

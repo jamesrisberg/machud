@@ -286,6 +286,8 @@ final class RadialMenu {
     private var keyMonitor: Any?
     private var timer: Timer?
     private var transparencyObserver: NSObjectProtocol?
+    /// The last field built: a wheel of the same shape opens with it.
+    private var field: RadialField?
 
     private var center: CGPoint = .zero          // screen coords
     private var screenFrame: CGRect = .zero
@@ -432,7 +434,9 @@ final class RadialMenu {
 
     /// Shapes the backdrop and the wheel's view to the field, which follows Reduce transparency.
     private func applyField() {
-        let field = RadialField(layout: layout, reduced: NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency)
+        let shape = RadialField.Shape(layout: layout, reduced: NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency)
+        let field = self.field?.shape == shape ? self.field! : RadialField(shape: shape)
+        self.field = field
         let canvas = field.canvas
         let local = CGRect(x: center.x - screenFrame.minX - canvas.center.x, y: center.y - screenFrame.minY - canvas.center.y,
                            width: canvas.size.width, height: canvas.size.height)
