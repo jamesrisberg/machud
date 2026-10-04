@@ -133,15 +133,21 @@ extension LoadoutEngine {
         return .success(ParkTarget(target: .ax(window), id: id, label: label, rest: window.cocoaFrame ?? info.frame))
     }
 
-    /// The radial menu's park wedge: the frontmost app's focused window goes to its
-    /// nearest edge. Returns why it could not, if it could not.
     /// The frontmost app's focused window: what the Park wedge parks.
     func focusedWindow() -> (app: NSRunningApplication, window: AXWindow)? {
-        guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != getpid() else { return nil }
-        let element = AXUIElementCreateApplication(app.processIdentifier)
-        AXUIElementSetMessagingTimeout(element, 0.5)
+        guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != getpid(),
+              let window = Self.focusedWindow(pid: app.processIdentifier) else { return nil }
+        return (app, window)
+    }
+
+    /// The focused window of the app with `pid`. Every Accessibility call on the app and on the
+    /// window is bounded by `timeout` seconds, so a hung app holds its caller at most that long a call.
+    nonisolated static func focusedWindow(pid: pid_t, timeout: Float = 0.5) -> AXWindow? {
+        let element = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(element, timeout)
         guard let focused = element.elementAttribute(kAXFocusedWindowAttribute) else { return nil }
-        return (app, AXWindow(element: focused, pid: app.processIdentifier))
+        AXUIElementSetMessagingTimeout(focused, timeout)
+        return AXWindow(element: focused, pid: pid)
     }
 
     /// "Safari · Page title", or nil when there is nothing Park could park.
@@ -154,17 +160,14 @@ extension LoadoutEngine {
     /// or nil when there is nothing Park could park. Accessibility calls only, each bounded by
     /// `timeout` seconds (the app's and its window's), so it may run off the main thread.
     nonisolated static func focusedWindowLabel(pid: pid_t, appName: String?, timeout: Float = 0.5) -> String? {
-        let element = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(element, timeout)
-        guard let focused = element.elementAttribute(kAXFocusedWindowAttribute) else { return nil }
-        AXUIElementSetMessagingTimeout(focused, timeout)
-        let window = AXWindow(element: focused, pid: pid)
-        guard window.isPlaceable else { return nil }
+        guard let window = focusedWindow(pid: pid, timeout: timeout), window.isPlaceable else { return nil }
         let title = window.title
         let name = appName ?? "window"
         return title.isEmpty ? name : "\(name) · \(title)"
     }
 
+    /// The radial menu's park wedge: the frontmost app's focused window goes to its
+    /// nearest edge. Returns why it could not, if it could not.
     func parkFocusedWindow() -> String? {
         guard let (app, window) = focusedWindow() else { return "no focused window" }
         guard window.isPlaceable, let rest = window.cocoaFrame else { return "window is not placeable" }
