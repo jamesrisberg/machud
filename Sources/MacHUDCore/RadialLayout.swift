@@ -375,13 +375,16 @@ struct RadialField {
         /// Both profiles at `p`, the shape measured once.
         func profiles(at p: CGPoint) -> (blur: CGFloat, tint: CGFloat) {
             let r = hypot(p.x, p.y)
+            let u = min(1, r / reach)
+            let rim = 1 - RadialField.rim * u * u * (3 - 2 * u)
             var d = r - disc
+            // Inside the disc the union only lies deeper: the blur is full there.
+            guard d > 0 else { return (1, rim) }
             for box in boxes { d = RadialField.smoothMin(d, RadialField.distance(p, to: box) - pad, smoothing) }
             guard d < fade else { return (0, 0) }
             let t = max(0, d / fade)
             let blur = 1 - t * t * t * (t * (t * 6 - 15) + 10)
-            let u = min(1, r / reach)
-            return (blur, blur * (1 - RadialField.rim * u * u * (3 - 2 * u)))
+            return (blur, blur * rim)
         }
     }
 
@@ -433,7 +436,9 @@ struct RadialField {
         let extent = shape.boxes.reduce(CGRect(x: -shape.disc, y: -shape.disc, width: 2 * shape.disc, height: 2 * shape.disc)) {
             $0.union($1.insetBy(dx: -shape.pad, dy: -shape.pad))
         }
-        let margin = shape.fade + shape.smoothing
+        // A smooth union reaches past its parts by a fraction of the smoothing; the images are
+        // cropped to where the field is not 0.
+        let margin = shape.fade + shape.smoothing / 2
         (support, blurImage, tintImage) = Self.images(over: extent.insetBy(dx: -margin, dy: -margin).integral,
                                                       profiles: shape.profiles)
     }
