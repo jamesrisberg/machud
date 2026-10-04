@@ -72,6 +72,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   in Arc) on another desktop is fetched like a single-window app's instead of leaving a blank
   Arc window behind. When a window MacHUD asked for opens on another desktop anyway, it is left
   there and the toast says so.
+- A hidden app (⌘H) in a loadout is shown again where it is and placed; it is never taken for
+  an app on another desktop.
 - A web page whose window is on another desktop gets a new window on this one, as the plan says,
   instead of being reported placed while nothing appeared.
 - The MCP tools tell an agent that a loadout is one screen: `apply_loadout` arranges the display

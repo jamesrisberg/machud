@@ -179,8 +179,10 @@ Mission Control shortcuts that would reach its desktop are off, the switch fails
 reports `cannot`, naming the app, saying it is on another desktop and why; the plan says so
 before anything moves.
 An app whose windows are all on other desktops and that would not open a window without being
-brought forward is not brought forward (that would show its desktop); its slot reports `cannot`
-too. A window showing on another display is still moved over, and a minimised one restored.
+brought forward is not brought forward (that would show its desktop): its New Window item is
+asked again each poll, and at the placement deadline its step becomes `cannot`, saying why. A
+hidden (⌘H) app's windows are not on another desktop: they are unhidden where they are (which
+does not bring the app forward) and placed, with `unhide it` in the step's reason. A window showing on another display is still moved over, and a minimised one restored.
 Whether an app can open another window: browsers can, except Arc, which opens a new window on its
 own desktop rather than the one showing (an Arc window, or a page in Arc, is fetched); any other app can when its menus hold an
 enabled item titled "New Window" or "New <something> Window" ("New Finder Window", Mail's "New

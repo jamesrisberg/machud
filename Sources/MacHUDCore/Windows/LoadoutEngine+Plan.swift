@@ -55,12 +55,22 @@ struct WindowLocator {
         return (screen, Spaces.monitor(for: screens[screen], in: monitors)?.currentIndex)
     }
 
+    /// Whether a window counts as on a desktop showing now: on screen, or, for a hidden (⌘H)
+    /// app, on the desktop its display shows (or one that cannot be told), since hiding takes a
+    /// window off screen without moving it. Minimized windows are not.
+    nonisolated static func isShowing(onScreen: Bool, minimized: Bool, appHidden: Bool, space: Int?, showingSpace: Int?) -> Bool {
+        guard !minimized else { return false }
+        if onScreen { return true }
+        return appHidden && (space == nil || space == showingSpace)
+    }
+
     /// An app's usable windows on every desktop, front to back, as the planner sees them.
     /// Uses the same rules as `WindowMatch.choose`: placeable, standard ones preferred,
     /// `titleMatch` honoured.
     func candidates(pids: [pid_t], titleMatch: String?) -> [PlacementPlan.Candidate] {
         var out: [(order: Int, candidate: PlacementPlan.Candidate, standard: Bool)] = []
         for pid in pids {
+            let appHidden = NSRunningApplication(processIdentifier: pid)?.isHidden == true
             let mine = entries.enumerated().filter { $0.element.pid == pid }
             let wanted = Set(mine.map(\.element.number))
             for (window, number) in AllSpacesWindows.axWindows(pid: pid, wanted: wanted) {
@@ -71,13 +81,17 @@ struct WindowLocator {
                 guard let frame = entry?.element.frame ?? window.cocoaFrame else { continue }
                 let minimized = window.isMinimized
                 // A window accessibility lists without a number is on this desktop.
-                let visible = !minimized && (entry?.element.onScreen ?? true)
-                let place: (screen: Int?, space: Int?) = number.map { location(number: $0, frame: frame, onScreen: visible) }
+                let onScreen = !minimized && (entry?.element.onScreen ?? true)
+                var place: (screen: Int?, space: Int?) = number.map { location(number: $0, frame: frame, onScreen: onScreen) }
                     ?? (screenIndex(containing: frame), nil)
+                let showingSpace = place.screen.flatMap { Spaces.monitor(for: screens[$0], in: monitors)?.currentIndex }
+                let visible = Self.isShowing(onScreen: onScreen, minimized: minimized, appHidden: appHidden,
+                                             space: place.space, showingSpace: showingSpace)
+                if visible, !onScreen { place.space = showingSpace }
                 out.append((entry?.offset ?? Int.max,
                             PlacementPlan.Candidate(number: number ?? 0, title: title, frame: frame,
                                                     screen: place.screen, space: place.space,
-                                                    visible: visible, minimized: minimized),
+                                                    visible: visible, minimized: minimized, hidden: appHidden),
                             window.isStandard))
             }
         }
@@ -419,6 +433,17 @@ extension LoadoutEngine.ApplyReport {
                 d["note"] = "the app kept \(Int(frame.width))×\(Int(frame.height)) (a minimum or maximum size?)"
             }
             return d
+        }
+    }
+
+    /// The placement deadline passed with the slot unplaced: why, when it is known (the step
+    /// becomes `cannot`), else "timed out".
+    mutating func giveUp(_ regionID: String, stalled: String?) {
+        guard let stalled else { failed[regionID] = "timed out"; return }
+        failed[regionID] = "cannot: \(stalled)"
+        if let index = steps.firstIndex(where: { $0.regionID == regionID }) {
+            steps[index].action = .cannot
+            steps[index].reason = stalled
         }
     }
 

@@ -322,3 +322,57 @@ final class WebWindowReuseTests: XCTestCase {
         XCTAssertEqual(browsers.reusable(url: "https://a.test", newWindowOnly: false, onScreen: [])?.number, 12)
     }
 }
+
+/// A running app that shows no window to place: a hidden app is unhidden (which does not bring it
+/// forward) and never called "on another desktop"; with multi-desktop loadouts off, an app whose
+/// windows are all on other desktops is asked by its menu every poll and never brought forward,
+/// and the deadline reports why instead of "timed out".
+@MainActor
+final class WindowlessAppTests: XCTestCase {
+    private typealias E = LoadoutEngine
+
+    func testAHiddenAppIsUnhiddenNotCalledElsewhere() {
+        XCTAssertEqual(E.windowlessMove(label: "Notes", hidden: true, activated: false, multiDesktop: false,
+                                        windowsOnScreen: [false, false]), .unhide)
+    }
+
+    func testAnAppWithWindowsOnlyElsewhereIsNeverBroughtForward() {
+        guard case .wait(let reason?) = E.windowlessMove(label: "Notes", hidden: false, activated: false, multiDesktop: false,
+                                                          windowsOnScreen: [false]) else { return XCTFail("expected to wait") }
+        XCTAssertTrue(reason.hasPrefix("Notes has windows only on another desktop"), reason)
+        // With the feature on it is brought forward as before; with no window at all, too.
+        XCTAssertEqual(E.windowlessMove(label: "Notes", hidden: false, activated: false, multiDesktop: true,
+                                        windowsOnScreen: [false]), .activate)
+        XCTAssertEqual(E.windowlessMove(label: "TextEdit", hidden: false, activated: false, multiDesktop: false,
+                                        windowsOnScreen: []), .activate)
+        XCTAssertEqual(E.windowlessMove(label: "TextEdit", hidden: false, activated: true, multiDesktop: false,
+                                        windowsOnScreen: []), .wait(nil), "brought forward once")
+    }
+
+    /// The menus are walked at most once a second per slot, not on every 100 ms poll.
+    func testTheMenusAreWalkedAtMostOnceASecond() {
+        let job = LoadoutEngine.SlotJob(regionID: "a", occupant: .app(bundleID: "com.apple.Notes", titleMatch: nil),
+                                        rect: .zero)
+        let start = Date()
+        XCTAssertTrue(job.mayWalkMenu(at: start))
+        XCTAssertFalse(job.mayWalkMenu(at: start.addingTimeInterval(0.1)))
+        XCTAssertFalse(job.mayWalkMenu(at: start.addingTimeInterval(0.9)))
+        XCTAssertTrue(job.mayWalkMenu(at: start.addingTimeInterval(1.0)))
+        XCTAssertFalse(job.mayWalkMenu(at: start.addingTimeInterval(1.5)))
+    }
+
+    func testTheDeadlineSaysWhyAndTheStepSaysCannot() {
+        var report = LoadoutEngine.ApplyReport(loadout: "L")
+        report.steps = [PlacementPlan.Step(regionID: "a", regionName: "A", occupant: "Notes", action: .launch, from: nil,
+                                           to: PlacementPlan.Location(), reason: "ask Notes for a window"),
+                        PlacementPlan.Step(regionID: "b", regionName: "B", occupant: "TextEdit", action: .launch, from: nil,
+                                           to: PlacementPlan.Location(), reason: "ask TextEdit for a window")]
+        report.giveUp("a", stalled: "Notes has windows only on another desktop")
+        report.giveUp("b", stalled: nil)
+        XCTAssertEqual(report.failed["a"], "cannot: Notes has windows only on another desktop")
+        XCTAssertEqual(report.steps[0].action, .cannot)
+        XCTAssertEqual(report.steps[0].reason, "Notes has windows only on another desktop")
+        XCTAssertEqual(report.failed["b"], "timed out")
+        XCTAssertEqual(report.steps[1].action, .launch)
+    }
+}

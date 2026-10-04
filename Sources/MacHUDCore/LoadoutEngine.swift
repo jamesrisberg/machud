@@ -326,6 +326,18 @@ final class LoadoutEngine {
         var newWindowOnly = false
         /// When the new window was asked for.
         var askedAt: Date?
+        /// Why the slot is still waiting, given at the deadline instead of "timed out".
+        var stalled: String?
+        /// When the app's menus were last walked for a New Window item.
+        private var lastMenuWalk: Date?
+
+        /// Whether the app's menus may be walked now: at most once a second, since a walk is many
+        /// Accessibility calls and the slot is polled every 100 ms.
+        func mayWalkMenu(at now: Date) -> Bool {
+            if let last = lastMenuWalk, now.timeIntervalSince(last) < 1 { return false }
+            lastMenuWalk = now
+            return true
+        }
 
         var z: Int { slot?.stackOrder ?? 0 }
 
@@ -353,6 +365,8 @@ final class LoadoutEngine {
             switch self {
             case .ax(let w):
                 if w.isMinimized { w.isMinimized = false }
+                // A hidden (⌘H) app's window shows again; unhiding does not bring the app forward.
+                if let app = NSRunningApplication(processIdentifier: w.pid), app.isHidden { app.unhide() }
                 w.setCocoaFrame(rect)
             case .own(let w):
                 w.setFrame(rect, display: true)
@@ -441,7 +455,7 @@ final class LoadoutEngine {
             if Date() >= deadline {
                 for job in jobs where !job.done {
                     job.restoreFocus()
-                    report.failed[job.regionID] = "timed out"
+                    report.giveUp(job.regionID, stalled: job.stalled)
                 }
                 finish()
                 return
@@ -551,22 +565,24 @@ final class LoadoutEngine {
             return .waiting
         }
         // Running but window-less: the launch above asked it to reopen, which shows a document
-        // app's window (TextEdit); ask by its New Window item too. ⌘N is never pressed (in Notes
-        // or Mail it makes a note or a message). An app with
-        // no window often has no reachable menu bar either until it is frontmost, so
-        // activate it once and hand focus back as soon as its window is placed.
-        if !job.askedForWindow, let app = running.first {
+        // app's window (TextEdit); ask by its New Window item too, every poll. ⌘N is never
+        // pressed (in Notes or Mail it makes a note or a message). See `windowlessMove` for
+        // when it is unhidden or brought forward instead.
+        if !job.askedForWindow, let app = running.first, job.mayWalkMenu(at: Date()) {
             let pid = app.processIdentifier
-            job.askedForWindow = NewWindowMenu.press(pid: pid)
-            if !job.askedForWindow, !job.activated {
-                let windows = AllSpacesWindows.list().filter { $0.pid == pid }
-                // Bringing forward an app whose windows are all on desktops that are not showing
-                // shows one of them. With multi-desktop loadouts off the only desktop switch is the
-                // plan's fetch of a single-window app (`SpacesPolicy.oneScreenSingleWindow`).
-                if !store.config.multiDesktopLoadouts, !windows.isEmpty, !windows.contains(where: \.onScreen) {
-                    return .failed("cannot: \(job.occupant.label) has windows only on another desktop "
-                                   + "and would not open one here without coming forward")
-                }
+            if !app.isHidden {
+                job.askedForWindow = NewWindowMenu.press(pid: pid)
+                if job.askedForWindow { return .waiting }
+            }
+            let windows = app.isHidden || job.activated ? [] : AllSpacesWindows.list().filter { $0.pid == pid }
+            switch Self.windowlessMove(label: job.occupant.label, hidden: app.isHidden, activated: job.activated,
+                                       multiDesktop: store.config.multiDesktopLoadouts,
+                                       windowsOnScreen: windows.map(\.onScreen)) {
+            case .unhide:
+                app.unhide()
+            case .wait(let reason):
+                if let reason { job.stalled = reason }
+            case .activate:
                 job.activated = true
                 job.previousFront = NSWorkspace.shared.frontmostApplication
                 // A freshly launched app can sit there with neither window nor menu
@@ -576,6 +592,28 @@ final class LoadoutEngine {
             }
         }
         return .waiting
+    }
+
+    /// What to do next for a running app that showed no window to place and would not open one
+    /// from its menu. A hidden (⌘H) app is unhidden: its windows are here, and unhiding does not
+    /// bring it forward. Otherwise it is brought forward once, so its menus answer, except, with
+    /// multi-desktop loadouts off, when all its windows are on desktops that are not showing:
+    /// that would show one of them, so its menu is asked again each poll and the slot gives
+    /// `wait`'s reason at the deadline.
+    enum WindowlessMove: Equatable {
+        case unhide
+        case activate
+        case wait(String?)
+    }
+
+    nonisolated static func windowlessMove(label: String, hidden: Bool, activated: Bool, multiDesktop: Bool,
+                                           windowsOnScreen: [Bool]) -> WindowlessMove {
+        if hidden { return .unhide }
+        if activated { return .wait(nil) }
+        if !multiDesktop, !windowsOnScreen.isEmpty, !windowsOnScreen.contains(true) {
+            return .wait("\(label) has windows only on another desktop and would not open one here without coming forward")
+        }
+        return .activate
     }
 
     private func resolveBuiltinWeb(url: String) -> Resolution {

@@ -132,9 +132,11 @@ enum PlacementPlan {
         var screen: Int?
         /// 1-based desktop on that screen; nil when unknown (or on every desktop).
         var space: Int?
-        /// On a desktop that is showing now.
+        /// On a desktop that is showing now (a hidden app's window there included).
         var visible: Bool
         var minimized: Bool = false
+        /// Its app is hidden (⌘H): placing the window unhides the app, which does not bring it forward.
+        var hidden: Bool = false
     }
 
     enum Kind: Equatable { case app, web, panel }
@@ -295,22 +297,23 @@ enum PlacementPlan {
             reachable = needsSwitch && onTarget && window.space != nil && window.space == wantedSpace
         }
         if reachable {
+            let unhide = window.hidden ? "unhide it and " : ""
             if needsSwitch {
                 step.action = .switchSpace
-                step.reason = switchNote + (onTarget || window.minimized || window.screen == nil
+                step.reason = switchNote + unhide + (onTarget || window.minimized || window.screen == nil
                     ? "place it" : "move it from \(name(screens, window.screen) ?? "?")")
             } else if window.minimized {
                 step.action = .resize
                 step.reason = "restore it from the Dock"
             } else if !onTarget {
                 step.action = .move
-                step.reason = "move it from \(name(screens, window.screen) ?? "another display")"
+                step.reason = unhide + "move it from \(name(screens, window.screen) ?? "another display")"
             } else if matches(window.frame, slot.rect) {
-                step.action = .stay
-                step.reason = "already in place"
+                step.action = window.hidden ? .resize : .stay
+                step.reason = window.hidden ? "unhide it, already in place" : "already in place"
             } else {
                 step.action = .resize
-                step.reason = "move/resize in place"
+                step.reason = unhide + "move/resize in place"
             }
             return step
         }

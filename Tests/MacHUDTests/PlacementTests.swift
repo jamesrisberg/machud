@@ -292,6 +292,27 @@ final class PlacementPlanTests: XCTestCase {
         XCTAssertNotNil(oneScreen(slot([win(1, screen: 0, space: 1, visible: false)], newWindow: .single), screens: screens).bring)
     }
 
+    /// A hidden (⌘H) app's window on the desktop showing is in reach: unhidden and placed, never
+    /// "on another desktop".
+    func testAHiddenAppsWindowIsUnhiddenInPlace() {
+        XCTAssertTrue(WindowLocator.isShowing(onScreen: false, minimized: false, appHidden: true, space: 3, showingSpace: 3))
+        XCTAssertTrue(WindowLocator.isShowing(onScreen: false, minimized: false, appHidden: true, space: nil, showingSpace: 3))
+        XCTAssertFalse(WindowLocator.isShowing(onScreen: false, minimized: false, appHidden: true, space: 1, showingSpace: 3))
+        XCTAssertFalse(WindowLocator.isShowing(onScreen: false, minimized: false, appHidden: false, space: 3, showingSpace: 3))
+        XCTAssertFalse(WindowLocator.isShowing(onScreen: false, minimized: true, appHidden: true, space: 3, showingSpace: 3))
+        var hidden = win(1, screen: 0, space: 3, visible: true)
+        hidden.hidden = true
+        let s = oneScreen(slot([hidden], newWindow: .single))
+        XCTAssertEqual(s.action, .resize)
+        XCTAssertTrue(s.reason.hasPrefix("unhide it"), s.reason)
+        XCTAssertFalse(s.reason.contains("desktop"), s.reason)
+        hidden.frame = rect
+        XCTAssertEqual(oneScreen(slot([hidden])).action, .resize, "in place but hidden: unhidden")
+        var there = win(1, screen: 1, space: 1, visible: true)
+        there.hidden = true
+        XCTAssertTrue(oneScreen(slot([there])).reason.hasPrefix("unhide it and move it from Built-in"))
+    }
+
     func testThePlanNamesItsMode() {
         XCTAssertEqual(P.Mode.oneScreen.name, "oneScreen")
         XCTAssertEqual(P.Mode.multiDesktop(.bring).name, "bring")
