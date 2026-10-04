@@ -56,7 +56,12 @@ final class LoadoutMenu {
     init(store: LayoutStore, engine: LoadoutEngine) {
         self.store = store
         self.engine = engine
+        parkTargets = { [weak engine] in
+            guard let engine else { return .init() }
+            return .init(focused: engine.focusedWindowLabel(), parked: engine.parking.parked.map(\.record.label))
+        }
         radial.onCommit = { [weak self] outcome in self?.handle(outcome) }
+        radial.parkTargets = { [weak self] in self?.parkTargets() ?? .init() }
         radial.onDismiss = { [weak self] in
             guard let self, self.registrationDeferred else { return }
             self.registrationDeferred = false
@@ -66,41 +71,31 @@ final class LoadoutMenu {
 
     // MARK: Wedges
 
-    /// Whether any app serves widgets (the wheel then has a Widgets wedge), its subtitle,
-    /// and what its rings do: reveal (false) or edit (true).
-    var hasWidgets: (() -> Bool)?
-    var widgetsSubtitle: (() -> String)?
+    /// What the widgets are doing (revealed, being edited), read as the wheel opens; nil while
+    /// no app serves widgets, when the wheel has no Widgets wedge. `onWidgets` is what its rings
+    /// do: toggle revealing (false) or editing (true).
+    var widgetsState: (() -> RadialMenu.Wedge.WidgetsState?)?
     var onWidgets: ((Bool) -> Void)?
 
+    /// What the park wedge acts on, read as the wheel opens and again as the park wedge becomes
+    /// highlighted: the focused window and the parked ones.
+    var parkTargets: () -> RadialMenu.Wedge.ParkTargets
+
     func wedges() -> [RadialMenu.Wedge] {
-        let loadouts = offered
-        let capture = RadialMenu.Wedge(
-            title: "Capture…",
-            icons: [NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: nil)].compactMap { $0 },
-            kind: .capture(offersAllScreens: store.config.multiDesktopLoadouts))
-        let parked = engine.parking.parked.count
-        var parkSubtitle = engine.focusedWindowLabel() ?? "nothing in front to park"
-        if parked > 0 { parkSubtitle += " · \(parked) parked" }
-        let park = RadialMenu.Wedge(
-            title: "Park", subtitle: parkSubtitle,
-            icons: [NSImage(systemSymbolName: "rectangle.portrait.and.arrow.right", accessibilityDescription: nil)]
-                .compactMap { $0 },
-            kind: .park)
-        var tools = [capture, park]
-        if hasWidgets?() == true {
-            tools.append(RadialMenu.Wedge(
-                title: "Widgets", subtitle: widgetsSubtitle?() ?? "",
-                icons: [NSImage(systemSymbolName: "square.grid.2x2", accessibilityDescription: nil)].compactMap { $0 },
-                kind: .widgets))
+        func symbol(_ name: String) -> [NSImage] {
+            [NSImage(systemSymbolName: name, accessibilityDescription: nil)].compactMap { $0 }
         }
-        return loadouts.map {
-            let n = $0.allSlots.count
-            var subtitle = "\(n) window\(n == 1 ? "" : "s")"
-            if $0.desktopCount > 1 { subtitle += " · \($0.desktopCount) desktops" }
-            if $0.hud != nil { subtitle += " · HUD" }
-            return RadialMenu.Wedge(title: $0.name, subtitle: subtitle,
-                                    icons: RadialMenu.icons(for: $0, panels: engine.panels),
-                                    kind: .loadout($0.name), hotkey: $0.hotkey)
+        var tools = [
+            RadialMenu.Wedge(name: "Capture", icons: symbol("camera.viewfinder"),
+                             kind: .capture(offersAllScreens: store.config.multiDesktopLoadouts)),
+            RadialMenu.Wedge(name: "Park", icons: symbol("rectangle.portrait.and.arrow.right"), kind: .park(parkTargets())),
+        ]
+        if let state = widgetsState?() {
+            tools.append(RadialMenu.Wedge(name: "Widgets", icons: symbol("square.grid.2x2"), kind: .widgets(state)))
+        }
+        return offered.map {
+            RadialMenu.Wedge(name: $0.name, icons: RadialMenu.icons(for: $0, panels: engine.panels),
+                             kind: .loadout($0.name), hotkey: $0.hotkey)
         } + tools
     }
 
@@ -717,7 +712,7 @@ final class LoadoutMenu {
                 response.merge(self.radial.json) { a, _ in a }
             } else {
                 let wedges = self.wedges()
-                response.merge(RadialMenu.json(wedges: wedges, geometry: RadialGeometry(count: wedges.count, ringCounts: wedges.map { RadialMenu.ringCount(for: $0.kind) }))) { a, _ in a }
+                response.merge(RadialMenu.json(wedges: wedges, layout: RadialLayout(wedges: wedges))) { a, _ in a }
                 response["visible"] = false
             }
             if let last = self.lastApply { response["lastApply"] = last }

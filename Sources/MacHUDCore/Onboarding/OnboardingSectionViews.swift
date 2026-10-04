@@ -474,7 +474,7 @@ struct RadialStep: View {
                 ring("Inner", "Preview: draws where each window would go first.")
                 ring("Middle", "Apply the loadout.")
                 ring("Outer", "Clear this screen, then apply.")
-                Text("Release in the centre to cancel. Capture… and Park live on the wheel too.")
+                Text("Release in the centre to cancel. Capture and Park live on the wheel too.")
                     .font(.system(size: 11)).foregroundStyle(OnboardingStyle.secondary)
             }
         }
@@ -518,7 +518,7 @@ struct RadialDiagram: View {
             let side = min(geo.size.width, geo.size.height)
             let c = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
             let r = side / 2 - 4
-            let wedges: [(String, Double, Bool)] = [(target, -90, true), ("Capture…", 30, false), ("Park", 150, false)]
+            let wedges: [(String, Double, Bool)] = [(target, -90, true), ("Capture", 30, false), ("Park", 150, false)]
             ZStack {
                 ForEach(0..<3, id: \.self) { ring in
                     Circle().stroke(Color.white.opacity(0.14), lineWidth: 1)

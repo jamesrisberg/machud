@@ -69,6 +69,22 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - The setup guide's cards use the classic frosted material, since the guide already blurs the
   desktop behind them.
 - The radial menu is drawn dark in light mode too, so its white labels stay readable.
+- The loadout wheel is words on one soft, dark blur that fades out at its edge rather than
+  ending in a line, with no tiles and no hard edges, and every word reads upright. Each loadout's name sits whole around the outside (wrapping to a second
+  line, then shrinking, rather than being cut off), with its apps' icons on wheels of up to eight
+  slices. Each slice's buttons line up from the centre out toward its name: Preview, Apply and
+  Clear + Apply; This screen and Draw layout for Capture; Park and Restore; Reveal (Lower while
+  the widgets are up) and Edit (Done while you are editing them) for Widgets. The button under the
+  pointer grows and glows, its slice's name lights up and the other slices fade back a little.
+  The line under the wheel says only what letting go does, such as "Apply Code", "Park Safari ·
+  Docs", "Focus a window to park" or "Finish editing widgets", and is never cut off; Park's names
+  the window letting go would park, even after a click under the wheel changed the focus. On a
+  screen too small for it the wheel shrinks, keeping every word and that line on screen. With
+  Reduce transparency on, the blur gives way to a plain dark disc.
+- In the replies of `machud menu` and `machud radial`, each wedge's `title` is now `name` and its
+  `subtitle` is gone, in `wedges[]` and in `selection`. Each wedge also lists the `hints` its rings
+  show under the wheel, the selection carries the `hint` showing, `icons` counts the icons the
+  wheel draws by the name, and `rings.names` is the radius the names are anchored at.
 - From scripts too: while **Multi-desktop loadouts** is off, `machud loadouts` leaves out the
   loadouts that span several desktops or displays (and says how many), and `machud apply` refuses
   one by name, saying how to turn the setting on, before anything moves, as does `machud loadouts
@@ -128,8 +144,6 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - A copy of MacHUD started with only `MACHUD_SOCKET` (for tests) keeps its config, state and dock
   registry beside the socket, in `<socket path without extension>-config/`, instead of reading and
   saving `~/.config/machud`. `MACHUD_CONFIG` still names the file when it is set.
-- With multi-desktop loadouts on, the wheel says how many desktops a captured multi-desktop
-  loadout covers (it said none).
 - After the first capture, onboarding points to the menu item that edits it (Loadouts › its name ›
   Edit Layout…) instead of an "Edit Layouts…" item that does not exist.
 - The wake word no longer stays off after the microphone stops for it (an audio device change, a

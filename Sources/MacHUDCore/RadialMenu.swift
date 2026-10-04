@@ -2,12 +2,13 @@ import AppKit
 import HUDKit
 
 /// Where an offset from the wheel's centre points: which wedge, and which ring.
-/// Pure maths, no AppKit state, so it can be unit tested.
+/// Pure maths, no AppKit state, so it can be unit tested. The wheel's layout (`RadialLayout`)
+/// sets the radii, sized for the words on each ring.
 struct RadialGeometry: Equatable {
     /// The rings, inside out. What each one does depends on the wedge (`RadialMenu.ringLabel`):
     /// a loadout previews / applies / clears then applies; capture captures this screen / (with
     /// multi-desktop loadouts on) all screens / opens the editor on a new layout; park parks /
-    /// restores.
+    /// restores; widgets reveals or lowers / edits or finishes editing.
     enum Ring: String, Equatable, CaseIterable {
         case inner, middle, outer
         var position: Int { Self.allCases.firstIndex(of: self)! }
@@ -33,12 +34,26 @@ struct RadialGeometry: Equatable {
     var innerEdge: CGFloat = 100
     /// Outer radius of the middle ring.
     var middleEdge: CGFloat = 148
-    /// Outer edge of the wheel; past it the last ring simply continues.
+    /// Outer edge of the wheel's rings; past it the last ring simply continues.
     var outerEdge: CGFloat = 196
+    /// Where each wedge's name is anchored, past the outer edge. It is not a button: a pointer
+    /// there selects the wedge's last ring.
+    var nameRadius: CGFloat = 206
 
     init(count: Int, ringCounts: [Int] = []) {
         self.count = count
         self.ringCounts = ringCounts
+    }
+
+    init(count: Int, ringCounts: [Int], deadZone: CGFloat, innerEdge: CGFloat, middleEdge: CGFloat,
+         outerEdge: CGFloat, nameRadius: CGFloat) {
+        self.count = count
+        self.ringCounts = ringCounts
+        self.deadZone = deadZone
+        self.innerEdge = innerEdge
+        self.middleEdge = middleEdge
+        self.outerEdge = outerEdge
+        self.nameRadius = nameRadius
     }
 
     var wedgeAngle: Double { count > 0 ? Self.fullTurn / Double(count) : Self.fullTurn }
@@ -100,15 +115,35 @@ struct RadialGeometry: Equatable {
 // MARK: - Controller
 
 /// Call-of-Duty style loadout wheel: held open by a hotkey, centred on the cursor,
-/// click-through, drawn in jelly glass. Release applies the highlighted wedge.
+/// click-through, its words upright on one soft dark blur. Release applies the highlighted wedge.
 @MainActor
 final class RadialMenu {
     struct Wedge {
+        /// What the park wedge's rings act on, read as the wheel opens and again whenever the
+        /// park wedge becomes highlighted.
+        struct ParkTargets: Equatable {
+            /// The focused window's label ("Safari · Page title"); nil when nothing in front
+            /// can be parked.
+            var focused: String?
+            /// The parked windows' labels.
+            var parked: [String] = []
+        }
+
+        /// What the widgets wedge's rings toggle, read as the wheel opens.
+        struct WidgetsState: Equatable {
+            /// The widgets are raised above the windows: the inner ring lowers them.
+            var revealed = false
+            /// The widgets are being edited: the outer ring finishes.
+            var editing = false
+        }
+
         /// `capture`'s `offersAllScreens`: whether it has the ring that captures every display,
         /// which exists only while multi-desktop loadouts (experimental) are on.
-        enum Kind: Equatable { case loadout(String), capture(offersAllScreens: Bool), park, widgets }
-        var title: String
-        var subtitle: String = ""
+        enum Kind: Equatable {
+            case loadout(String), capture(offersAllScreens: Bool), park(ParkTargets), widgets(WidgetsState)
+        }
+        /// Shown outside the last ring: the loadout's name, or Capture, Park, Widgets.
+        var name: String
         var icons: [NSImage] = []
         var kind: Kind
         var hotkey: HotKey?
@@ -129,37 +164,75 @@ final class RadialMenu {
         /// The park wedge's inner ring: park the focused window. Its outer ring: bring
         /// every parked window back.
         case park(restore: Bool)
-        /// The widgets wedge's inner ring: reveal (or lower) the widgets. Its outer ring: edit them.
+        /// The widgets wedge's inner ring: reveal or lower the widgets. Its outer ring: start or
+        /// finish editing them.
         case widgets(edit: Bool)
     }
 
+    /// Which buttons show while the pointer is not on their wedge: every wedge's, faint
+    /// (`faint`), or only the highlighted wedge's, the others showing their names alone (`hidden`).
+    enum RestingButtons { case faint, hidden }
+    static let restingButtons: RestingButtons = .faint
+
     /// How many rings a wedge has: park, widgets and a capture wedge that captures one screen
     /// have two, the others three.
-    static func ringCount(for kind: Wedge.Kind) -> Int {
+    nonisolated static func ringCount(for kind: Wedge.Kind) -> Int {
         switch kind {
         case .park, .widgets, .capture(offersAllScreens: false): return 2
         case .loadout, .capture(offersAllScreens: true): return 3
         }
     }
 
-    /// What each ring of a wedge does.
-    static func ringLabel(_ ring: RadialGeometry.Ring, for kind: Wedge.Kind) -> String {
+    /// The button label on each ring of a wedge.
+    nonisolated static func ringLabel(_ ring: RadialGeometry.Ring, for kind: Wedge.Kind) -> String {
         switch (kind, ring) {
         case (.loadout, .inner): return "Preview"
         case (.loadout, .middle): return "Apply"
-        case (.loadout, .outer): return "Clear this screen + Apply"
-        case (.capture, .inner): return "Capture this screen as a loadout"
-        case (.capture(offersAllScreens: true), .middle): return "Capture all screens as a loadout"
-        case (.capture, .middle), (.capture, .outer): return "Draw a new layout"
-        case (.park, .inner): return "Park front window"
-        case (.park, .middle), (.park, .outer): return "Restore parked"
-        case (.widgets, .inner): return "Reveal widgets"
-        case (.widgets, .middle), (.widgets, .outer): return "Edit widgets"
+        case (.loadout, .outer): return "Clear + Apply"
+        case (.capture, .inner): return "This screen"
+        case (.capture(offersAllScreens: true), .middle): return "All screens"
+        case (.capture, .middle), (.capture, .outer): return "Draw layout"
+        case (.park, .inner): return "Park"
+        case (.park, .middle), (.park, .outer): return "Restore"
+        case (.widgets(let state), .inner): return state.revealed ? "Lower" : "Reveal"
+        case (.widgets(let state), .middle), (.widgets(let state), .outer): return state.editing ? "Done" : "Edit"
         }
     }
 
+    /// The line under the wheel while `ring` of a wedge of `kind` is highlighted: what releasing
+    /// does, and nothing else.
+    nonisolated static func hint(_ ring: RadialGeometry.Ring, for kind: Wedge.Kind) -> String {
+        switch (kind, ring) {
+        case (.loadout(let name), .inner): return "Preview \(name)"
+        case (.loadout(let name), .middle): return "Apply \(name)"
+        case (.loadout(let name), .outer): return "Clear this screen and apply \(name)"
+        case (.capture, .inner): return "Capture this screen as a loadout"
+        case (.capture(offersAllScreens: true), .middle): return "Capture every screen as a loadout"
+        case (.capture, .middle), (.capture, .outer): return "Draw a new layout"
+        case (.park(let targets), .inner):
+            return targets.focused.map { "Park \($0)" } ?? "Focus a window to park"
+        case (.park(let targets), .middle), (.park(let targets), .outer):
+            switch targets.parked.count {
+            case 0: return targets.focused == nil ? "Focus a window to park" : "Nothing is parked"
+            case 1: return "Restore \(targets.parked[0])"
+            case let n: return "Restore \(n) parked windows"
+            }
+        case (.widgets(let state), .inner): return state.revealed ? "Lower widgets" : "Reveal widgets"
+        case (.widgets(let state), .middle), (.widgets(let state), .outer):
+            return state.editing ? "Finish editing widgets" : "Edit widgets"
+        }
+    }
+
+    /// The line under the wheel while nothing is highlighted.
+    nonisolated static let idleHint = "Release on a button · centre cancels"
+
+    nonisolated static func hint(for selection: RadialGeometry.Selection, in wedges: [Wedge]) -> String {
+        guard case .wedge(let i, let ring) = selection, wedges.indices.contains(i) else { return idleHint }
+        return hint(ring, for: wedges[i].kind)
+    }
+
     /// What committing `ring` of a wedge of `kind` does.
-    static func outcome(of kind: Wedge.Kind, ring: RadialGeometry.Ring) -> Outcome {
+    nonisolated static func outcome(of kind: Wedge.Kind, ring: RadialGeometry.Ring) -> Outcome {
         switch (kind, ring) {
         case (.capture, .inner): return .capture(allScreens: false)
         case (.capture(offersAllScreens: true), .middle): return .capture(allScreens: true)
@@ -174,31 +247,52 @@ final class RadialMenu {
         }
     }
 
+    /// `wedges` with the park wedge's targets read again by `parkTargets`, when wedge `index`
+    /// has just become highlighted (it was `previous`) and is the park wedge; nil when nothing
+    /// changes. The wheel is click-through, so a click under it can change the focused window
+    /// while it is open: this keeps the hint naming the window a release would park.
+    static func refreshed(_ wedges: [Wedge], highlighting index: Int, from previous: Int?,
+                          parkTargets: (() -> Wedge.ParkTargets)?) -> [Wedge]? {
+        guard index != previous, wedges.indices.contains(index), case .park(let old) = wedges[index].kind,
+              let parkTargets else { return nil }
+        let now = parkTargets()
+        guard now != old else { return nil }
+        var out = wedges
+        out[index].kind = .park(now)
+        return out
+    }
+
     /// Applied when the hotkey is released.
     var onCommit: ((Outcome) -> Void)?
     /// False when the menu's own hotkey already uses shift, so it cannot double as "clear".
     var shiftSelectsOuter = true
     /// Called whenever a visible wheel goes away, however it was dismissed.
     var onDismiss: (() -> Void)?
+    /// Reads the park wedge's targets now (`refreshed`).
+    var parkTargets: (() -> Wedge.ParkTargets)?
 
     private(set) var wedges: [Wedge] = []
-    private(set) var geometry = RadialGeometry(count: 0)
+    private(set) var layout = RadialLayout(wedges: [])
+    var geometry: RadialGeometry { layout.geometry }
     private(set) var selection: RadialGeometry.Selection = .cancel
     var isVisible: Bool { window?.isVisible ?? false }
 
     private var window: NSWindow?
     private let wheel = RadialWheelView()
-    private let glass = HUDGlassView(style: .plain)
+    private let tint = RadialTintView(frame: .zero)
+    private let backdrop = RadialBackdrop()
     private var monitors: [Any] = []
     private var keyTap: CFMachPort?
     private var keyMonitor: Any?
     private var timer: Timer?
+    private var transparencyObserver: NSObjectProtocol?
+    /// The last field built: a wheel of the same shape opens with it.
+    private var field: RadialField?
 
     private var center: CGPoint = .zero          // screen coords
+    private var screenFrame: CGRect = .zero
     private var pointerOffset: CGPoint = .zero   // relative to the wheel's centre
     private var keyboardIndex: Int?
-
-    private static let padding: CGFloat = 52
 
     // MARK: Lifecycle
 
@@ -207,26 +301,18 @@ final class RadialMenu {
         let origin = point ?? NSEvent.mouseLocation
         guard let screen = NSScreen.screens.first(where: { $0.frame.contains(origin) }) ?? NSScreen.main else { return }
         self.wedges = wedges
-        geometry = RadialGeometry(count: wedges.count, ringCounts: wedges.map { Self.ringCount(for: $0.kind) })
+        let placed = Self.place(wedges: wedges, at: origin, visibleFrame: screen.visibleFrame)
+        layout = placed.layout
+        center = placed.center
+        screenFrame = screen.frame
         pointerOffset = .zero
         keyboardIndex = nil
         selection = .cancel
 
-        let side = (geometry.outerEdge + Self.padding) * 2
-        let inset = side / 2
-        center = CGPoint(
-            x: min(max(origin.x, screen.frame.minX + inset), screen.frame.maxX - inset),
-            y: min(max(origin.y, screen.frame.minY + inset), screen.frame.maxY - inset))
-
         let w = window ?? makeWindow()
-        if w.frame != screen.frame { w.setFrame(screen.frame, display: false) }
-        let local = CGRect(x: center.x - screen.frame.minX - inset, y: center.y - screen.frame.minY - inset,
-                           width: side, height: side)
-        glass.frame = local
-        glass.maskImage = Self.maskImage(side: side, geometry: geometry)
-        wheel.frame = local
-        wheel.configure(geometry: geometry, wedges: wedges)
+        if w.frame != screenFrame { w.setFrame(screenFrame, display: false) }
         wheel.selection = .cancel
+        applyField()
         w.orderFrontRegardless()
 
         startTracking()
@@ -266,57 +352,100 @@ final class RadialMenu {
         guard wedges.indices.contains(index) else { return }
         keyboardIndex = index
         if let ring {
+            let previous = selection.index
             let ring = RadialGeometry.Ring.allCases[min(ring.position, geometry.ringCount(of: index) - 1)]
             selection = .wedge(index: index, ring: ring)
             pointerOffset = offset(index: index, ring: ring)
+            noteHighlight(from: previous)
         } else {
             refreshSelection()
         }
         wheel.selection = selection
     }
 
-    /// Wedge list with the angles each one covers; also used to preview the wheel
-    /// while it is hidden.
-    static func json(wedges: [Wedge], geometry g: RadialGeometry) -> [String: Any] {
-        ["rings": ["deadZone": Double(g.deadZone), "inner": Double(g.innerEdge), "middle": Double(g.middleEdge),
-                   "outer": Double(g.outerEdge)],
-         "wedges": wedges.enumerated().map { i, wedge -> [String: Any] in
-            var w: [String: Any] = [
-                "index": i,
-                "title": wedge.title,
-                "subtitle": wedge.subtitle,
-                "kind": { () -> String in
-                    switch wedge.kind {
-                    case .capture: return "capture"
-                    case .park: return "park"
-                    case .widgets: return "widgets"
-                    case .loadout: return "loadout"
-                    }
-                }(),
-                "rings": g.rings(of: i).map { RadialMenu.ringLabel($0, for: wedge.kind) },
-                "angleStart": g.startAngle(of: i),
-                "angleCenter": g.centerAngle(of: i),
-                "angleEnd": g.endAngle(of: i),
-                "icons": wedge.icons.count,
-            ]
-            if i < 9 { w["digit"] = i + 1 }
-            if let hk = wedge.hotkey { w["hotkey"] = hk.display }
-            return w
-         }]
+    /// Wedge list with the angles each one covers, each ring's label and hint, the icons drawn
+    /// by its name, the rings' radii, and with a `selection` what it highlights and the hint
+    /// showing; also used to describe the wheel while it is hidden.
+    static func json(wedges: [Wedge], layout: RadialLayout, selection: RadialGeometry.Selection? = nil) -> [String: Any] {
+        let g = layout.geometry
+        var d: [String: Any] = [
+            "rings": ["deadZone": Double(g.deadZone), "inner": Double(g.innerEdge), "middle": Double(g.middleEdge),
+                      "outer": Double(g.outerEdge), "names": Double(g.nameRadius)],
+            "wedges": wedges.enumerated().map { i, wedge -> [String: Any] in
+                var w: [String: Any] = [
+                    "index": i,
+                    "name": wedge.name,
+                    "kind": { () -> String in
+                        switch wedge.kind {
+                        case .capture: return "capture"
+                        case .park: return "park"
+                        case .widgets: return "widgets"
+                        case .loadout: return "loadout"
+                        }
+                    }(),
+                    "rings": g.rings(of: i).map { RadialMenu.ringLabel($0, for: wedge.kind) },
+                    "hints": g.rings(of: i).map { RadialMenu.hint($0, for: wedge.kind) },
+                    "angleStart": g.startAngle(of: i),
+                    "angleCenter": g.centerAngle(of: i),
+                    "angleEnd": g.endAngle(of: i),
+                    "icons": layout.icons(of: i),
+                ]
+                if i < 9 { w["digit"] = i + 1 }
+                if let hk = wedge.hotkey { w["hotkey"] = hk.display }
+                return w
+            },
+        ]
+        switch selection {
+        case nil:
+            break
+        case .wedge(let i, let ring) where wedges.indices.contains(i):
+            d["selection"] = ["kind": "wedge", "index": i, "ring": ring.rawValue, "name": wedges[i].name,
+                              "hint": hint(ring, for: wedges[i].kind)]
+        case .cancel?, .wedge?:
+            d["selection"] = ["kind": "cancel", "hint": idleHint]
+        }
+        return d
     }
 
     var json: [String: Any] {
-        var d = Self.json(wedges: wedges, geometry: geometry)
+        var d = Self.json(wedges: wedges, layout: layout, selection: selection)
         d["visible"] = isVisible
         d["center"] = ["x": Int(center.x), "y": Int(center.y)]
-        switch selection {
-        case .cancel:
-            d["selection"] = ["kind": "cancel"]
-        case .wedge(let i, let ring):
-            d["selection"] = ["kind": "wedge", "index": i, "ring": ring.rawValue,
-                              "title": wedges.indices.contains(i) ? wedges[i].title : ""]
-        }
         return d
+    }
+
+    // MARK: Placement
+
+    /// Room kept between the wheel's words and the edge of the screen's visible frame.
+    static let screenMargin: CGFloat = 8
+
+    /// The wheel's layout and centre (screen coordinates) for a wheel opened at `pointer` on a
+    /// screen whose visible frame (less the menu bar and the Dock) is `visibleFrame`: full size
+    /// where it fits, smaller where it would not, and moved in from the edges so every word and
+    /// the hint are on screen. The field may fade out past the edge.
+    static func place(wedges: [Wedge], at pointer: CGPoint, visibleFrame: CGRect) -> (layout: RadialLayout, center: CGPoint) {
+        let room = visibleFrame.insetBy(dx: screenMargin, dy: screenMargin)
+        let layout = RadialLayout.fitting(wedges, in: room.size)
+        let b = layout.bounds
+        let x = min(max(pointer.x, room.minX - b.minX), room.maxX - b.maxX)
+        let y = min(max(pointer.y, room.minY - b.minY), room.maxY - b.maxY)
+        return (layout, CGPoint(x: x, y: y))
+    }
+
+    /// Shapes the backdrop and the wheel's view to the field, which follows Reduce transparency.
+    private func applyField() {
+        let shape = RadialField.Shape(layout: layout, reduced: NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency)
+        let field = self.field?.shape == shape ? self.field! : RadialField(shape: shape)
+        self.field = field
+        let canvas = field.canvas
+        let local = CGRect(x: center.x - screenFrame.minX - canvas.center.x, y: center.y - screenFrame.minY - canvas.center.y,
+                           width: canvas.size.width, height: canvas.size.height)
+        backdrop.view.frame = local
+        tint.darkness = RadialBackdrop.darkness(for: backdrop.show(field: field.blurImage))
+        tint.frame = local
+        tint.image = field.tintImage
+        wheel.frame = local
+        wheel.configure(layout: layout, field: field, wedges: wedges)
     }
 
     // MARK: Selection
@@ -331,6 +460,7 @@ final class RadialMenu {
     private var shiftHeld: Bool { shiftSelectsOuter && NSEvent.modifierFlags.contains(.shift) }
 
     private func refreshSelection() {
+        let previous = selection.index
         let pointer = geometry.selection(at: pointerOffset, shift: shiftHeld)
         if let k = keyboardIndex {
             let ring = pointer.ring ?? (shiftHeld ? geometry.lastRing(of: k) : .inner)
@@ -338,7 +468,16 @@ final class RadialMenu {
         } else {
             selection = pointer
         }
+        noteHighlight(from: previous)
         wheel.selection = selection
+    }
+
+    /// The park wedge reads its targets again as it becomes highlighted (`refreshed`).
+    private func noteHighlight(from previous: Int?) {
+        guard let i = selection.index,
+              let fresh = Self.refreshed(wedges, highlighting: i, from: previous, parkTargets: parkTargets) else { return }
+        wedges = fresh
+        wheel.update(wedges: fresh)
     }
 
     private func pointerMoved(to location: CGPoint) {
@@ -364,12 +503,19 @@ final class RadialMenu {
         if let local { monitors.append(local) }
         installKeys()
         if let tap = keyTap { CGEvent.tapEnable(tap: tap, enable: true) }
+        transparencyObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { if self?.isVisible == true { self?.applyField() } }
+        }
     }
 
     private func stopTracking() {
         for m in monitors { NSEvent.removeMonitor(m) }
         monitors.removeAll()
         if let tap = keyTap { CGEvent.tapEnable(tap: tap, enable: false) }
+        if let observer = transparencyObserver { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
+        transparencyObserver = nil
     }
 
     private func installKeys() {
@@ -429,10 +575,11 @@ final class RadialMenu {
         return false
     }
 
+
     // MARK: Animation
 
     private func startAnimation() {
-        wheel.resetSprings(count: wedges.count)
+        wheel.resetSprings()
         guard timer == nil else { return }
         timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 120.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.wheel.tick() }
@@ -450,8 +597,8 @@ final class RadialMenu {
         let w = NSWindow(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
         w.isOpaque = false
         w.backgroundColor = .clear
-        // The labels, strokes and fills are white: dark in a light system appearance too, so the
-        // glass's tint (white in a light appearance) never sits under them.
+        // The words are white on a dark field: dark in a light system appearance too, so the
+        // system's material the backdrop shows with Reduce transparency on is the dark one.
         w.appearance = NSAppearance(named: .darkAqua)
         w.hasShadow = false
         w.ignoresMouseEvents = true
@@ -459,61 +606,19 @@ final class RadialMenu {
         w.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
         w.isReleasedWhenClosed = false
         let content = NSView(frame: .zero)
-        content.addSubview(glass)
+        content.addSubview(backdrop.view)
+        content.addSubview(tint)
         content.addSubview(wheel)
+        wheel.onShown = { [weak tint] shown in tint?.shown = shown }
         w.contentView = content
         window = w
         return w
     }
 
-    // MARK: Shapes
-
-    /// One frosted tile per wedge and ring, plus the centre disc: used both as the
-    /// visual-effect mask and as the fill/stroke geometry.
-    static func tiles(center c: CGPoint, geometry g: RadialGeometry) -> [(index: Int, ring: RadialGeometry.Ring, path: NSBezierPath)] {
-        var out: [(Int, RadialGeometry.Ring, NSBezierPath)] = []
-        for i in 0..<max(g.count, 1) {
-            let mean = (g.deadZone + g.outerEdge) / 2
-            let gap = min(Double(6 / mean), g.wedgeAngle * 0.22)
-            let a0 = g.startAngle(of: i) + gap
-            let a1 = g.endAngle(of: i) - gap
-            let rings = g.count > 0 ? g.rings(of: i) : RadialGeometry.Ring.allCases
-            for ring in rings {
-                let band = g.band(ring, of: i)
-                let r0 = band.r0 + (ring == .inner ? 6 : 3)
-                let r1 = band.r1 == g.outerEdge ? g.outerEdge : band.r1 - 3
-                out.append((i, ring, segment(center: c, r0: r0, r1: r1, a0: a0, a1: a1)))
-            }
-        }
-        return out.map { (index: $0.0, ring: $0.1, path: $0.2) }
-    }
-
-    static func segment(center c: CGPoint, r0: CGFloat, r1: CGFloat, a0: Double, a1: Double) -> NSBezierPath {
-        let path = NSBezierPath()
-        let m0 = CGFloat(90 - a0 * 180 / .pi)
-        let m1 = CGFloat(90 - a1 * 180 / .pi)
-        path.move(to: point(c, r0, a0))
-        path.line(to: point(c, r1, a0))
-        path.appendArc(withCenter: c, radius: r1, startAngle: m0, endAngle: m1, clockwise: true)
-        path.line(to: point(c, r0, a1))
-        path.appendArc(withCenter: c, radius: r0, startAngle: m1, endAngle: m0, clockwise: false)
-        path.close()
-        return path
-    }
-
-    static func point(_ c: CGPoint, _ r: CGFloat, _ a: Double) -> CGPoint {
-        CGPoint(x: c.x + r * CGFloat(sin(a)), y: c.y + r * CGFloat(cos(a)))
-    }
-
-    private static func maskImage(side: CGFloat, geometry g: RadialGeometry) -> NSImage {
-        NSImage(size: CGSize(width: side, height: side), flipped: false) { _ in
-            let c = CGPoint(x: side / 2, y: side / 2)
-            NSColor.black.setFill()
-            for tile in tiles(center: c, geometry: g) { tile.path.fill() }
-            NSBezierPath(ovalIn: CGRect(x: c.x - g.deadZone, y: c.y - g.deadZone,
-                                        width: g.deadZone * 2, height: g.deadZone * 2)).fill()
-            return true
-        }
+    /// The view the wheel draws in, centred where its centre is.
+    struct Canvas: Equatable {
+        var size: CGSize
+        var center: CGPoint
     }
 
     // MARK: Icons
@@ -535,17 +640,130 @@ final class RadialMenu {
     }
 
     static func icons(for loadout: Loadout, panels: PanelRegistry?) -> [NSImage] {
-        loadout.slots.prefix(5).compactMap { icon(for: $0.occupant, panels: panels) }
+        loadout.slots.prefix(RadialLayout.maxIcons).compactMap { icon(for: $0.occupant, panels: panels) }
+    }
+}
+
+// MARK: - Backdrop
+
+/// What the wheel's tint and words sit on: HUDKit's soft backdrop (`HUDSoftBackdropView`), a
+/// blur of what is behind the window shown through the field, so its edge fades out instead of
+/// ending in a line. It draws no tint of its own: the wheel's tint is its own view
+/// (`RadialTintView`), as dark as `darkness(for:)` says for the way the backdrop draws. Nothing
+/// else in the wheel's window may be on the window server's blur (`HUDGlassView` with the window
+/// blur): that blur covers everything the window draws and would end in a line.
+@MainActor
+final class RadialBackdrop {
+    /// The tint's darkness with no backdrop at all, the words over the sharp desktop.
+    nonisolated static let darknessWithoutBackdrop: CGFloat = 0.85
+
+    /// How dark the wheel's tint is where its profile is full, over a backdrop that draws by
+    /// `path`: `RadialField.darkness` over the blur, and over the system's material (opaque and
+    /// dark with Reduce transparency on; AppKit's own translucent material where the blur cannot
+    /// be made); `darknessWithoutBackdrop` with none, where sharp detail sits behind the words.
+    nonisolated static func darkness(for path: HUDSoftBackdropView.Path) -> CGFloat {
+        switch path {
+        case .blur, .systemMaterial: return RadialField.darkness
+        case .none: return darknessWithoutBackdrop
+        }
+    }
+
+    let view: HUDSoftBackdropView
+    private var shown: CGImage?
+
+    /// `view` stands in for the backdrop (tests); nil makes the family's.
+    init(view: HUDSoftBackdropView? = nil) {
+        self.view = view ?? HUDSoftBackdropView(frame: .zero)
+        self.view.tint = nil
+    }
+
+    var path: HUDSoftBackdropView.Path { view.path }
+
+    /// Shows the blur through `field`'s alpha, stretched over the view, and says how the
+    /// backdrop draws now. The same field again is left as it is: a new one has the backdrop
+    /// build its material again.
+    @discardableResult
+    func show(field: CGImage) -> HUDSoftBackdropView.Path {
+        if field !== shown {
+            shown = field
+            view.field = NSImage(cgImage: field, size: CGSize(width: field.width, height: field.height))
+        }
+        return view.path
     }
 }
 
 // MARK: - Drawing
 
+/// The wheel's tint: the field's tint profile (black, its alpha the profile) stretched over the
+/// canvas, composited by the GPU and drawn once per configuration, under the words. Its opacity
+/// is `darkness` times how far the wheel has faded in (`shown`).
+final class RadialTintView: NSView {
+    var image: CGImage? { didSet { layer?.contents = image } }
+    var darkness = RadialField.darkness { didSet { alphaValue = darkness * shown } }
+    var shown: CGFloat = 1 { didSet { alphaValue = darkness * shown } }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.contentsGravity = .resize
+        layer?.magnificationFilter = .linear
+        alphaValue = darkness * shown
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+/// The wheel's words, over its tint (`RadialTintView`). Each word is rendered once per
+/// configuration and backing scale, white with its soft dark shadow, and once more lit (with its
+/// glow, a button at its grown size); a frame draws those pictures at the springs' strengths, and
+/// the hint again only when it changes.
 final class RadialWheelView: NSView {
-    private var geometry = RadialGeometry(count: 0)
+    /// A word drawn once: its picture and where it goes, in wheel coordinates.
+    private struct Still {
+        var image: CGImage
+        var rect: CGRect
+        /// How many times its word's rest size the picture shows it.
+        var grown: CGFloat = 1
+    }
+
+    private static let empty: CGImage = {
+        let ctx = CGContext(data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        return ctx.makeImage()!
+    }()
+
+    private struct Drawn {
+        var role: RadialLayout.Word.Role
+        var rest: Still
+        var lit: Still?
+    }
+
+    /// How much a button grows under the pointer, about its own centre.
+    nonisolated static let grow: CGFloat = 1.3
+
+    /// Which buttons show while the pointer is not on their wedge.
+    var restingButtons = RadialMenu.restingButtons { didSet { if restingButtons != oldValue { needsDisplay = true } } }
+
+    /// Called with how far the wheel has faded in (0...1), for the tint under it.
+    var onShown: ((CGFloat) -> Void)?
+
+    private var layout = RadialLayout(wedges: [])
     private var wedges: [RadialMenu.Wedge] = []
+    private var origin: CGPoint = .zero
+    /// The words drawn, at `drawnScale` pixels per point (0: not yet).
+    private var drawn: [Drawn] = []
+    private var drawnScale: CGFloat = 0
+    private var buttonIndex: [RadialLayout.Word.Role: Int] = [:]
+    private var hint: (text: String, still: Still)?
+
+    /// Per wedge: highlighted.
     private var highlight: [Spring] = []
-    private var appear = Spring(0)
+    /// Per button, in the layout's order: under the pointer.
+    private var lit: [Spring] = []
+    private var cancelLit = Spring(1)
+    private var appear = Spring(1)
 
     var selection: RadialGeometry.Selection = .cancel {
         didSet { guard selection != oldValue else { return }; retarget(); needsDisplay = true }
@@ -554,185 +772,273 @@ final class RadialWheelView: NSView {
     override var isFlipped: Bool { false }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    func configure(geometry: RadialGeometry, wedges: [RadialMenu.Wedge]) {
-        self.geometry = geometry
+    private var buttonRoles: [RadialLayout.Word.Role] {
+        layout.words.compactMap { if case .button = $0.role { return $0.role } else { return nil } }
+    }
+
+    func configure(layout: RadialLayout, field: RadialField, wedges: [RadialMenu.Wedge]) {
+        self.layout = layout
+        self.wedges = wedges
+        origin = field.canvas.center
+        drawn = []
+        drawnScale = 0
+        hint = nil
+        let roles = buttonRoles
+        buttonIndex = Dictionary(uniqueKeysWithValues: roles.enumerated().map { ($1, $0) })
+        if highlight.count != wedges.count { highlight = wedges.map { _ in Spring(0) } }
+        if lit.count != roles.count { lit = roles.map { _ in Spring(0) } }
+        retarget()
+        needsDisplay = true
+    }
+
+    /// The same wheel with wedges whose kinds changed but whose labels did not (the park
+    /// wedge's targets): only the hint changes.
+    func update(wedges: [RadialMenu.Wedge]) {
         self.wedges = wedges
         needsDisplay = true
     }
 
-    func resetSprings(count: Int) {
-        highlight = (0..<count).map { _ in Spring(0) }
+    func resetSprings() {
+        highlight = wedges.map { _ in Spring(0) }
+        lit = buttonRoles.map { _ in Spring(0) }
+        cancelLit = Spring(selection == .cancel ? 1 : 0)
         appear = Spring(0)
         appear.target = 1
+        onShown?(0)
+        retarget()
+        needsDisplay = true
+    }
+
+    /// At rest with `selection` highlighted, as if the springs had settled (snapshots).
+    func settle(selection: RadialGeometry.Selection) {
+        self.selection = selection
+        retarget()
+        for i in highlight.indices { highlight[i].jump(to: highlight[i].target) }
+        for i in lit.indices { lit[i].jump(to: lit[i].target) }
+        cancelLit.jump(to: cancelLit.target)
+        appear.jump(to: 1)
+        onShown?(1)
         needsDisplay = true
     }
 
     private func retarget() {
-        for i in highlight.indices { highlight[i].target = (selection.index == i) ? 1 : 0 }
+        for i in highlight.indices { highlight[i].target = selection.index == i ? 1 : 0 }
+        for (role, k) in buttonIndex where lit.indices.contains(k) {
+            guard case .button(let i, let ring) = role else { continue }
+            lit[k].target = selection == .wedge(index: i, ring: ring) ? 1 : 0
+        }
+        cancelLit.target = selection == .cancel ? 1 : 0
     }
 
+    private var springs: [Spring] { highlight + lit + [cancelLit, appear] }
+
+    /// Whether a spring is still moving.
+    var isMoving: Bool { springs.contains { $0.value != $0.target || $0.velocity != 0 } }
+
+    /// Steps the springs; redraws only while something moves.
     func tick() {
         let dt = 1.0 / 120.0
-        var settled = appear.step(dt: dt, stiffness: 320, damping: 0.62, epsilon: 0.002)
-        for i in highlight.indices {
-            settled = highlight[i].step(dt: dt, stiffness: 420, damping: 0.66, epsilon: 0.002) && settled
-        }
+        let before = springs
+        _ = appear.step(dt: dt, stiffness: 320, damping: 0.62, epsilon: 0.002)
+        _ = cancelLit.step(dt: dt, stiffness: 420, damping: 0.7, epsilon: 0.002)
+        for i in highlight.indices { _ = highlight[i].step(dt: dt, stiffness: 420, damping: 0.66, epsilon: 0.002) }
+        for i in lit.indices { _ = lit[i].step(dt: dt, stiffness: 380, damping: 0.55, epsilon: 0.002) }
+        if appear.value != before[before.count - 1].value { onShown?(shown) }
+        if springs != before { needsDisplay = true }
+    }
+
+    private var shown: CGFloat { max(0, min(1, CGFloat(appear.value) * 1.4)) }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
         needsDisplay = true
-        _ = settled
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        needsDisplay = true
+    }
+
+    // MARK: Pictures
+
+    private var backingScale: CGFloat { window?.backingScaleFactor ?? 2 }
+
+    /// Draws each word once, at `scale` pixels per point.
+    private func prepare(scale: CGFloat) {
+        let s = layout.scale
+        drawn = layout.words.compactMap { word -> Drawn? in
+            let text = PreparedText(word.fit, style: word.style)
+            switch word.role {
+            case .button:
+                return Drawn(role: word.role, rest: Self.still(text, frame: word.frame, align: 0.5, scale: scale, size: s),
+                             lit: Self.still(text, frame: word.frame, align: 0.5, scale: scale, size: s, glow: true, grow: Self.grow))
+            case .name(let i):
+                let icons = wedges.indices.contains(i) ? Array(wedges[i].icons.prefix(word.icons)) : []
+                return Drawn(role: word.role,
+                             rest: Self.still(text, frame: word.frame, align: word.align, scale: scale, size: s, icons: icons),
+                             lit: Self.still(text, frame: word.frame, align: word.align, scale: scale, size: s, icons: icons, glow: true))
+            case .digit:
+                return Drawn(role: word.role, rest: Self.still(text, frame: word.frame, align: 0.5, scale: scale, size: s), lit: nil)
+            case .centre:
+                let escape = PreparedText(TextFit(lines: ["Esc"], size: word.style.preferred - 1.5 * s, truncated: false), style: word.style)
+                return Drawn(role: word.role, rest: Self.still(escape, frame: word.frame, align: 0.5, scale: scale, size: s),
+                             lit: Self.still(text, frame: word.frame, align: 0.5, scale: scale, size: s, glow: true))
+            }
+        }
+        drawnScale = scale
+        hint = nil
+    }
+
+    /// `text` in white inside `frame` (its lines from the top, placed across by `align`; a
+    /// name's `icons` in a row under them), with a soft dark shadow and, when `glow`, a white
+    /// glow, `grow` times its size about its centre: rendered at `scale` pixels per point, the
+    /// shadows sized for wheel scale `size`.
+    private static func still(_ text: PreparedText, frame: CGRect, align: CGFloat, scale: CGFloat, size s: CGFloat,
+                              icons: [NSImage] = [], glow: Bool = false, grow: CGFloat = 1) -> Still {
+        let margin = (glow ? 14 : 6) * s
+        let grown = CGRect(x: frame.midX - frame.width * grow / 2, y: frame.midY - frame.height * grow / 2,
+                           width: frame.width * grow, height: frame.height * grow)
+        let rect = grown.insetBy(dx: -margin, dy: -margin).integral
+        let space = CGColorSpace(name: CGColorSpace.sRGB)!
+        guard let ctx = CGContext(data: nil, width: max(1, Int(rect.width * scale)), height: max(1, Int(rect.height * scale)),
+                                  bitsPerComponent: 8, bytesPerRow: 0, space: space,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            return Still(image: empty, rect: rect, grown: grow)
+        }
+        ctx.scaleBy(x: scale, y: scale)
+        ctx.translateBy(x: -rect.minX, y: -rect.minY)
+        if grow != 1 {
+            ctx.translateBy(x: frame.midX, y: frame.midY)
+            ctx.scaleBy(x: grow, y: grow)
+            ctx.translateBy(x: -frame.midX, y: -frame.midY)
+        }
+        // Shadows are in the bitmap's pixels, whatever the transform.
+        let px = scale * grow
+        let textFrame = CGRect(x: frame.minX, y: frame.maxY - text.height, width: frame.width, height: text.height)
+        func words() {
+            text.draw(in: textFrame, align: align, in: ctx)
+            guard !icons.isEmpty else { return }
+            let side = RadialLayout.iconSize * s, spacing = RadialLayout.iconSpacing * s
+            let row = CGFloat(icons.count) * side + CGFloat(icons.count - 1) * spacing
+            let x = frame.minX + (frame.width - row) * align
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
+            for (k, icon) in icons.enumerated() {
+                (icon.isTemplate ? white(icon) : icon).draw(in: CGRect(x: x + CGFloat(k) * (side + spacing), y: frame.minY,
+                                                                        width: side, height: side))
+            }
+            NSGraphicsContext.restoreGraphicsState()
+        }
+        ctx.setFillColor(NSColor.white.cgColor)
+        if glow {
+            ctx.setShadow(offset: .zero, blur: 10 * s * px, color: NSColor.white.withAlphaComponent(0.8).cgColor)
+            words()
+        }
+        ctx.setShadow(offset: CGSize(width: 0, height: -1 * s * px), blur: 4 * s * px, color: NSColor.black.withAlphaComponent(0.7).cgColor)
+        words()
+        return Still(image: ctx.makeImage() ?? empty, rect: rect, grown: grow)
+    }
+
+    /// A template symbol in white.
+    private static func white(_ icon: NSImage) -> NSImage {
+        NSImage(size: icon.size, flipped: false) { rect in
+            icon.draw(in: rect)
+            NSColor.white.set()
+            rect.fill(using: .sourceAtop)
+            return true
+        }
+    }
+
+    // MARK: Frames
+
+    private func value(_ springs: [Spring], _ i: Int) -> CGFloat {
+        springs.indices.contains(i) ? CGFloat(springs[i].value) : 0
     }
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext, !wedges.isEmpty else { return }
-        let c = CGPoint(x: bounds.midX, y: bounds.midY)
-        let accent = NSColor.controlAccentColor
-
+        if drawnScale != backingScale { prepare(scale: backingScale) }
+        let shown = self.shown
         ctx.saveGState()
-        let scale = 0.82 + 0.18 * appear.value
-        ctx.translateBy(x: c.x, y: c.y)
-        ctx.scaleBy(x: scale, y: scale)
-        ctx.translateBy(x: -c.x, y: -c.y)
-        ctx.setAlpha(max(0, min(1, appear.value * 1.4)))
-
-        for tile in RadialMenu.tiles(center: c, geometry: geometry) {
-            guard wedges.indices.contains(tile.index) else { continue }
-            let h = highlight.indices.contains(tile.index) ? highlight[tile.index].value : 0
-            let active = selection.index == tile.index && selection.ring == tile.ring
-            let path = tile.path
-            if h > 0.001 {
-                let a = geometry.centerAngle(of: tile.index)
-                let push = CGFloat(h) * 5
-                let t = AffineTransform(translationByX: push * CGFloat(sin(a)), byY: push * CGFloat(cos(a)))
-                path.transform(using: t)
+        ctx.translateBy(x: origin.x, y: origin.y)
+        ctx.interpolationQuality = .high
+        let grow = 0.9 + 0.1 * CGFloat(appear.value)
+        ctx.scaleBy(x: grow, y: grow)
+        let hovered = CGFloat(highlight.map(\.value).max() ?? 0)
+        func recede(_ i: Int) -> CGFloat { max(0, hovered - value(highlight, i)) }
+        drawLight(in: ctx, shown: shown)
+        for word in drawn {
+            switch word.role {
+            case .button(let i, _):
+                let l = value(lit, buttonIndex[word.role] ?? -1)
+                let h = value(highlight, i)
+                let resting: CGFloat = restingButtons == .faint ? 0.45 - 0.13 * recede(i) : 0
+                let base = resting + (0.88 - resting) * h
+                draw(word, alpha: (base + (1 - base) * l) * shown, lit: l, grow: 1 + (Self.grow - 1) * l, in: ctx)
+            case .name(let i):
+                let h = value(highlight, i)
+                draw(word, alpha: (0.88 + 0.12 * h - 0.3 * recede(i)) * shown, lit: h, in: ctx)
+            case .digit(let i):
+                let h = value(highlight, i)
+                draw(word, alpha: (0.32 + 0.4 * h - 0.12 * recede(i)) * shown, lit: 0, in: ctx)
+            case .centre:
+                let c = CGFloat(cancelLit.value)
+                draw(word, alpha: 0.5 * shown, lit: c, litAlpha: shown, in: ctx)
             }
-            let base = tile.ring == .inner ? 0.10 : 0.05
-            NSColor.white.withAlphaComponent(base + 0.10 * h).setFill()
-            path.fill()
-            if active {
-                accent.withAlphaComponent(0.20 + 0.35 * h).setFill()
-                path.fill()
-            }
-            // Jelly sheen: a light band across the top half of the tile.
-            ctx.saveGState()
-            path.addClip()
-            let box = path.bounds
-            NSGradient(colors: [NSColor.white.withAlphaComponent(0.22), NSColor.white.withAlphaComponent(0.0)])?
-                .draw(in: CGRect(x: box.minX, y: box.midY, width: box.width, height: box.height / 2), angle: -90)
-            ctx.restoreGState()
-            (active ? accent : NSColor.white.withAlphaComponent(0.18 + 0.3 * h)).setStroke()
-            path.lineWidth = active ? 2 : 1
-            path.stroke()
         }
-
-        for (i, wedge) in wedges.enumerated() {
-            drawWedgeContents(wedge, index: i, center: c)
-        }
-
-        drawCenter(at: c)
+        drawHint(in: ctx, alpha: 0.95 * shown)
         ctx.restoreGState()
-        drawCaption()
     }
 
-    private func drawWedgeContents(_ wedge: RadialMenu.Wedge, index: Int, center c: CGPoint) {
-        let h = highlight.indices.contains(index) ? highlight[index].value : 0
-        let a = geometry.centerAngle(of: index)
-        let r = (geometry.deadZone + geometry.innerEdge) / 2 + CGFloat(h) * 5
-        let p = RadialMenu.point(c, r, a)
-        let span = geometry.count > 1
-            ? max(70, 2 * r * CGFloat(sin(min(geometry.wedgeAngle / 2, .pi / 3))) - 10)
-            : 190
-
-        let hasIcons = !wedge.icons.isEmpty
-        let style = NSMutableParagraphStyle()
-        style.alignment = .center
-        style.lineBreakMode = .byTruncatingTail
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
-            .foregroundColor: NSColor.white.withAlphaComponent(0.72 + 0.28 * h),
-            .paragraphStyle: style,
-        ]
-        let titleRect = CGRect(x: p.x - span / 2, y: p.y - 9 + (hasIcons ? 8 : 0), width: span, height: 18)
-        (wedge.title as NSString).draw(in: titleRect, withAttributes: attrs)
-
-        if hasIcons {
-            let size: CGFloat = 18
-            let spacing: CGFloat = 4
-            let total = CGFloat(wedge.icons.count) * size + CGFloat(wedge.icons.count - 1) * spacing
-            var x = p.x - total / 2
-            let y = p.y - 9 - size + 4
-            for icon in wedge.icons {
-                let box = CGRect(x: x, y: y, width: size, height: size)
-                if icon.isTemplate {
-                    NSGraphicsContext.current?.saveGraphicsState()
-                    icon.draw(in: box)
-                    NSColor.white.withAlphaComponent(0.75 + 0.25 * h).set()
-                    box.fill(using: .sourceAtop)
-                    NSGraphicsContext.current?.restoreGraphicsState()
-                } else {
-                    icon.draw(in: box, from: .zero, operation: .sourceOver, fraction: 0.7 + 0.3 * h)
-                }
-                x += size + spacing
-            }
+    /// Draws `word` at `alpha`, crossfading to its lit picture by `lit`, `grow` times its rest size.
+    private func draw(_ word: Drawn, alpha: CGFloat, lit l: CGFloat, litAlpha: CGFloat? = nil, grow: CGFloat = 1,
+                      in ctx: CGContext) {
+        let l = max(0, min(1, l))
+        func put(_ still: Still, _ a: CGFloat, scale: CGFloat) {
+            guard a > 0.004 else { return }
+            ctx.saveGState()
+            ctx.setAlpha(min(1, a))
+            let r = still.rect
+            ctx.draw(still.image, in: CGRect(x: r.midX - r.width * scale / 2, y: r.midY - r.height * scale / 2,
+                                             width: r.width * scale, height: r.height * scale))
+            ctx.restoreGState()
         }
-
-        if index < 9 {
-            let digit = NSAttributedString(string: "\(index + 1)", attributes: [
-                .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .bold),
-                .foregroundColor: NSColor.white.withAlphaComponent(0.30 + 0.45 * h),
-            ])
-            let dp = RadialMenu.point(c, geometry.deadZone + 14, a)
-            digit.draw(at: CGPoint(x: dp.x - digit.size().width / 2, y: dp.y - digit.size().height / 2))
+        guard let lit = word.lit, l > 0.004 else {
+            put(word.rest, alpha, scale: grow)
+            return
         }
+        put(word.rest, alpha * (1 - l), scale: grow)
+        put(lit, (litAlpha ?? alpha) * l, scale: grow / lit.grown)
+    }
 
-        // The highlighted wedge names its outer rings; the selected one is bright, the others faint.
-        guard selection.index == index, let selected = selection.ring else { return }
-        for ring in geometry.rings(of: index) where ring != .inner {
-            let label = NSAttributedString(string: RadialMenu.ringLabel(ring, for: wedges[index].kind), attributes: [
-                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
-                .foregroundColor: NSColor.white.withAlphaComponent(ring == selected ? 1 : 0.45),
-            ])
-            let band = geometry.band(ring, of: index)
-            let lp = RadialMenu.point(c, (band.r0 + band.r1) / 2 + CGFloat(h) * 5, a)
-            let width = min(label.size().width, band.r1 - band.r0 + 40)
-            let rect = CGRect(x: lp.x - width / 2, y: lp.y - label.size().height / 2, width: width, height: label.size().height)
-            label.draw(with: rect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+    /// A very soft light under the button the pointer is on, with no edge.
+    private func drawLight(in ctx: CGContext, shown: CGFloat) {
+        for (role, k) in buttonIndex {
+            let l = value(lit, k) * shown
+            guard l > 0.01, let frame = layout.word(role)?.frame else { continue }
+            let radius = max(frame.width, frame.height) * 0.8 + 26 * layout.scale
+            let colors = [NSColor.white.withAlphaComponent(0.13 * l).cgColor, NSColor.white.withAlphaComponent(0.05 * l).cgColor,
+                          NSColor.white.withAlphaComponent(0).cgColor] as CFArray
+            guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 0.45, 1]) else { continue }
+            let c = CGPoint(x: frame.midX, y: frame.midY)
+            ctx.drawRadialGradient(gradient, startCenter: c, startRadius: 0, endCenter: c, endRadius: radius, options: [])
         }
     }
 
-    private func drawCenter(at c: CGPoint) {
-        let r = geometry.deadZone
-        let disc = NSBezierPath(ovalIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2))
-        let cancelling = selection == .cancel
-        NSColor.white.withAlphaComponent(cancelling ? 0.16 : 0.08).setFill()
-        disc.fill()
-        NSColor.white.withAlphaComponent(cancelling ? 0.55 : 0.2).setStroke()
-        disc.lineWidth = 1
-        disc.stroke()
-        let text = NSAttributedString(string: cancelling ? "Cancel" : "Esc", attributes: [
-            .font: NSFont.systemFont(ofSize: cancelling ? 12 : 10, weight: .semibold),
-            .foregroundColor: NSColor.white.withAlphaComponent(cancelling ? 0.95 : 0.45),
-        ])
-        text.draw(at: CGPoint(x: c.x - text.size().width / 2, y: c.y - text.size().height / 2))
-    }
-
-    private func drawCaption() {
-        var caption = "Out to preview · further to apply · furthest to clear this screen + apply · centre cancels"
-        if case .wedge(let i, let ring) = selection, wedges.indices.contains(i) {
-            let action = RadialMenu.ringLabel(ring, for: wedges[i].kind)
-            let sub = wedges[i].subtitle.isEmpty ? "" : " · \(wedges[i].subtitle)"
-            caption = "\(wedges[i].title)\(sub)  —  \(action)"
+    /// What releasing does, in plain words under the wheel, fitted to the hint's zone.
+    private func drawHint(in ctx: CGContext, alpha: CGFloat) {
+        let text = RadialMenu.hint(for: selection, in: wedges)
+        if hint?.text != text {
+            let fit = layout.fitHint(text)
+            let prepared = PreparedText(fit, style: layout.hintStyle)
+            let zone = layout.hintZone
+            let frame = CGRect(x: zone.minX, y: zone.maxY - prepared.height, width: zone.width, height: prepared.height)
+            hint = (text, Self.still(prepared, frame: frame, align: 0.5, scale: drawnScale, size: layout.scale))
         }
-        let str = NSAttributedString(string: caption, attributes: [
-            .font: NSFont.systemFont(ofSize: 12, weight: .medium),
-            .foregroundColor: NSColor.white.withAlphaComponent(0.92),
-        ])
-        let s = str.size()
-        let rect = CGRect(x: bounds.midX - s.width / 2 - 12, y: 10, width: s.width + 24, height: s.height + 10)
-        let bg = NSBezierPath(roundedRect: rect, xRadius: rect.height / 2, yRadius: rect.height / 2)
-        NSColor.black.withAlphaComponent(0.6).setFill()
-        bg.fill()
-        NSColor.white.withAlphaComponent(0.18).setStroke()
-        bg.lineWidth = 1
-        bg.stroke()
-        str.draw(at: CGPoint(x: rect.midX - s.width / 2, y: rect.midY - s.height / 2))
+        guard let hint, alpha > 0.004 else { return }
+        ctx.saveGState()
+        ctx.setAlpha(alpha)
+        ctx.draw(hint.still.image, in: hint.still.rect)
+        ctx.restoreGState()
     }
 }
