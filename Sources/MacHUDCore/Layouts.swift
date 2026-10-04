@@ -404,7 +404,7 @@ struct Config: Codable, Equatable {
     /// What apply does with windows on desktops that are not showing (default `bring`).
     var spaces: SpacesConfig? = nil
     /// Name of a loadout applied about two seconds after launch, once the sibling apps it
-    /// names are reachable (typically one saved with "Save Current HUD as Loadout…").
+    /// names are reachable (typically one saved with "Save Dock and Panels as HUD Loadout…").
     var startupLoadout: String? = nil
     /// The app catalog (Settings → Apps): its URL and the install directory.
     var catalog: CatalogConfig? = nil
