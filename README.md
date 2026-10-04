@@ -206,7 +206,7 @@ applies to whichever you are on. What apply does with each slot's window:
   the toast names the app.
 - **No window**: the app is launched, or asked for a window.
 
-Apply never closes a window. One loadout is applied at a time: a second apply while one runs is
+Without `clear=1`, apply never closes a window. One loadout is applied at a time: a second apply while one runs is
 refused ("<name> is still being applied"). `clear=1` (the wheel's outer ring, the menu's
 **Clear This Screen + Apply**) first minimises the other windows showing on that screen and
 closes the web windows MacHUD opened that the loadout does not want; `machud restore` or
