@@ -57,9 +57,15 @@ final class RadialOpeningTests: XCTestCase {
                     XCTAssertEqual(menu.selection, .cancel, "\(what), after a modifier change")
                     menu.pointerMoved(to: pointer, delta: .zero)
                     XCTAssertEqual(menu.selection, .cancel, "\(what), after an event that did not move")
+                    // A pen or a remotely driven pointer reports where it really is, away from
+                    // the centre the pointer was moved to, with a delta: still nothing.
+                    menu.pointerMoved(to: CGPoint(x: pointer.x + 2, y: pointer.y - 1), delta: CGVector(dx: 2, dy: 1))
+                    XCTAssertEqual(menu.selection, .cancel, "\(what), after a first event that moved")
+                    menu.pointerMoved(to: CGPoint(x: pointer.x + 6, y: pointer.y + 1), delta: CGVector(dx: 4, dy: -2))
+                    XCTAssertEqual(menu.selection, .cancel, "\(what), within a few points of the first event")
                     XCTAssertEqual(menu.releaseOutcome, .cancelled, what)
                     if hypot(menu.center.x - pointer.x, menu.center.y - pointer.y) > 0.5 {
-                        XCTAssertEqual(warps, [RadialMenu.displayPoint(menu.center, primaryHeight: display.primaryHeight)], what)
+                        XCTAssertEqual(warps, [ScreenCoords.axPoint(fromCocoa: menu.center, primaryHeight: display.primaryHeight)], what)
                     } else {
                         XCTAssertEqual(warps, [], what)
                     }
@@ -68,11 +74,105 @@ final class RadialOpeningTests: XCTestCase {
         }
     }
 
+    /// The park wedge's targets are read again as it becomes highlighted without waiting for the
+    /// answer: the hint keeps what it said until the answer comes, which is used only while the
+    /// park wedge is still highlighted in the same opening of the wheel.
+    func testTheParkWedgeRereadsItsTargetsWithoutWaiting() {
+        let menu = menu()
+        var asked: [(RadialMenu.Wedge.ParkTargets) -> Void] = []
+        menu.readParkTargets = { answer in asked.append(answer) }
+        let display = Self.displays[1]
+        var wedges = RadialLayoutTests.wedges(8, RadialLayoutTests.short)
+        wedges[6].kind = .park(.init(focused: "Safari · Docs"))
+        let at = CGPoint(x: display.frame.midX, y: display.frame.midY)
+        menu.prepare(wedges: wedges, at: at, on: display, movesPointer: true)
+        func hint() -> String { RadialMenu.hint(for: menu.selection, in: menu.wedges) }
+        XCTAssertTrue(asked.isEmpty)
+        menu.select(index: 6, ring: .inner)
+        XCTAssertEqual(asked.count, 1, "asked as it became highlighted")
+        XCTAssertEqual(hint(), "Park Safari · Docs", "unchanged until the answer")
+        menu.select(index: 6, ring: .middle)
+        XCTAssertEqual(asked.count, 1, "still highlighted: not asked again")
+        menu.select(index: 6, ring: .inner)
+        asked[0](.init(focused: "Notes · Groceries"))
+        XCTAssertEqual(hint(), "Park Notes · Groceries", "the answer, while the park wedge is highlighted")
+
+        menu.select(index: 0, ring: .inner)
+        menu.select(index: 6, ring: .inner)
+        XCTAssertEqual(asked.count, 2)
+        menu.select(index: 1, ring: .inner)
+        asked[1](.init(focused: "Terminal"))
+        menu.select(index: 6, ring: .inner)
+        XCTAssertEqual(asked.count, 3)
+        XCTAssertEqual(hint(), "Park Notes · Groceries", "an answer that came after the park wedge was left is not used")
+
+        menu.prepare(wedges: wedges, at: at, on: display, movesPointer: true)
+        menu.select(index: 6, ring: .inner)
+        asked[2](.init(focused: "Mail · Inbox"))
+        XCTAssertEqual(hint(), "Park Safari · Docs", "an answer from an earlier opening is not used")
+    }
+
+    /// Park left and highlighted again while a read is still out: that read's answer is older
+    /// than the highlight, so it is not used, and the wheel asks again as it lands.
+    func testARehighlightAsksAgainRatherThanUseAnOlderAnswer() {
+        let menu = menu()
+        var asked: [(RadialMenu.Wedge.ParkTargets) -> Void] = []
+        menu.readParkTargets = { answer in asked.append(answer) }
+        let display = Self.displays[1]
+        var wedges = RadialLayoutTests.wedges(8, RadialLayoutTests.short)
+        wedges[6].kind = .park(.init(focused: "Safari · Docs"))
+        menu.prepare(wedges: wedges, at: CGPoint(x: display.frame.midX, y: display.frame.midY), on: display, movesPointer: true)
+        func hint() -> String { RadialMenu.hint(for: menu.selection, in: menu.wedges) }
+        menu.select(index: 6, ring: .inner)
+        menu.select(index: 0, ring: .inner)
+        menu.select(index: 6, ring: .inner)
+        XCTAssertEqual(asked.count, 1, "one read out at a time")
+        asked[0](.init(focused: "Notes · Groceries"))
+        XCTAssertEqual(hint(), "Park Safari · Docs", "the older answer is not used")
+        XCTAssertEqual(asked.count, 2, "asked again as it landed")
+        asked[1](.init(focused: "Terminal"))
+        XCTAssertEqual(hint(), "Park Terminal")
+
+        // Left again before the older answer lands: it is not used, and nothing is asked until
+        // Park is highlighted again.
+        menu.select(index: 0, ring: .inner)
+        menu.select(index: 6, ring: .inner)
+        XCTAssertEqual(asked.count, 3)
+        menu.select(index: 0, ring: .inner)
+        menu.select(index: 6, ring: .inner)
+        menu.select(index: 0, ring: .inner)
+        asked[2](.init(focused: "Mail · Inbox"))
+        XCTAssertEqual(asked.count, 3)
+        menu.select(index: 6, ring: .inner)
+        XCTAssertEqual(asked.count, 4)
+        XCTAssertEqual(hint(), "Park Terminal")
+    }
+
+    /// A wheel opened again with the same words in the same room reuses its layout; any other
+    /// words (a widgets button that reads Lower now) or room lay it out anew.
+    func testALayoutIsReusedOnlyForTheSameWordsAndRoom() {
+        let menu = menu()
+        let display = Self.displays[1]
+        let at = CGPoint(x: display.frame.midX, y: display.frame.midY)
+        func widgetsButton() -> [String]? { menu.layout.word(.button(7, .inner))?.fit.lines }
+        var wedges = RadialLayoutTests.wedges(8, RadialLayoutTests.short)
+        menu.prepare(wedges: wedges, at: at, on: display, movesPointer: true)
+        XCTAssertEqual(widgetsButton(), ["Reveal"])
+        let first = menu.layout
+        menu.prepare(wedges: wedges, at: at, on: display, movesPointer: true)
+        XCTAssertEqual(menu.layout, first)
+        wedges[7].kind = .widgets(.init(revealed: true))
+        menu.prepare(wedges: wedges, at: at, on: display, movesPointer: true)
+        XCTAssertEqual(widgetsButton(), ["Lower"])
+        menu.prepare(wedges: wedges, at: CGPoint(x: 100, y: 100), on: Self.displays[0], movesPointer: true)
+        XCTAssertLessThan(menu.layout.scale, 1, "the small screen's room")
+    }
+
     /// Screen points (y up from the primary display's bottom) become display points (y down
     /// from its top), which is what moving the pointer takes.
     func testThePointerIsMovedInDisplayPoints() {
-        XCTAssertEqual(RadialMenu.displayPoint(CGPoint(x: 300, y: 40), primaryHeight: 640), CGPoint(x: 300, y: 600))
-        XCTAssertEqual(RadialMenu.displayPoint(CGPoint(x: 1500, y: -60), primaryHeight: 640), CGPoint(x: 1500, y: 700))
+        XCTAssertEqual(ScreenCoords.axPoint(fromCocoa: CGPoint(x: 300, y: 40), primaryHeight: 640), CGPoint(x: 300, y: 600))
+        XCTAssertEqual(ScreenCoords.axPoint(fromCocoa: CGPoint(x: 1500, y: -60), primaryHeight: 640), CGPoint(x: 1500, y: 700))
     }
 
     /// A wheel opened by a script at a given point does not move the user's pointer; nothing is
@@ -98,9 +198,36 @@ final class RadialOpeningTests: XCTestCase {
         let r = (band.r0 + band.r1) / 2
         let a = g.centerAngle(of: 2)
         let target = CGPoint(x: menu.center.x + r * CGFloat(sin(a)), y: menu.center.y + r * CGFloat(cos(a)))
+        menu.pointerMoved(to: CGPoint(x: menu.center.x + 1, y: menu.center.y), delta: CGVector(dx: 1, dy: 0))
+        XCTAssertEqual(menu.selection, .cancel)
         menu.pointerMoved(to: target, delta: CGVector(dx: 3, dy: 0))
         XCTAssertEqual(menu.selection, .wedge(index: 2, ring: .middle))
         XCTAssertEqual(menu.releaseOutcome, RadialMenu.outcome(of: wedges[2].kind, ring: .middle))
+    }
+
+    /// Where the pointer's first report after the wheel opens is far from the centre (a
+    /// hovering pen, a remotely driven pointer: moving the pointer did not stick), nothing
+    /// lights there; once the pointer has gone on a few points from that first report, the
+    /// wheel lights what is under it.
+    func testAFirstReportAwayFromTheCentreLightsNothingUntilThePointerGoesOn() {
+        let menu = menu()
+        let display = Self.displays[1]
+        let wedges = RadialLayoutTests.wedges(8, RadialLayoutTests.short)
+        menu.prepare(wedges: wedges, at: CGPoint(x: display.frame.minX + 3, y: display.frame.minY + 3), on: display, movesPointer: true)
+        let g = menu.geometry
+        let band = g.band(.outer, of: 1)
+        let r = (band.r0 + band.r1) / 2
+        let a = g.centerAngle(of: 1)
+        let pen = CGPoint(x: menu.center.x + r * CGFloat(sin(a)), y: menu.center.y + r * CGFloat(cos(a)))
+        menu.pointerMoved(to: pen, delta: CGVector(dx: 140, dy: -90))
+        XCTAssertEqual(menu.selection, .cancel, "the first report, far from the centre")
+        XCTAssertEqual(menu.releaseOutcome, .cancelled)
+        menu.pointerMoved(to: CGPoint(x: pen.x + 3, y: pen.y + 3), delta: CGVector(dx: 3, dy: 3))
+        XCTAssertEqual(menu.selection, .cancel, "a few points on")
+        let on = CGPoint(x: pen.x + 6 * CGFloat(sin(a)), y: pen.y + 6 * CGFloat(cos(a)))
+        menu.pointerMoved(to: on, delta: CGVector(dx: 3, dy: 3))
+        XCTAssertEqual(menu.selection, g.selection(at: CGPoint(x: on.x - menu.center.x, y: on.y - menu.center.y)))
+        XCTAssertEqual(menu.selection, .wedge(index: 1, ring: .outer), "past the threshold it lights what is under the pointer")
     }
 
     /// The keyboard works with no pointer movement: a digit picks a wedge's inner ring, Shift

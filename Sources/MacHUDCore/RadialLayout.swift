@@ -8,7 +8,10 @@ import AppKit
 ///   horizontal spoke a wedge's words sit side by side, so each ring is as deep as its widest
 ///   label grown (`RadialWheelView.grow`) plus `buttonGap`: a grown word never touches the next.
 ///   With many wedges every ring moves out (the dead zone stays) until no grown word touches a
-///   word of another wedge.
+///   word of another wedge and every word, grown by at least `minimumGrow`, lies inside its own
+///   region. Each word then grows under the pointer as far as its region allows, up to
+///   `RadialWheelView.grow` (`Word.grow`), so the word under the pointer is the one that lights
+///   wherever on it the pointer is.
 /// - Names. Each wedge's name is anchored at `RadialGeometry.nameRadius`, past the last ring,
 ///   and grows away from the centre: on the right half it starts at its anchor, on the left half
 ///   it ends there, at the top and the bottom it is centred on it, blending between; above the
@@ -21,8 +24,8 @@ import AppKit
 ///
 /// `scale` draws the whole wheel smaller (radii, words and gaps alike), for a screen it would
 /// not otherwise fit (`fitting(_:in:)`).
-struct RadialLayout {
-    struct Word {
+struct RadialLayout: Equatable {
+    struct Word: Equatable {
         enum Role: Hashable {
             case name(Int)
             case button(Int, RadialGeometry.Ring)
@@ -41,6 +44,9 @@ struct RadialLayout {
         var align: CGFloat
         /// Icons in a row under a name's lines.
         var icons: Int
+        /// How many times its size a button grows under the pointer, inside its region; 1 for
+        /// every other word.
+        var grow: CGFloat = 1
 
         var font: NSFont { style.font(fit.size) }
         var lineHeight: CGFloat { PreparedText.lineHeight(font) }
@@ -63,6 +69,9 @@ struct RadialLayout {
     /// The least room between two words.
     static let wordGap: CGFloat = 4
     static let iconLimit = 8
+    /// The least a button grows under the pointer: the rings move out until every button can
+    /// grow this much inside its region.
+    static let minimumGrow: CGFloat = 1.15
     static let maxIcons = 5
 
     let geometry: RadialGeometry
@@ -73,8 +82,6 @@ struct RadialLayout {
     let hintZone: CGRect
     /// Every word and the hint's zone.
     let bounds: CGRect
-
-    var showsIcons: Bool { geometry.count <= Self.iconLimit }
 
     func word(_ role: Word.Role) -> Word? { words.first { $0.role == role } }
 
@@ -114,20 +121,30 @@ struct RadialLayout {
             if have < last.width { depth[depth.count - 1] += last.width - have }
         }
 
-        // Out until no grown button touches another.
+        // Out until no grown button touches another and each fits its region grown at least
+        // `minimumGrow`.
         let dead = Self.deadZone * s
-        var geometry = RadialGeometry(count: count, ringCounts: ringCounts)
+        func rings(_ extra: CGFloat) -> RadialGeometry {
+            let inner = dead + depth[0] + extra
+            return RadialGeometry(count: count, ringCounts: ringCounts, deadZone: dead, innerEdge: inner,
+                                  middleEdge: inner + depth[1], outerEdge: inner + depth[1] + depth[2],
+                                  nameRadius: inner + depth[1] + depth[2] + Self.nameGap * s)
+        }
+        // Each label fitted once: moving the rings out only gives it more room.
+        let labels = Self.fitLabels(wedges, geometry: rings(0), style: labelStyle, room: { ($0 - gap) / grow + 0.01 })
+        var geometry = rings(0)
         var buttons: [Word] = []
         var extra: CGFloat = 0
         for _ in 0..<400 {
-            let inner = dead + depth[0] + extra
-            geometry = RadialGeometry(count: count, ringCounts: ringCounts, deadZone: dead, innerEdge: inner,
-                                      middleEdge: inner + depth[1], outerEdge: inner + depth[1] + depth[2],
-                                      nameRadius: inner + depth[1] + depth[2] + Self.nameGap * s)
-            buttons = Self.buttons(wedges, geometry: geometry, style: labelStyle, room: { ($0 - gap) / grow + 0.01 })
-            if !Self.anyOverlap(buttons, grown: grow, gap: Self.wordGap * s) { break }
+            geometry = rings(extra)
+            buttons = Self.buttons(labels, geometry: geometry, style: labelStyle)
+            let inside = buttons.allSatisfy {
+                Self.inside(Self.grown($0.frame, by: Self.minimumGrow), region: $0.role, geometry: geometry, margin: s)
+            }
+            if inside && !Self.anyOverlap(buttons, grown: grow, gap: Self.wordGap * s) { break }
             extra += 2 * s
         }
+        for k in buttons.indices { buttons[k].grow = Self.largestGrowth(buttons[k], upTo: grow, geometry: geometry, margin: s) }
 
         let small = (0..<min(count, 9)).map { Self.digit($0, geometry: geometry, scale: s) } + [Self.centre(scale: s)]
 
@@ -140,7 +157,7 @@ struct RadialLayout {
             names = wedges.indices.map { i in
                 Self.name(wedges[i], index: i, width: widths[i], icons: icons, geometry: geometry, style: nameStyle, scale: s)
             }
-            let others = buttons.map { Self.grown($0.frame, by: grow) } + small.map(\.frame)
+            let others = buttons.map { Self.grown($0.frame, by: $0.grow) } + small.map(\.frame)
             var crowded = Set<Int>()
             for (a, name) in names.enumerated() {
                 if others.contains(where: { $0.insetBy(dx: -Self.wordGap * s, dy: -Self.wordGap * s).intersects(name.frame) }) {
@@ -193,17 +210,28 @@ struct RadialLayout {
     }
 
     /// Each wedge's buttons; `room` is the width a label may take in a band of the given depth.
-    private static func buttons(_ wedges: [RadialMenu.Wedge], geometry g: RadialGeometry, style: TextFit.Style,
-                                room: (CGFloat) -> CGFloat) -> [Word] {
+    /// Each wedge's ring labels fitted to `room` for their band's depth in `g`, with the size
+    /// of their box.
+    private static func fitLabels(_ wedges: [RadialMenu.Wedge], geometry g: RadialGeometry, style: TextFit.Style,
+                                  room: (CGFloat) -> CGFloat) -> [(role: Word.Role, fit: TextFit, size: CGSize)] {
         wedges.indices.flatMap { i in
-            g.rings(of: i).map { ring -> Word in
+            g.rings(of: i).map { ring -> (role: Word.Role, fit: TextFit, size: CGSize) in
                 let band = g.band(ring, of: i)
-                let room = room(band.r1 - band.r0)
-                let fit = TextFit.fit(RadialMenu.ringLabel(ring, for: wedges[i].kind), style: style, width: room)
-                return Word(role: .button(i, ring), fit: fit, style: style,
-                            frame: box(fit, style: style, centredAt: point((band.r0 + band.r1) / 2, g.centerAngle(of: i))),
-                            align: 0.5, icons: 0)
+                let fit = TextFit.fit(RadialMenu.ringLabel(ring, for: wedges[i].kind), style: style, width: room(band.r1 - band.r0))
+                return (.button(i, ring), fit, box(fit, style: style, centredAt: .zero).size)
             }
+        }
+    }
+
+    /// The fitted labels as buttons, each in the middle of its region in `g`.
+    private static func buttons(_ labels: [(role: Word.Role, fit: TextFit, size: CGSize)], geometry g: RadialGeometry,
+                                style: TextFit.Style) -> [Word] {
+        labels.compactMap { label -> Word? in
+            guard case .button(let i, let ring) = label.role else { return nil }
+            let band = g.band(ring, of: i)
+            let p = point((band.r0 + band.r1) / 2, g.centerAngle(of: i))
+            let frame = CGRect(x: p.x - label.size.width / 2, y: p.y - label.size.height / 2, width: label.size.width, height: label.size.height)
+            return Word(role: label.role, fit: label.fit, style: style, frame: frame, align: 0.5, icons: 0)
         }
     }
 
@@ -251,6 +279,41 @@ struct RadialLayout {
 
     static func grown(_ frame: CGRect, by factor: CGFloat) -> CGRect {
         frame.insetBy(dx: -frame.width * (factor - 1) / 2, dy: -frame.height * (factor - 1) / 2)
+    }
+
+    /// The most `word` can grow, up to `limit`, and lie inside its region (`minimumGrow` at
+    /// least, where the rings made room for that).
+    private static func largestGrowth(_ word: Word, upTo limit: CGFloat, geometry g: RadialGeometry, margin: CGFloat) -> CGFloat {
+        func fits(_ factor: CGFloat) -> Bool { inside(grown(word.frame, by: factor), region: word.role, geometry: g, margin: margin) }
+        if fits(limit) { return limit }
+        var (low, high) = (CGFloat(1), limit)
+        for _ in 0..<12 {
+            let middle = (low + high) / 2
+            if fits(middle) { low = middle } else { high = middle }
+        }
+        return low
+    }
+
+    /// Whether `frame` lies inside the region of the button `role` names (its wedge's angle and
+    /// its ring's radii; a wedge's last ring has no outer edge), `margin` points clear of its edges.
+    static func inside(_ frame: CGRect, region role: Word.Role, geometry g: RadialGeometry, margin: CGFloat = 1) -> Bool {
+        guard case .button(let i, let ring) = role else { return true }
+        let band = g.band(ring, of: i)
+        let corners = [CGPoint(x: frame.minX, y: frame.minY), CGPoint(x: frame.maxX, y: frame.minY),
+                       CGPoint(x: frame.minX, y: frame.maxY), CGPoint(x: frame.maxX, y: frame.maxY)]
+        let nearest = hypot(max(frame.minX, 0, -frame.maxX), max(frame.minY, 0, -frame.maxY))
+        guard nearest >= band.r0 + margin else { return false }
+        if ring != g.lastRing(of: i), corners.contains(where: { RadialGeometry.radius(of: $0) > band.r1 - margin }) { return false }
+        // A wedge narrower than a half turn is convex, so its corners decide.
+        guard g.count > 1 else { return true }
+        let half = g.wedgeAngle / 2
+        return corners.allSatisfy { corner in
+            var off = RadialGeometry.angle(of: corner) - g.centerAngle(of: i)
+            off = off.truncatingRemainder(dividingBy: RadialGeometry.fullTurn)
+            if off > .pi { off -= RadialGeometry.fullTurn }
+            if off < -.pi { off += RadialGeometry.fullTurn }
+            return abs(off) <= half - Double(margin / max(1, RadialGeometry.radius(of: corner)))
+        }
     }
 
     /// Whether any of `words`, grown by `factor`, comes within `gap` of another at rest.
@@ -304,18 +367,24 @@ struct RadialField {
         }
 
         /// Full inside the shape, falling smoothly to 0 over `fade` outside it.
-        func blur(at p: CGPoint) -> CGFloat {
-            var d = hypot(p.x, p.y) - disc
-            for box in boxes { d = RadialField.smoothMin(d, RadialField.distance(p, to: box) - pad, smoothing) }
-            guard d < fade else { return 0 }
-            let t = max(0, d / fade)
-            return 1 - t * t * t * (t * (t * 6 - 15) + 10)
-        }
+        func blur(at p: CGPoint) -> CGFloat { profiles(at: p).blur }
 
         /// `blur`, weaker by up to `rim` toward the farthest word.
-        func tint(at p: CGPoint) -> CGFloat {
-            let u = min(1, hypot(p.x, p.y) / reach)
-            return blur(at: p) * (1 - RadialField.rim * u * u * (3 - 2 * u))
+        func tint(at p: CGPoint) -> CGFloat { profiles(at: p).tint }
+
+        /// Both profiles at `p`, the shape measured once.
+        func profiles(at p: CGPoint) -> (blur: CGFloat, tint: CGFloat) {
+            let r = hypot(p.x, p.y)
+            let u = min(1, r / reach)
+            let rim = 1 - RadialField.rim * u * u * (3 - 2 * u)
+            var d = r - disc
+            // Inside the disc the union only lies deeper: the blur is full there.
+            guard d > 0 else { return (1, rim) }
+            for box in boxes { d = RadialField.smoothMin(d, RadialField.distance(p, to: box) - pad, smoothing) }
+            guard d < fade else { return (0, 0) }
+            let t = max(0, d / fade)
+            let blur = 1 - t * t * t * (t * (t * 6 - 15) + 10)
+            return (blur, blur * rim)
         }
     }
 
@@ -327,7 +396,9 @@ struct RadialField {
     static let readable: CGFloat = 0.84
     /// How much weaker the tint's profile is at the farthest word than in the middle.
     static let rim: CGFloat = 0.14
-    static let pad: CGFloat = 26
+    /// How far past each word's box the blur stays full: a little past a lit word's glow
+    /// (`RadialWheelView.glowReach`).
+    nonisolated static let pad: CGFloat = RadialWheelView.glowReach + 12
     static let fade: CGFloat = 72
     static let smoothing: CGFloat = 120
     /// How far past the names' anchors the field's disc reaches.
@@ -340,7 +411,7 @@ struct RadialField {
     /// with its icons, the digits and the centre) and the hint's two-line zone.
     static func places(_ layout: RadialLayout) -> [CGRect] {
         layout.words.map { word in
-            if case .button = word.role { return RadialLayout.grown(word.frame, by: RadialWheelView.grow) }
+            if case .button = word.role { return RadialLayout.grown(word.frame, by: word.grow) }
             return word.frame
         } + [layout.hintZone]
     }
@@ -365,9 +436,11 @@ struct RadialField {
         let extent = shape.boxes.reduce(CGRect(x: -shape.disc, y: -shape.disc, width: 2 * shape.disc, height: 2 * shape.disc)) {
             $0.union($1.insetBy(dx: -shape.pad, dy: -shape.pad))
         }
-        let margin = shape.fade + shape.smoothing
+        // A smooth union reaches past its parts by a fraction of the smoothing; the images are
+        // cropped to where the field is not 0.
+        let margin = shape.fade + shape.smoothing / 2
         (support, blurImage, tintImage) = Self.images(over: extent.insetBy(dx: -margin, dy: -margin).integral,
-                                                      blur: shape.blur, tint: shape.tint)
+                                                      profiles: shape.profiles)
     }
 
     func blur(at p: CGPoint) -> CGFloat { shape.blur(at: p) }
@@ -386,10 +459,9 @@ struct RadialField {
     }
 
     /// The blur's and the tint's images (black, alpha the profile), one pixel per `step` points,
-    /// top row first, cropped from `room` to where `blur` is not 0 with two empty pixels around
-    /// it; and the rectangle they cover. `tint` is nowhere stronger than `blur`.
-    static func images(over room: CGRect, blur: (CGPoint) -> CGFloat,
-                       tint: (CGPoint) -> CGFloat) -> (CGRect, CGImage, CGImage) {
+    /// top row first, cropped from `room` to where the blur is not 0 with two empty pixels
+    /// around it; and the rectangle they cover. The tint is nowhere stronger than the blur.
+    static func images(over room: CGRect, profiles: (CGPoint) -> (blur: CGFloat, tint: CGFloat)) -> (CGRect, CGImage, CGImage) {
         let width = max(1, Int((room.width / step).rounded(.up)))
         let height = max(1, Int((room.height / step).rounded(.up)))
         var values = [(blur: CGFloat, tint: CGFloat)](repeating: (0, 0), count: width * height)
@@ -397,10 +469,9 @@ struct RadialField {
         for row in 0..<height {
             let y = room.maxY - (CGFloat(row) + 0.5) * step
             for column in 0..<width {
-                let p = CGPoint(x: room.minX + (CGFloat(column) + 0.5) * step, y: y)
-                let b = blur(p)
-                guard b > 0.5 / 255 else { continue }
-                values[row * width + column] = (b, tint(p))
+                let v = profiles(CGPoint(x: room.minX + (CGFloat(column) + 0.5) * step, y: y))
+                guard v.blur > 0.5 / 255 else { continue }
+                values[row * width + column] = v
                 (left, right, top, bottom) = (min(left, column), max(right, column), min(top, row), max(bottom, row))
             }
         }

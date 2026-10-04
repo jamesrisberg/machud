@@ -27,15 +27,40 @@ final class RadialLayoutTests: XCTestCase {
         return loadouts + tools
     }
 
-    private func everyLayout(_ body: (RadialLayout, String) -> Void) {
-        for count in Self.counts {
-            for (label, names) in [("short", Self.short), ("long", Self.long)] {
+    /// Every case, laid out once for all the tests: 3, 6, 8, 9 and 12 wedges with short and long
+    /// names, with and without the every-screen ring, at full size; and 3, 8 and 12 wedges
+    /// drawn at 0.79 (a wheel fitted to a smaller screen).
+    private static let cases: [(layout: RadialLayout, what: String)] = {
+        var out: [(RadialLayout, String)] = []
+        for count in counts {
+            for (label, names) in [("short", short), ("long", long)] {
                 for allScreens in [false, true] {
-                    body(RadialLayout(wedges: Self.wedges(count, names, allScreens: allScreens)),
-                         "\(count) wedges, \(label) names\(allScreens ? ", all screens" : "")")
+                    out.append((RadialLayout(wedges: wedges(count, names, allScreens: allScreens)),
+                                "\(count) wedges, \(label) names\(allScreens ? ", all screens" : "")"))
                 }
             }
         }
+        for count in [3, 8, 12] {
+            for (label, names) in [("short", short), ("long", long)] {
+                out.append((RadialLayout(wedges: wedges(count, names), scale: 0.79), "\(count) wedges, \(label) names, at 0.79"))
+            }
+        }
+        return out
+    }()
+
+    /// Each case's field, built once for all the tests that need it.
+    private static var fields: [String: RadialField] = [:]
+
+    private static func field(_ layout: RadialLayout, _ what: String, reduced: Bool) -> RadialField {
+        let key = "\(what)\(reduced ? ", reduced" : "")"
+        if let field = fields[key] { return field }
+        let field = RadialField(layout: layout, reduced: reduced)
+        fields[key] = field
+        return field
+    }
+
+    private func everyLayout(_ body: (RadialLayout, String) -> Void) {
+        for (layout, what) in Self.cases { body(layout, what) }
     }
 
     private static func distance(to rect: CGRect) -> CGFloat {
@@ -76,8 +101,22 @@ final class RadialLayoutTests: XCTestCase {
         }
     }
 
-    /// Each button's word sits in the middle of its region, so the word under the pointer is
-    /// the one that lights; a pointer over a name selects its wedge's last ring.
+    /// Points over `frame`, a quarter point inside its edges: corners, edges and within.
+    private static func over(_ frame: CGRect) -> [CGPoint] {
+        let inner = frame.insetBy(dx: 0.25, dy: 0.25)
+        var points: [CGPoint] = []
+        for u in 0...8 {
+            for v in 0...4 {
+                points.append(CGPoint(x: inner.minX + inner.width * CGFloat(u) / 8, y: inner.minY + inner.height * CGFloat(v) / 4))
+            }
+        }
+        return points
+    }
+
+    /// Each button's word sits in the middle of its region and lies wholly inside it, at rest
+    /// and grown under the pointer, so the word under the pointer is the one that lights,
+    /// wherever on the word the pointer is; a pointer anywhere over a name selects its wedge's
+    /// last ring.
     func testTheWordUnderThePointerIsTheOneThatLights() {
         everyLayout { layout, what in
             let g = layout.geometry
@@ -85,13 +124,21 @@ final class RadialLayoutTests: XCTestCase {
                 let middle = CGPoint(x: word.frame.midX, y: word.frame.midY)
                 switch word.role {
                 case .button(let i, let ring):
-                    XCTAssertEqual(g.selection(at: middle), .wedge(index: i, ring: ring), "\(what): \(word.role)")
                     let band = g.band(ring, of: i)
                     XCTAssertEqual(RadialGeometry.radius(of: middle), (band.r0 + band.r1) / 2, accuracy: 0.01, "\(what)")
+                    XCTAssertGreaterThanOrEqual(word.grow, RadialLayout.minimumGrow, "\(what): \(word.fit.lines)")
+                    XCTAssertLessThanOrEqual(word.grow, RadialWheelView.grow, "\(what): \(word.fit.lines)")
+                    for (state, frame) in [("resting", word.frame), ("grown", RadialLayout.grown(word.frame, by: word.grow))] {
+                        for p in Self.over(frame) where g.selection(at: p) != .wedge(index: i, ring: ring) {
+                            XCTFail("\(what): \(word.fit.lines) \(state) at \(p) selects \(g.selection(at: p))")
+                            break
+                        }
+                    }
                 case .name(let i):
-                    let anchor = CGPoint(x: g.nameRadius * CGFloat(sin(g.centerAngle(of: i))),
-                                         y: g.nameRadius * CGFloat(cos(g.centerAngle(of: i))))
-                    XCTAssertEqual(g.selection(at: anchor), .wedge(index: i, ring: g.lastRing(of: i)), "\(what): \(word.role)")
+                    for p in Self.over(word.frame) where g.selection(at: p) != .wedge(index: i, ring: g.lastRing(of: i)) {
+                        XCTFail("\(what): name \(word.fit.lines) at \(p) selects \(g.selection(at: p))")
+                        break
+                    }
                 case .centre:
                     XCTAssertEqual(g.selection(at: middle), .cancel)
                 case .digit:
@@ -125,7 +172,7 @@ final class RadialLayoutTests: XCTestCase {
             for button in layout.words {
                 guard case .button = button.role else { continue }
                 let f = button.frame
-                let grown = f.insetBy(dx: -f.width * (RadialWheelView.grow - 1) / 2, dy: -f.height * (RadialWheelView.grow - 1) / 2)
+                let grown = RadialLayout.grown(f, by: button.grow)
                 for other in layout.words where other.role != button.role {
                     XCTAssertFalse(grown.intersects(other.frame), "\(what): \(button.fit.lines) grown and \(other.fit.lines)")
                 }
@@ -221,7 +268,7 @@ final class RadialLayoutTests: XCTestCase {
     /// with its icons), the digits, the centre and the hint's two-line zone.
     private static func places(_ layout: RadialLayout) -> [(String, CGRect)] {
         layout.words.map { word -> (String, CGRect) in
-            if case .button = word.role { return ("\(word.role) grown", RadialLayout.grown(word.frame, by: RadialWheelView.grow)) }
+            if case .button = word.role { return ("\(word.role) grown", RadialLayout.grown(word.frame, by: word.grow)) }
             return ("\(word.role)", word.frame)
         } + [("hint", layout.hintZone)]
     }
@@ -237,7 +284,7 @@ final class RadialLayoutTests: XCTestCase {
     func testUnderEveryWordTheBlurIsFullAndTheTintReads() {
         everyLayout { layout, what in
             for reduced in [false, true] {
-                let field = RadialField(layout: layout, reduced: reduced)
+                let field = Self.field(layout, what, reduced: reduced)
                 for (role, frame) in Self.places(layout) {
                     for p in Self.samples(frame) {
                         XCTAssertGreaterThanOrEqual(field.blur(at: p), 1 - 1 / 255, "\(what)\(reduced ? ", reduced" : ""): \(role) blur")
@@ -254,7 +301,7 @@ final class RadialLayoutTests: XCTestCase {
     func testTheBlurImageIsFullOverEveryWord() {
         everyLayout { layout, what in
             for reduced in [false, true] {
-                let field = RadialField(layout: layout, reduced: reduced)
+                let field = Self.field(layout, what, reduced: reduced)
                 let image = field.blurImage
                 guard let data = image.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else { return XCTFail(what) }
                 let step = field.support.width / CGFloat(image.width)
@@ -279,26 +326,34 @@ final class RadialLayoutTests: XCTestCase {
     func testTheFieldFadesToNothingWithoutAnEdge() {
         everyLayout { layout, what in
             for reduced in [false, true] {
-                let field = RadialField(layout: layout, reduced: reduced)
-                for (profile, value) in [("blur", field.blur), ("tint", field.tint)] as [(String, (CGPoint) -> CGFloat)] {
-                    XCTAssertEqual(value(.zero), 1, accuracy: 0.001, "\(what) \(profile)")
-                    let s = field.support
-                    for x in stride(from: s.minX, through: s.maxX, by: 8) {
-                        XCTAssertEqual(value(CGPoint(x: x, y: s.minY)), 0, "\(what) \(profile)")
-                        XCTAssertEqual(value(CGPoint(x: x, y: s.maxY)), 0, "\(what) \(profile)")
-                    }
-                    for y in stride(from: s.minY, through: s.maxY, by: 8) {
-                        XCTAssertEqual(value(CGPoint(x: s.minX, y: y)), 0, "\(what) \(profile)")
-                        XCTAssertEqual(value(CGPoint(x: s.maxX, y: y)), 0, "\(what) \(profile)")
-                    }
-                    for degrees in stride(from: 0.0, to: 360, by: 15) {
-                        let a = degrees * .pi / 180
-                        var previous = value(.zero)
-                        for r in stride(from: 1.0, through: Double(max(s.width, s.height)), by: 1) {
-                            let next = value(CGPoint(x: r * sin(a), y: r * cos(a)))
-                            XCTAssertLessThan(abs(next - previous), 0.04, "\(what) \(profile): a step at \(Int(degrees))° r \(Int(r))")
-                            previous = next
+                let field = Self.field(layout, what, reduced: reduced)
+                let s = field.support
+                XCTAssertEqual(field.blur(at: .zero), 1, accuracy: 0.001, what)
+                XCTAssertEqual(field.tint(at: .zero), 1, accuracy: 0.001, what)
+                var edge: [CGPoint] = []
+                for x in stride(from: s.minX, through: s.maxX, by: 8) { edge += [CGPoint(x: x, y: s.minY), CGPoint(x: x, y: s.maxY)] }
+                for y in stride(from: s.minY, through: s.maxY, by: 8) { edge += [CGPoint(x: s.minX, y: y), CGPoint(x: s.maxX, y: y)] }
+                for p in edge where field.blur(at: p) != 0 || field.tint(at: p) != 0 {
+                    XCTFail("\(what): not 0 at the edge, \(p)")
+                    break
+                }
+                // Along each wedge's centre line and each boundary between wedges (where the
+                // names' lobes join), and every 30°, in 2 pt steps out from inside the rings,
+                // where both profiles leave the full middle, to past the field's edge.
+                let g = layout.geometry
+                let angles = (0..<g.count).flatMap { [g.centerAngle(of: $0), g.startAngle(of: $0)] }
+                    + stride(from: 0.0, to: 2 * .pi, by: .pi / 6).map { $0 }
+                let reach = Double(hypot(max(-s.minX, s.maxX), max(-s.minY, s.maxY)))
+                for a in angles {
+                    let start = Double(field.shape.disc) * 0.5
+                    var previous = field.shape.profiles(at: CGPoint(x: start * sin(a), y: start * cos(a)))
+                    for r in stride(from: start + 2, through: reach, by: 2) {
+                        let next = field.shape.profiles(at: CGPoint(x: r * sin(a), y: r * cos(a)))
+                        if abs(next.blur - previous.blur) >= 0.08 || abs(next.tint - previous.tint) >= 0.08 {
+                            XCTFail("\(what): a step at \(Int(a * 180 / .pi))° r \(Int(r))")
+                            break
                         }
+                        previous = next
                     }
                 }
             }
@@ -337,8 +392,15 @@ final class RadialLayoutTests: XCTestCase {
         }
     }
 
+    /// The blur is full a little past a lit word's glow, and the light under a hovered button
+    /// ends where the full blur around a lone word would: one reach decides all three.
+    func testTheGlowTheBlurAndTheLightAgree() {
+        XCTAssertGreaterThan(RadialField.pad, RadialWheelView.glowReach)
+        XCTAssertEqual(RadialWheelView.lightReach, RadialField.pad)
+    }
+
     /// Each image is its profile in black: the blur's alpha is the blur profile, the tint's the
-    /// tint profile, whose strength is the tint view's darkness (`RadialBackdrop.darkness(for:)`).
+    /// tint profile, whose strength is the tint view's darkness (`RadialField.darkness`).
     func testTheImagesAreTheProfiles() throws {
         let field = RadialField(layout: RadialLayout(wedges: Self.wedges(8, Self.long)), reduced: false)
         for (image, value) in [(field.blurImage, field.blur), (field.tintImage, field.tint)] as [(CGImage, (CGPoint) -> CGFloat)] {
@@ -364,12 +426,15 @@ final class RadialLayoutTests: XCTestCase {
         for visible in screens {
             for count in [3, 8, 12, 22] {
                 let wedges = Self.wedges(count, Self.long, allScreens: true)
+                // Where the pointer is moves the wheel, not its size: laid out once, placed for each.
+                let layout = RadialMenu.place(wedges: wedges, at: .zero, visibleFrame: visible).layout
+                let room = visible.insetBy(dx: RadialMenu.screenMargin, dy: RadialMenu.screenMargin)
+                XCTAssertLessThanOrEqual(layout.scale, 1)
                 for pointer in [CGPoint(x: visible.minX, y: visible.minY), CGPoint(x: visible.maxX, y: visible.maxY),
                                 CGPoint(x: visible.midX, y: visible.minY + 3), CGPoint(x: visible.midX, y: visible.midY)] {
-                    let placed = RadialMenu.place(wedges: wedges, at: pointer, visibleFrame: visible)
-                    let words = placed.layout.bounds.offsetBy(dx: placed.center.x, dy: placed.center.y)
+                    let center = RadialMenu.centre(of: layout, at: pointer, room: room)
+                    let words = layout.bounds.offsetBy(dx: center.x, dy: center.y)
                     XCTAssertTrue(visible.insetBy(dx: 1, dy: 1).contains(words), "\(count) wedges at \(pointer) in \(visible): \(words)")
-                    XCTAssertLessThanOrEqual(placed.layout.scale, 1)
                 }
             }
         }

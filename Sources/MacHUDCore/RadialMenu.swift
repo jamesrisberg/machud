@@ -248,18 +248,20 @@ final class RadialMenu {
         }
     }
 
-    /// `wedges` with the park wedge's targets read again by `parkTargets`, when wedge `index`
-    /// has just become highlighted (it was `previous`) and is the park wedge; nil when nothing
-    /// changes. The wheel is click-through, so a click under it can change the focused window
-    /// while it is open: this keeps the hint naming the window a release would park.
-    static func refreshed(_ wedges: [Wedge], highlighting index: Int, from previous: Int?,
-                          parkTargets: (() -> Wedge.ParkTargets)?) -> [Wedge]? {
-        guard index != previous, wedges.indices.contains(index), case .park(let old) = wedges[index].kind,
-              let parkTargets else { return nil }
-        let now = parkTargets()
-        guard now != old else { return nil }
+    /// Whether the park wedge's targets are asked for again: wedge `index` has just become
+    /// highlighted (it was `previous`) and is the park wedge. The wheel is click-through, so a
+    /// click under it can change the focused window while it is open; asking again keeps the
+    /// hint naming the window a release would park.
+    nonisolated static func asksForParkTargets(highlighting index: Int, from previous: Int?, in wedges: [Wedge]) -> Bool {
+        guard index != previous, wedges.indices.contains(index), case .park = wedges[index].kind else { return false }
+        return true
+    }
+
+    /// `wedges` with the park wedge at `index` given `targets`; nil when that changes nothing.
+    nonisolated static func refreshed(_ wedges: [Wedge], park index: Int, with targets: Wedge.ParkTargets) -> [Wedge]? {
+        guard wedges.indices.contains(index), case .park(let old) = wedges[index].kind, old != targets else { return nil }
         var out = wedges
-        out[index].kind = .park(now)
+        out[index].kind = .park(targets)
         return out
     }
 
@@ -269,8 +271,17 @@ final class RadialMenu {
     var shiftSelectsOuter = true
     /// Called whenever a visible wheel goes away, however it was dismissed.
     var onDismiss: (() -> Void)?
-    /// Reads the park wedge's targets now (`refreshed`).
-    var parkTargets: (() -> Wedge.ParkTargets)?
+    /// Reads the park wedge's targets and calls back with them on the main thread
+    /// (`asksForParkTargets`). It must not wait for the answer on the main thread: the
+    /// Accessibility calls behind it can take a hung app's timeout.
+    var readParkTargets: ((@escaping @MainActor @Sendable (Wedge.ParkTargets) -> Void) -> Void)?
+    /// Counts the wheel's openings: an answer about the park wedge from an earlier one is not used.
+    private var opening = 0
+    /// A read of the park wedge's targets has been asked for and not answered.
+    private var parkTargetsAsked = false
+    /// The park wedge was highlighted again while a read was out: that read's answer is older
+    /// than the highlight, so it is not used, and the wheel asks again as it lands.
+    private var parkTargetsStale = false
 
     private(set) var wedges: [Wedge] = []
     private(set) var layout = RadialLayout(wedges: [])
@@ -279,7 +290,7 @@ final class RadialMenu {
     var isVisible: Bool { window?.isVisible ?? false }
 
     private var window: NSWindow?
-    private let wheel = RadialWheelView()
+    let wheel = RadialWheelView()
     private let tint = RadialTintView(frame: .zero)
     private let backdrop = RadialBackdrop()
     private var monitors: [Any] = []
@@ -289,18 +300,45 @@ final class RadialMenu {
     private var transparencyObserver: NSObjectProtocol?
     /// The last field built: a wheel of the same shape opens with it.
     private var field: RadialField?
+    /// The last layout made: a wheel with the same words in the same room opens with it.
+    private var laidOut: (key: LayoutKey, layout: RadialLayout)?
+
+    /// What a layout is made from: each wedge's name, ring labels and icon count, and the room.
+    struct LayoutKey: Equatable {
+        var words: [[String]]
+        var icons: [Int]
+        var room: CGSize
+
+        init(_ wedges: [Wedge], room: CGSize) {
+            words = wedges.map { wedge in
+                [wedge.name] + Array(RadialGeometry.Ring.allCases.prefix(RadialMenu.ringCount(for: wedge.kind))).map {
+                    RadialMenu.ringLabel($0, for: wedge.kind)
+                }
+            }
+            icons = wedges.map { min($0.icons.count, RadialLayout.maxIcons) }
+            self.room = room
+        }
+    }
 
     /// The wheel's centre, in screen coordinates.
     private(set) var center: CGPoint = .zero
     private var screenFrame: CGRect = .zero
     private var pointerOffset: CGPoint = .zero   // relative to the wheel's centre
     private var keyboardIndex: Int?
-    /// The pointer has moved since the wheel opened: until it has, it is taken to be at the
-    /// centre, so nothing is lit and releasing cancels, wherever it really is.
+    /// The pointer has gone `pointerTravel` from where the first report after the wheel opened
+    /// found it: until it has, it is taken to be at the centre, so nothing is lit and releasing
+    /// cancels, wherever it really is. Counting from the first report rather than from the
+    /// centre covers a pointer that moving did not stick to (a hovering pen, a remotely driven
+    /// pointer), whose next report puts it back where it was.
     private var pointerHasMoved = false
+    /// Where the first pointer report after the wheel opened found it.
+    private var firstReport: CGPoint?
+    /// How far the pointer goes from its first report before the wheel follows it.
+    static let pointerTravel: CGFloat = 6
 
-    /// Moves the pointer to a point in display coordinates (y down from the primary display's
-    /// top), without a pause before it moves again. Tests record it instead.
+    /// Moves the pointer to a point in display coordinates, which are AX coordinates (y down
+    /// from the primary display's top), without a pause before it moves again. Tests record it
+    /// instead.
     var warpPointer: (CGPoint) -> Void = { point in
         CGWarpMouseCursorPosition(point)
         CGAssociateMouseAndMouseCursorPosition(1)
@@ -309,17 +347,12 @@ final class RadialMenu {
     var modifiers: () -> NSEvent.ModifierFlags = { NSEvent.modifierFlags }
 
     /// The screen a wheel opens on, in screen coordinates; `primaryHeight` is the height of the
-    /// primary display (the one at the origin), which turns screen points into display points.
+    /// primary display (the one at the origin), which turns screen points into display points
+    /// (`ScreenCoords.axPoint(fromCocoa:primaryHeight:)`).
     struct Display: Equatable {
         var frame: CGRect
         var visibleFrame: CGRect
         var primaryHeight: CGFloat
-    }
-
-    /// `point` in screen coordinates (y up from the primary display's bottom) as a display
-    /// point (y down from its top), which is what moving the pointer takes.
-    nonisolated static func displayPoint(_ point: CGPoint, primaryHeight: CGFloat) -> CGPoint {
-        CGPoint(x: point.x, y: primaryHeight - point.y)
     }
 
     // MARK: Lifecycle
@@ -327,7 +360,9 @@ final class RadialMenu {
     func show(wedges: [Wedge], at point: CGPoint? = nil) {
         guard !wedges.isEmpty else { return }
         let origin = point ?? NSEvent.mouseLocation
-        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(origin) }) ?? NSScreen.main else { return }
+        let screens = NSScreen.screens
+        guard let index = ScreenCoords.screenIndex(containing: origin, frames: screens.map(\.frame)) else { return }
+        let screen = screens[index]
         let display = Display(frame: screen.frame, visibleFrame: screen.visibleFrame,
                               primaryHeight: NSScreen.screens.first?.frame.maxY ?? screen.frame.maxY)
         // Opened at the pointer (the hotkey), the wheel moves the pointer to its centre when
@@ -349,18 +384,25 @@ final class RadialMenu {
     /// the wheel opens; it is not moved back. No window is shown and no event is watched.
     func prepare(wedges: [Wedge], at origin: CGPoint, on display: Display, movesPointer: Bool) {
         self.wedges = wedges
-        let placed = Self.place(wedges: wedges, at: origin, visibleFrame: display.visibleFrame)
-        layout = placed.layout
-        center = placed.center
+        let room = display.visibleFrame.insetBy(dx: Self.screenMargin, dy: Self.screenMargin)
+        let key = LayoutKey(wedges, room: room.size)
+        let layout = laidOut?.key == key ? laidOut!.layout : RadialLayout.fitting(wedges, in: room.size)
+        laidOut = (key, layout)
+        self.layout = layout
+        center = Self.centre(of: layout, at: origin, room: room)
         screenFrame = display.frame
         pointerOffset = .zero
         pointerHasMoved = false
+        firstReport = nil
+        opening += 1
+        parkTargetsAsked = false
+        parkTargetsStale = false
         keyboardIndex = nil
         selection = .cancel
         wheel.selection = .cancel
         applyField()
         if movesPointer, hypot(center.x - origin.x, center.y - origin.y) > 0.5 {
-            warpPointer(Self.displayPoint(center, primaryHeight: display.primaryHeight))
+            warpPointer(ScreenCoords.axPoint(fromCocoa: center, primaryHeight: display.primaryHeight))
         }
     }
 
@@ -471,10 +513,15 @@ final class RadialMenu {
     static func place(wedges: [Wedge], at pointer: CGPoint, visibleFrame: CGRect) -> (layout: RadialLayout, center: CGPoint) {
         let room = visibleFrame.insetBy(dx: screenMargin, dy: screenMargin)
         let layout = RadialLayout.fitting(wedges, in: room.size)
+        return (layout, centre(of: layout, at: pointer, room: room))
+    }
+
+    /// Where `layout`'s centre goes for a wheel opened at `pointer`: there, or moved in from
+    /// the edges of `room` so every word and the hint are inside it.
+    static func centre(of layout: RadialLayout, at pointer: CGPoint, room: CGRect) -> CGPoint {
         let b = layout.bounds
-        let x = min(max(pointer.x, room.minX - b.minX), room.maxX - b.maxX)
-        let y = min(max(pointer.y, room.minY - b.minY), room.maxY - b.maxY)
-        return (layout, CGPoint(x: x, y: y))
+        return CGPoint(x: min(max(pointer.x, room.minX - b.minX), room.maxX - b.maxX),
+                       y: min(max(pointer.y, room.minY - b.minY), room.maxY - b.maxY))
     }
 
     /// Shapes the backdrop and the wheel's view to the field, which follows Reduce transparency.
@@ -486,7 +533,7 @@ final class RadialMenu {
         let local = CGRect(x: center.x - screenFrame.minX - canvas.center.x, y: center.y - screenFrame.minY - canvas.center.y,
                            width: canvas.size.width, height: canvas.size.height)
         backdrop.view.frame = local
-        tint.darkness = RadialBackdrop.darkness(for: backdrop.show(field: field.blurImage))
+        backdrop.show(field: field.blurImage)
         tint.frame = local
         tint.image = field.tintImage
         wheel.frame = local
@@ -517,19 +564,46 @@ final class RadialMenu {
         wheel.selection = selection
     }
 
-    /// The park wedge reads its targets again as it becomes highlighted (`refreshed`).
+    /// The park wedge asks for its targets again as it becomes highlighted (`asksForParkTargets`).
     private func noteHighlight(from previous: Int?) {
-        guard let i = selection.index,
-              let fresh = Self.refreshed(wedges, highlighting: i, from: previous, parkTargets: parkTargets) else { return }
-        wedges = fresh
-        wheel.update(wedges: fresh)
+        guard let i = selection.index, Self.asksForParkTargets(highlighting: i, from: previous, in: wedges) else { return }
+        // One read out at a time: a highlight while one is out makes its answer too old to use.
+        if parkTargetsAsked { parkTargetsStale = true } else { askForParkTargets(i) }
+    }
+
+    /// Asks for the park wedge's targets; the answer replaces them while the park wedge (at
+    /// `index`) is still highlighted in the same opening, unless it was highlighted again
+    /// meanwhile, when the wheel asks again instead.
+    private func askForParkTargets(_ index: Int) {
+        guard let read = readParkTargets else { return }
+        parkTargetsAsked = true
+        let asked = opening
+        read { [weak self] targets in
+            guard let self, self.opening == asked else { return }
+            self.parkTargetsAsked = false
+            let highlighted = self.selection.index == index
+            if self.parkTargetsStale {
+                self.parkTargetsStale = false
+                if highlighted { self.askForParkTargets(index) }
+                return
+            }
+            // Only while the park wedge is still highlighted: its hint is the one that shows.
+            guard highlighted, let fresh = Self.refreshed(self.wedges, park: index, with: targets) else { return }
+            self.wedges = fresh
+            self.wheel.update(wedges: fresh)
+        }
     }
 
     /// A mouse-moved or dragged event: the pointer is at `location` (screen coordinates),
-    /// having moved by `delta`. An event that did not move it changes nothing until it has.
+    /// having moved by `delta`. Nothing changes until the pointer has gone `pointerTravel` from
+    /// where the first report found it.
     func pointerMoved(to location: CGPoint, delta: CGVector) {
-        guard pointerHasMoved || delta.dx != 0 || delta.dy != 0 else { return }
-        pointerHasMoved = true
+        if !pointerHasMoved {
+            guard delta.dx != 0 || delta.dy != 0 else { return }
+            guard let first = firstReport else { firstReport = location; return }
+            guard hypot(location.x - first.x, location.y - first.y) >= Self.pointerTravel else { return }
+            pointerHasMoved = true
+        }
         let o = CGPoint(x: location.x - center.x, y: location.y - center.y)
         if RadialGeometry.radius(of: o) >= geometry.deadZone { keyboardIndex = nil }
         pointerOffset = o
@@ -711,26 +785,14 @@ final class RadialMenu {
 
 /// What the wheel's tint and words sit on: HUDKit's soft backdrop (`HUDSoftBackdropView`), a
 /// blur of what is behind the window shown through the field, so its edge fades out instead of
-/// ending in a line. It draws no tint of its own: the wheel's tint is its own view
-/// (`RadialTintView`), as dark as `darkness(for:)` says for the way the backdrop draws. Nothing
-/// else in the wheel's window may be on the window server's blur (`HUDGlassView` with the window
-/// blur): that blur covers everything the window draws and would end in a line.
+/// ending in a line. With a field it always draws: the blur, or the system's material (opaque
+/// and dark with Reduce transparency on; AppKit's own translucent material where the blur
+/// cannot be made). It draws no tint of its own: the wheel's tint is its own view
+/// (`RadialTintView`), the same over either. Nothing else in the wheel's window may be on the
+/// window server's blur (`HUDGlassView` with the window blur): that blur covers everything the
+/// window draws and would end in a line.
 @MainActor
 final class RadialBackdrop {
-    /// The tint's darkness with no backdrop at all, the words over the sharp desktop.
-    nonisolated static let darknessWithoutBackdrop: CGFloat = 0.85
-
-    /// How dark the wheel's tint is where its profile is full, over a backdrop that draws by
-    /// `path`: `RadialField.darkness` over the blur, and over the system's material (opaque and
-    /// dark with Reduce transparency on; AppKit's own translucent material where the blur cannot
-    /// be made); `darknessWithoutBackdrop` with none, where sharp detail sits behind the words.
-    nonisolated static func darkness(for path: HUDSoftBackdropView.Path) -> CGFloat {
-        switch path {
-        case .blur, .systemMaterial: return RadialField.darkness
-        case .none: return darknessWithoutBackdrop
-        }
-    }
-
     let view: HUDSoftBackdropView
     private var shown: CGImage?
 
@@ -738,6 +800,8 @@ final class RadialBackdrop {
     init(view: HUDSoftBackdropView? = nil) {
         self.view = view ?? HUDSoftBackdropView(frame: .zero)
         self.view.tint = nil
+        // HUDKit's log lines about the backdrop name it by this.
+        self.view.identifier = NSUserInterfaceItemIdentifier("loadout wheel")
     }
 
     var path: HUDSoftBackdropView.Path { view.path }
@@ -759,18 +823,17 @@ final class RadialBackdrop {
 
 /// The wheel's tint: the field's tint profile (black, its alpha the profile) stretched over the
 /// canvas, composited by the GPU and drawn once per configuration, under the words. Its opacity
-/// is `darkness` times how far the wheel has faded in (`shown`).
+/// is `RadialField.darkness` times how far the wheel has faded in (`shown`).
 final class RadialTintView: NSView {
     var image: CGImage? { didSet { layer?.contents = image } }
-    var darkness = RadialField.darkness { didSet { alphaValue = darkness * shown } }
-    var shown: CGFloat = 1 { didSet { alphaValue = darkness * shown } }
+    var shown: CGFloat = 1 { didSet { alphaValue = RadialField.darkness * shown } }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
         layer?.contentsGravity = .resize
         layer?.magnificationFilter = .linear
-        alphaValue = darkness * shown
+        alphaValue = RadialField.darkness * shown
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
@@ -801,10 +864,19 @@ final class RadialWheelView: NSView {
         var role: RadialLayout.Word.Role
         var rest: Still
         var lit: Still?
+        /// How many times its size it grows lit (`RadialLayout.Word.grow`).
+        var grow: CGFloat = 1
     }
 
-    /// How much a button grows under the pointer, about its own centre.
+    /// The most a button grows under the pointer, about its own centre; each grows as far as
+    /// its region allows (`RadialLayout.Word.grow`).
     nonisolated static let grow: CGFloat = 1.3
+    /// How far a lit word's glow reaches past its box, at full size. The field's blur is full a
+    /// little further out (`RadialField.pad`).
+    nonisolated static let glowReach: CGFloat = 14
+    /// How far the light under a hovered button reaches past most of its box, at full size: as
+    /// far as the full blur around a lone word.
+    nonisolated static let lightReach: CGFloat = RadialField.pad
 
     /// Which buttons show while the pointer is not on their wedge.
     var restingButtons = RadialMenu.restingButtons { didSet { if restingButtons != oldValue { needsDisplay = true } } }
@@ -818,6 +890,12 @@ final class RadialWheelView: NSView {
     /// The words drawn, at `drawnScale` pixels per point (0: not yet).
     private var drawn: [Drawn] = []
     private var drawnScale: CGFloat = 0
+    private var drawnAppearance: NSAppearance.Name?
+    /// How many times the words have been drawn into their pictures (tests).
+    private(set) var wordRenders = 0
+    /// Each name's icons in a row, by wedge, drawn once per configuration (the icons are the
+    /// wedges', which a new configuration brings anew); nil until drawn.
+    private var iconRows: [Int: Still]?
     private var buttonIndex: [RadialLayout.Word.Role: Int] = [:]
     private var hint: (text: String, still: Still)?
 
@@ -840,11 +918,16 @@ final class RadialWheelView: NSView {
     }
 
     func configure(layout: RadialLayout, field: RadialField, wedges: [RadialMenu.Wedge]) {
+        // The words are drawn again only for a new layout: they depend on it, the backing scale
+        // and the appearance alone.
+        if layout != self.layout {
+            drawn = []
+            drawnScale = 0
+        }
         self.layout = layout
         self.wedges = wedges
         origin = field.canvas.center
-        drawn = []
-        drawnScale = 0
+        iconRows = nil
         hint = nil
         let roles = buttonRoles
         buttonIndex = Dictionary(uniqueKeysWithValues: roles.enumerated().map { ($1, $0) })
@@ -934,12 +1017,11 @@ final class RadialWheelView: NSView {
             switch word.role {
             case .button:
                 return Drawn(role: word.role, rest: Self.still(text, frame: word.frame, align: 0.5, scale: scale, size: s),
-                             lit: Self.still(text, frame: word.frame, align: 0.5, scale: scale, size: s, glow: true, grow: Self.grow))
-            case .name(let i):
-                let icons = wedges.indices.contains(i) ? Array(wedges[i].icons.prefix(word.icons)) : []
-                return Drawn(role: word.role,
-                             rest: Self.still(text, frame: word.frame, align: word.align, scale: scale, size: s, icons: icons),
-                             lit: Self.still(text, frame: word.frame, align: word.align, scale: scale, size: s, icons: icons, glow: true))
+                             lit: Self.still(text, frame: word.frame, align: 0.5, scale: scale, size: s, glow: true, grow: word.grow),
+                             grow: word.grow)
+            case .name:
+                return Drawn(role: word.role, rest: Self.still(text, frame: word.frame, align: word.align, scale: scale, size: s),
+                             lit: Self.still(text, frame: word.frame, align: word.align, scale: scale, size: s, glow: true))
             case .digit:
                 return Drawn(role: word.role, rest: Self.still(text, frame: word.frame, align: 0.5, scale: scale, size: s), lit: nil)
             case .centre:
@@ -949,16 +1031,30 @@ final class RadialWheelView: NSView {
             }
         }
         drawnScale = scale
+        drawnAppearance = effectiveAppearance.name
+        wordRenders += 1
+        iconRows = nil
         hint = nil
     }
 
-    /// `text` in white inside `frame` (its lines from the top, placed across by `align`; a
-    /// name's `icons` in a row under them), with a soft dark shadow and, when `glow`, a white
-    /// glow, `grow` times its size about its centre: rendered at `scale` pixels per point, the
-    /// shadows sized for wheel scale `size`.
-    private static func still(_ text: PreparedText, frame: CGRect, align: CGFloat, scale: CGFloat, size s: CGFloat,
+    /// Each name's icons in a row under its lines, with the words' soft dark shadow.
+    private func prepareIcons(scale: CGFloat) {
+        var rows: [Int: Still] = [:]
+        for word in layout.words {
+            guard case .name(let i) = word.role, word.icons > 0, wedges.indices.contains(i) else { continue }
+            rows[i] = Self.still(nil, frame: word.frame, align: word.align, scale: scale, size: layout.scale,
+                                 icons: Array(wedges[i].icons.prefix(word.icons)))
+        }
+        iconRows = rows
+    }
+
+    /// `text` in white inside `frame` (its lines from the top, placed across by `align`), or a
+    /// name's `icons` in a row at the frame's foot, with a soft dark shadow and, when `glow`, a
+    /// white glow, `grow` times its size about its centre: rendered at `scale` pixels per point,
+    /// the shadows sized for wheel scale `size`.
+    private static func still(_ text: PreparedText?, frame: CGRect, align: CGFloat, scale: CGFloat, size s: CGFloat,
                               icons: [NSImage] = [], glow: Bool = false, grow: CGFloat = 1) -> Still {
-        let margin = (glow ? 14 : 6) * s
+        let margin = (glow ? glowReach : 6) * s
         let grown = CGRect(x: frame.midX - frame.width * grow / 2, y: frame.midY - frame.height * grow / 2,
                            width: frame.width * grow, height: frame.height * grow)
         let rect = grown.insetBy(dx: -margin, dy: -margin).integral
@@ -977,9 +1073,11 @@ final class RadialWheelView: NSView {
         }
         // Shadows are in the bitmap's pixels, whatever the transform.
         let px = scale * grow
-        let textFrame = CGRect(x: frame.minX, y: frame.maxY - text.height, width: frame.width, height: text.height)
         func words() {
-            text.draw(in: textFrame, align: align, in: ctx)
+            if let text {
+                text.draw(in: CGRect(x: frame.minX, y: frame.maxY - text.height, width: frame.width, height: text.height),
+                          align: align, in: ctx)
+            }
             guard !icons.isEmpty else { return }
             let side = RadialLayout.iconSize * s, spacing = RadialLayout.iconSpacing * s
             let row = CGFloat(icons.count) * side + CGFloat(icons.count - 1) * spacing
@@ -1020,7 +1118,8 @@ final class RadialWheelView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext, !wedges.isEmpty else { return }
-        if drawnScale != backingScale { prepare(scale: backingScale) }
+        if drawnScale != backingScale || drawnAppearance != effectiveAppearance.name { prepare(scale: backingScale) }
+        if iconRows == nil { prepareIcons(scale: backingScale) }
         let shown = self.shown
         ctx.saveGState()
         ctx.translateBy(x: origin.x, y: origin.y)
@@ -1037,10 +1136,17 @@ final class RadialWheelView: NSView {
                 let h = value(highlight, i)
                 let resting: CGFloat = restingButtons == .faint ? 0.45 - 0.13 * recede(i) : 0
                 let base = resting + (0.88 - resting) * h
-                draw(word, alpha: (base + (1 - base) * l) * shown, lit: l, grow: 1 + (Self.grow - 1) * l, in: ctx)
+                draw(word, alpha: (base + (1 - base) * l) * shown, lit: l, grow: 1 + (word.grow - 1) * l, in: ctx)
             case .name(let i):
                 let h = value(highlight, i)
-                draw(word, alpha: (0.88 + 0.12 * h - 0.3 * recede(i)) * shown, lit: h, in: ctx)
+                let alpha = (0.88 + 0.12 * h - 0.3 * recede(i)) * shown
+                draw(word, alpha: alpha, lit: h, in: ctx)
+                if let row = iconRows?[i], alpha > 0.004 {
+                    ctx.saveGState()
+                    ctx.setAlpha(min(1, alpha + 0.1 * shown))
+                    ctx.draw(row.image, in: row.rect)
+                    ctx.restoreGState()
+                }
             case .digit(let i):
                 let h = value(highlight, i)
                 draw(word, alpha: (0.32 + 0.4 * h - 0.12 * recede(i)) * shown, lit: 0, in: ctx)
@@ -1079,7 +1185,7 @@ final class RadialWheelView: NSView {
         for (role, k) in buttonIndex {
             let l = value(lit, k) * shown
             guard l > 0.01, let frame = layout.word(role)?.frame else { continue }
-            let radius = max(frame.width, frame.height) * 0.8 + 26 * layout.scale
+            let radius = max(frame.width, frame.height) * 0.8 + Self.lightReach * layout.scale
             let colors = [NSColor.white.withAlphaComponent(0.13 * l).cgColor, NSColor.white.withAlphaComponent(0.05 * l).cgColor,
                           NSColor.white.withAlphaComponent(0).cgColor] as CFArray
             guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 0.45, 1]) else { continue }

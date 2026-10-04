@@ -234,8 +234,8 @@ once and needs no relaunch. It turns on:
   bound to a desktop (`"space": N`), with `whenScreenMissing` for a display that is not
   attached (see docs/API.md).
 - Capturing every screen: the menu item reads **Capture Windows as Loadout…** and takes every
-  display when more than one has windows, the wheel's capture wedge gains **Capture all
-  screens as a loadout**, and `machud capture name=Studio screens=all` does the same. Walking
+  display when more than one has windows, the wheel's capture wedge gains an **All screens**
+  button, and `machud capture name=Studio screens=all` does the same. Walking
   desktops while capturing: the capture sheet's "Also walk desktops 1…N" box and
   `desktops=1,2`. Filling one layout per display: `screens=<layout>@<display>,…`.
 - Slots bound to a desktop: apply switches to that desktop, places the slot's window there and
@@ -262,7 +262,7 @@ the windows on every desktop of every display.
 ### Layouts and the visual editor
 
 Menu bar → Loadouts → a loadout → **Edit Layout…** (its regions, with its occupants),
-**Draw a New Layout…** for an empty canvas (also the wheel's Capture wedge, outer ring),
+**Draw a New Layout…** for an empty canvas (also the wheel's Capture wedge, last ring),
 or Snap Layout → **Edit Snap Layout…**. With no layout yet, a Shift-drag offers
 the editor in a toast. The screen dims and shows a fine snap grid
 (96 × 54 by default; pick 24 × 12 up to 192 × 108 from the panel).

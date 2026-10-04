@@ -24,6 +24,11 @@ enum ScreenCoords {
     static var primaryHeight: CGFloat { NSScreen.screens.first?.frame.height ?? 0 }
 
     static func axPoint(fromCocoa p: CGPoint) -> CGPoint {
+        axPoint(fromCocoa: p, primaryHeight: primaryHeight)
+    }
+
+    /// `p` as an AX point, given the primary display's height (tests give their own).
+    static func axPoint(fromCocoa p: CGPoint, primaryHeight: CGFloat) -> CGPoint {
         CGPoint(x: p.x, y: primaryHeight - p.y)
     }
 
@@ -31,8 +36,24 @@ enum ScreenCoords {
         CGRect(x: r.minX, y: primaryHeight - r.maxY, width: r.width, height: r.height)
     }
 
+    /// The screen the pointer at `p` is on (`screenIndex(containing:frames:)`).
     static func screen(containing p: CGPoint) -> NSScreen? {
-        NSScreen.screens.first { $0.frame.contains(p) } ?? NSScreen.main
+        let screens = NSScreen.screens
+        return screenIndex(containing: p, frames: screens.map(\.frame)).map { screens[$0] }
+    }
+
+    /// Which of the screens with these `frames` the pointer at `point` is on. A screen holds
+    /// its left and top edges and not its right and bottom ones (`NSMouseInRect`), as the
+    /// pointer reports them: pinned at the top of a screen it is at that screen's top edge,
+    /// which is the bottom edge of a screen above. A point on no screen (on an edge a screen
+    /// leaves out, or as a display goes away) goes to the nearest screen, which is the one the
+    /// pointer is at; nil only when there are no screens.
+    nonisolated static func screenIndex(containing point: CGPoint, frames: [CGRect]) -> Int? {
+        if let index = frames.firstIndex(where: { NSMouseInRect(point, $0, false) }) { return index }
+        func distance(_ r: CGRect) -> CGFloat {
+            hypot(max(r.minX - point.x, 0, point.x - r.maxX), max(r.minY - point.y, 0, point.y - r.maxY))
+        }
+        return frames.indices.min { distance(frames[$0]) < distance(frames[$1]) }
     }
 }
 
@@ -177,8 +198,16 @@ extension AXUIElement {
     }
 
     func elementAttribute(_ name: String) -> AXUIElement? {
-        guard let raw = rawAttribute(name), CFGetTypeID(raw) == AXUIElementGetTypeID() else { return nil }
-        return (raw as! AXUIElement)
+        elementAttributeAnswer(name).element
+    }
+
+    /// The element attribute `name`, and what the call answered (`.cannotComplete` when the
+    /// app did not answer within the messaging timeout).
+    func elementAttributeAnswer(_ name: String) -> (element: AXUIElement?, error: AXError) {
+        var value: CFTypeRef?
+        let error = AXUIElementCopyAttributeValue(self, name as CFString, &value)
+        guard error == .success, let raw = value, CFGetTypeID(raw) == AXUIElementGetTypeID() else { return (nil, error) }
+        return ((raw as! AXUIElement), error)
     }
 
     func value<T>(_ name: String, _ type: AXValueType) -> T? {
@@ -204,9 +233,14 @@ extension AXUIElement {
     }
 
     func isSettable(_ name: String) -> Bool {
+        settableAnswer(name).settable
+    }
+
+    /// Whether attribute `name` can be set, and what the call answered.
+    func settableAnswer(_ name: String) -> (settable: Bool, error: AXError) {
         var settable = DarwinBoolean(false)
-        guard AXUIElementIsAttributeSettable(self, name as CFString, &settable) == .success else { return false }
-        return settable.boolValue
+        let error = AXUIElementIsAttributeSettable(self, name as CFString, &settable)
+        return (error == .success && settable.boolValue, error)
     }
 
     func set(_ name: String, size: CGSize) {
