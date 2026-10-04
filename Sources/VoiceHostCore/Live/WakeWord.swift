@@ -173,14 +173,24 @@ final class MicrophoneWakeSource: WakeSourceFailing {
     var onFailure: ((String) -> Void)?
     private var engine: AVAudioEngine?
     private var configurationObserver: NSObjectProtocol?
+    /// Counts starts and stops. The listener keeps this source and starts it again after a stop,
+    /// so a start can still be waiting for the microphone permission when a stop and a newer start
+    /// come: only the latest call may open the engine, and never a second one.
+    private var calls = 0
 
     func start() async throws {
+        calls += 1
+        let call = calls
+        let allowed = await Self.microphoneAllowed()
+        // Stopped, or started again, while the permission was asked: the later call decides.
+        guard call == calls else { return }
         // Without access the input delivers silence, and the wake word would never hear a thing.
-        guard await Self.microphoneAllowed() else { throw MicrophoneDenied() }
+        guard allowed else { throw MicrophoneDenied() }
         try startEngine()
     }
 
     func stop() {
+        calls += 1
         if let configurationObserver { NotificationCenter.default.removeObserver(configurationObserver) }
         configurationObserver = nil
         guard let engine else { return }
@@ -198,6 +208,9 @@ final class MicrophoneWakeSource: WakeSourceFailing {
     }
 
     private func startEngine() throws {
+        // One engine at a time: a second would keep the microphone open after `stop` and deliver
+        // every sample twice.
+        guard engine == nil else { return }
         let engine = AVAudioEngine()
         let input = engine.inputNode
         let inputFormat = input.outputFormat(forBus: 0)
