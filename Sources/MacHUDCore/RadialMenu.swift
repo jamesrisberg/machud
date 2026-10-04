@@ -655,6 +655,47 @@ final class RadialMenu {
         }
     }
 
+    // MARK: Snapshots
+
+    /// The wheel showing `wedges` with `selection` highlighted, at rest, drawn offscreen at 2x
+    /// over `backdrop` with the glass's shape darkened in place of the glass (which does not
+    /// render offscreen). No window is made.
+    static func snapshot(wedges: [Wedge], selection: RadialGeometry.Selection, backdrop: NSColor? = nil) -> NSBitmapImageRep? {
+        let backdrop = backdrop ?? NSColor(calibratedRed: 0.30, green: 0.34, blue: 0.40, alpha: 1)
+        let geometry = RadialGeometry(count: wedges.count, ringCounts: wedges.map { ringCount(for: $0.kind) })
+        let canvas = canvas(for: geometry)
+        let view = RadialWheelView(frame: CGRect(origin: .zero, size: canvas.size))
+        view.configure(geometry: geometry, wedges: wedges)
+        view.settle(selection: selection)
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(canvas.size.width * 2),
+                                         pixelsHigh: Int(canvas.size.height * 2), bitsPerSample: 8, samplesPerPixel: 4,
+                                         hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                                         bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
+        rep.size = canvas.size
+        guard let context = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current = context
+        NSAppearance(named: .darkAqua)?.performAsCurrentDrawingAppearance {
+            backdrop.setFill()
+            CGRect(origin: .zero, size: canvas.size).fill()
+            NSColor.black.withAlphaComponent(0.35).setFill()
+            for path in glassShape(center: canvas.center, geometry: geometry) { path.fill() }
+            view.draw(view.bounds)
+        }
+        context.flushGraphics()
+        return rep
+    }
+
+    static func writeSnapshot(wedges: [Wedge], selection: RadialGeometry.Selection, backdrop: NSColor? = nil,
+                              to url: URL) throws {
+        guard let data = snapshot(wedges: wedges, selection: selection, backdrop: backdrop)?
+            .representation(using: .png, properties: [:]) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        try data.write(to: url)
+    }
+
     // MARK: Icons
 
     static func icon(for occupant: Occupant, panels: PanelRegistry?) -> NSImage? {
@@ -718,6 +759,14 @@ final class RadialWheelView: NSView {
         highlight = (0..<count).map { _ in Spring(0) }
         appear = Spring(0)
         appear.target = 1
+        needsDisplay = true
+    }
+
+    /// At rest with `selection` highlighted, as if the springs had settled (snapshots).
+    func settle(selection: RadialGeometry.Selection) {
+        self.selection = selection
+        highlight = wedges.indices.map { Spring(selection.index == $0 ? 1 : 0) }
+        appear = Spring(1)
         needsDisplay = true
     }
 
