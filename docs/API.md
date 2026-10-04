@@ -1175,7 +1175,8 @@ the real siblings' icons. Its `diagnose` snapshots go to a `diagnostics` folder 
 beside the socket), not to `~/Library/Logs/MacHUD`.
 Its voice host listens on `$MACHUD_VOICE_SOCKET`, else `<MACHUD_SOCKET>-voice.sock` (else
 `machud-voice.sock` beside `MACHUD_CONFIG`), never the real one's, and inherits the isolation
-variables. MacHUD also starts it with `MACHUD_VOICE_NO_MIC=1`, `MACHUD_VOICE_NO_BRAIN=1`,
+variables; with only `MACHUD_SOCKET` it is given `MACHUD_CONFIG` set to the derived config, so its
+`voice.json` is beside that. MacHUD also starts it with `MACHUD_VOICE_NO_MIC=1`, `MACHUD_VOICE_NO_BRAIN=1`,
 `MACHUD_VOICE_HEADLESS=1` and `MACHUD_VOICE_NO_SPEECH=1` (no microphone, no brain, no orb, no
 sound), `MACHUD_VOICE_MODELS_DIR=<voice socket without its extension>-models` (never the real
 models folder) and `MACHUD_VOICE_HISTORY_DIR=<voice socket without its extension>-history`

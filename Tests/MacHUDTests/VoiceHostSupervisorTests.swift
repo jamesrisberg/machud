@@ -109,6 +109,23 @@ final class VoiceHostSupervisorTests: XCTestCase {
                        VoiceHostSupervisor.isolatedConversationFile(socketPath: env["MACHUD_VOICE_SOCKET"]!))
     }
 
+    func testAnInstanceWithOnlyASocketGivesItsHostTheConfigBesideTheSocket() {
+        // Without it the host would read and write the live ~/.config/machud/voice.json.
+        makeSupervisor(environment: ["PATH": "/usr/bin", "MACHUD_SOCKET": "/tmp/machud-try.sock"], isolated: true).start()
+        XCTAssertEqual(launcher.launches[0].environment["MACHUD_CONFIG"], "/tmp/machud-try-config/layouts.json")
+    }
+
+    func testAConfigAnInstanceNamesIsPassedToItsHostUnchanged() {
+        makeSupervisor(environment: ["PATH": "/usr/bin", "MACHUD_SOCKET": "/tmp/machud-try.sock",
+                                     "MACHUD_CONFIG": "/tmp/c/layouts.json"], isolated: true).start()
+        XCTAssertEqual(launcher.launches[0].environment["MACHUD_CONFIG"], "/tmp/c/layouts.json")
+    }
+
+    func testTheRealInstanceAddsNoConfigForItsHost() {
+        makeSupervisor().start()
+        XCTAssertNil(launcher.launches[0].environment["MACHUD_CONFIG"], "the host defaults to ~/.config/machud")
+    }
+
     func testAnIsolatedInstanceCanOptIntoALiveHost() {
         makeSupervisor(environment: ["MACHUD_VOICE_LIVE": "1", "MACHUD_VOICE_KEYCHAIN_SERVICE": "my.test"], isolated: true).start()
         let env = launcher.launches[0].environment

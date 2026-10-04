@@ -489,7 +489,9 @@ MACHUD_SOCKET=/tmp/machud-try.sock scripts/machud quit
 | `MACHUD_VOICE_PARENT_PIPE` | Set by MacHUD for the voice host: it exits when MacHUD's end of its stdin closes |
 
 The voice host inherits MacHUD's environment, so `MACHUD_CONFIG`, `MACHUD_NO_HOTKEYS` and the
-`MACHUD_VOICE_*` switches reach it. An isolated copy sets `MACHUD_VOICE_NO_MIC`, `NO_BRAIN`,
+`MACHUD_VOICE_*` switches reach it. With only `MACHUD_SOCKET` an isolated copy gives its host
+`MACHUD_CONFIG` set to the config it uses itself (`<socket path without extension>-config/layouts.json`), so
+the host's `voice.json` sits beside it and never in `~/.config/machud`. An isolated copy sets `MACHUD_VOICE_NO_MIC`, `NO_BRAIN`,
 `HEADLESS` and `NO_SPEECH` to `1` for it and models and history folders beside its voice socket (unless
 `MACHUD_VOICE_LIVE=1`), a conversation file beside its voice socket (always), and a Keychain service of its own
 (`com.jrisberg.machud.voice.isolated`, unless `MACHUD_VOICE_KEYCHAIN_SERVICE` is set).

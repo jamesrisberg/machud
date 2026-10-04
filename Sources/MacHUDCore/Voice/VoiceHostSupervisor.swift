@@ -138,13 +138,17 @@ final class VoiceHostSupervisor {
     /// The environment the helper runs with. A host started by an isolated MacHUD never touches
     /// what the real one owns: it runs with no microphone, no brain, no orb on screen, no sound
     /// and its own models and history folders unless `MACHUD_VOICE_LIVE=1`, keeps the conversation
-    /// beside its socket even then, and keeps secrets under its own Keychain service unless
-    /// `MACHUD_VOICE_KEYCHAIN_SERVICE` names one.
+    /// beside its socket even then, keeps secrets under its own Keychain service unless
+    /// `MACHUD_VOICE_KEYCHAIN_SERVICE` names one, and reads and writes `voice.json` beside the
+    /// config MacHUD itself uses (`Env.configURL`: with only a socket, the folder beside it).
     func childEnvironment() -> [String: String] {
         var env = environment
         env["MACHUD_VOICE_PARENT_PIPE"] = "1"
         env["MACHUD_VOICE_SOCKET"] = socketPath
         if isolated {
+            if env["MACHUD_CONFIG"] == nil, let config = Env.configURL(in: environment) {
+                env["MACHUD_CONFIG"] = config.path
+            }
             if env["MACHUD_VOICE_LIVE"] != "1" {
                 for key in ["MACHUD_VOICE_NO_MIC", "MACHUD_VOICE_NO_BRAIN", "MACHUD_VOICE_HEADLESS", "MACHUD_VOICE_NO_SPEECH"] {
                     env[key] = "1"
