@@ -214,8 +214,9 @@ final class LoadoutPreview {
         return glass
     }
 
-    private static func glassPanel(around stack: NSStackView) -> HUDGlassView {
-        let glass = HUDGlassView(style: .panel)
+    static func glassPanel(around stack: NSStackView) -> HUDGlassView {
+        // The preview's window is a screen-sized dim: its panels use the classic material.
+        let glass = HUDGlassView(style: .overlayPanel)
         glass.appearance = NSAppearance(named: .darkAqua)
         // A dark tint under the text keeps it legible over any backdrop.
         let tint = NSView()

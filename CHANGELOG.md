@@ -45,6 +45,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - The capture sheet's "Include the tool dock and the apps' panels (the HUD)" box starts unticked.
 - The Loadouts settings tab draws a one-screen loadout on one screen, without naming a display,
   since it goes on whichever screen you apply it to.
+- The layout editor's and the loadout preview's floating panels use the classic frosted material,
+  so the desktop behind their dimmed screen stays sharp.
 
 ### Fixed
 - With multi-desktop loadouts on, the wheel says how many desktops a captured multi-desktop
