@@ -1,8 +1,9 @@
 import AppKit
 
-/// A brief, non-interactive HUD pill (jelly glass) near the top of a screen.
-/// Used to report what an apply or capture did, since those run from hotkeys
-/// with no window of their own.
+/// A brief, non-interactive pill near the top of a screen, hand-drawn rather than glass: a
+/// near-opaque dark fill (alpha 0.9) with a faint highlight on its upper half and a hairline
+/// outline. Used to report what an apply or capture did, since those run from hotkeys with no
+/// window of their own.
 @MainActor
 enum Toast {
     private static var window: NSWindow?
