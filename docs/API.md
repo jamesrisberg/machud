@@ -1149,7 +1149,7 @@ own are named only when a window has no identifier.
   the run loop turns, so a mismatch is read again about 0.3 s later and reported only if it still holds (the
   reply takes that long only then);
 - a family window on some desktops of its display but not the one showing: when it is on two or more of them
-  (an all-desktops window missing the showing one), or, above layer 0 and on a single desktop, when it is
+  (an all-desktops window missing the showing one), or, not at layer 0 and on a single desktop, when it is
   meant to be seen: a MacHUD window AppKit calls visible, a hover panel its app reports shown and not parked
   (the app's panel state MacHUD holds), or a desktop-level window of an app with a widget placed. A dormant
   panel, ordered out and merely remembering the desktop it was last shown on, is not an anomaly. Not
