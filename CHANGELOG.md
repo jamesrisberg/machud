@@ -130,6 +130,9 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   agent, about 80 ms later.
 
 ### Fixed
+- With the pointer at the very top of a screen (just after using the menu bar), capturing a
+  loadout, applying one, its preview, the layout editor, notices and snapping a dragged window
+  use that screen, rather than the one above it or the screen of the frontmost window.
 - Park on the loadout wheel says when the front app did not answer ("Safari did not answer")
   instead of saying it has no window to park.
 - After a wake word that starts nothing (the agent busy or the brain off), the rest of the sound
