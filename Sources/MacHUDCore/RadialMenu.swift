@@ -316,6 +316,18 @@ final class RadialMenu {
         var primaryHeight: CGFloat
     }
 
+    /// Which of the screens with these `frames` the pointer at `point` is on. A screen holds
+    /// its left and top edges and not its right and bottom ones (`NSMouseInRect`), as the pointer
+    /// reports them: pinned at the top of a screen it is at that screen's top edge, which is the
+    /// bottom edge of a screen above. A point on no screen goes to the nearest one.
+    nonisolated static func screenIndex(containing point: CGPoint, frames: [CGRect]) -> Int? {
+        if let index = frames.firstIndex(where: { NSMouseInRect(point, $0, false) }) { return index }
+        func distance(_ r: CGRect) -> CGFloat {
+            hypot(max(r.minX - point.x, 0, point.x - r.maxX), max(r.minY - point.y, 0, point.y - r.maxY))
+        }
+        return frames.indices.min { distance(frames[$0]) < distance(frames[$1]) }
+    }
+
     /// `point` in screen coordinates (y up from the primary display's bottom) as a display
     /// point (y down from its top), which is what moving the pointer takes.
     nonisolated static func displayPoint(_ point: CGPoint, primaryHeight: CGFloat) -> CGPoint {
@@ -327,7 +339,9 @@ final class RadialMenu {
     func show(wedges: [Wedge], at point: CGPoint? = nil) {
         guard !wedges.isEmpty else { return }
         let origin = point ?? NSEvent.mouseLocation
-        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(origin) }) ?? NSScreen.main else { return }
+        let screens = NSScreen.screens
+        guard let index = Self.screenIndex(containing: origin, frames: screens.map(\.frame)) else { return }
+        let screen = screens[index]
         let display = Display(frame: screen.frame, visibleFrame: screen.visibleFrame,
                               primaryHeight: NSScreen.screens.first?.frame.maxY ?? screen.frame.maxY)
         // Opened at the pointer (the hotkey), the wheel moves the pointer to its centre when
