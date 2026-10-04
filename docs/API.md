@@ -913,8 +913,8 @@ confirmed and says why in its journal line and in `wakeProblem`: no speech model
 speech model to confirm the wake phrase.`), one still loading after launch (it is loaded for the
 next wake), a transcription that failed, a take still being transcribed at the end of the 1.5 s
 (`The speech model was still transcribing the last take, so the wake phrase could not be
-confirmed.`), or no answer within 1.5 s. The audio is used for this
-and let go: it is never kept, written, logged or sent, and neither are the words. With
+confirmed.`), or no answer within 1.5 s. The audio is held in memory
+until the answer and let go: it is never written, logged or sent, and neither are the words. With
 `voice.wakeConfirm` false the detection alone starts the take. `voice.wakeConfirm` is the voice
 host's own key, kept inside `voice` beside VoiceKit's.
 
@@ -968,11 +968,11 @@ muted (the socket's `ask` and `dictate`), the brain off or unable to take a turn
 working, a take already recording, or the dictation refusing to start. So is each wake detection
 that starts no take, with its score. A detection that arrives when no listener is wanted (voice
 off, muted, the wake word off, a take recording), that was on its way from a listener stopped or
-replaced since (`From a wake listener stopped or replaced since`), that is not of the phrase
-listened for (`Not the wake phrase listened for`) or that comes while another is being confirmed
-(`Another wake is being confirmed`) is refused before anything else: it writes its line and its
-log line and changes nothing, not the reply being spoken, the orb or the listener. So is a wake
-whose phrase is not confirmed (above). A wake whose listener stops or is replaced while it is
+replaced since (`From a wake listener stopped or replaced since`) or that is not of the phrase
+listened for (`Not the wake phrase listened for`) is refused before anything else: it writes its
+line and its log line and changes nothing, not the reply being spoken, the orb or the listener.
+One that comes while another is being confirmed (`Another wake is being confirmed`) is refused
+the same way, and the listener is re-armed. So is a wake whose phrase is not confirmed (above). A wake whose listener stops or is replaced while it is
 being confirmed (a take started meanwhile, a mute, new settings) is refused at that moment, with
 that reason and no answer, so the listener started again hears the next one. A confirmed wake from the
 listener running now is refused as any other take start is: the brain off or unable to take a
