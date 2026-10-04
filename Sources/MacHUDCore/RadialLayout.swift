@@ -265,16 +265,19 @@ struct RadialLayout {
 
 // MARK: - The field
 
-/// The one soft region the wheel's words sit on: strongest in the middle, fading to nothing
-/// with no edge, reaching under every word and the hint. A pure function from the layout to an
-/// alpha in 0...1, used as the field the backdrop's blur shows through (`maskImage`), as the
-/// profile of the tint the wheel draws (`tintImage`), and by the snapshots as the mask through
-/// which the blurred desktop shows.
+/// The one soft region the wheel's words sit on, fading to nothing with no edge, as two
+/// profiles over the same shape. Pure functions from the layout to an alpha in 0...1:
+/// - `blur`: what the backdrop's blur shows through (`blurImage`). It is full wherever a word can
+///   be, so no sharp desktop shows through there (an alpha is a cross-fade between the blurred
+///   desktop and the sharp one), and fades only outside that.
+/// - `tint`: the profile of the tint the wheel draws (`tintImage`): the same, a little weaker
+///   toward the rim (`rim`), so the middle is darkest. Its strength is the tint view's darkness.
+/// The snapshots show the blurred desktop through `blur` and the tint through `tint`.
 ///
-/// It is a disc a little past the names' anchors united with a rounded box around each word
-/// that reaches outside it (the names, the hint's zone), joined smoothly, full inside and
-/// fading over `fade` outside; the middle is a little stronger than the rim. With Reduce
-/// transparency on it is a plain soft disc around every word.
+/// The shape is a disc a little past the names' anchors united with a rounded box around each
+/// place a word can be that reaches outside it (a name with its icons, a button grown under the
+/// pointer, the hint's two-line zone), joined smoothly, full inside and fading over `fade`
+/// outside. With Reduce transparency on it is a plain soft disc around every word.
 struct RadialField {
     /// What the field is made from: two layouts with the same shape have the same field.
     struct Shape: Equatable {
@@ -291,7 +294,7 @@ struct RadialField {
             pad = RadialField.pad * s
             fade = RadialField.fade * s
             smoothing = RadialField.smoothing * s
-            let frames = layout.words.map(\.frame) + [layout.hintZone]
+            let frames = RadialField.places(layout)
             let farthest = { (r: CGRect) in hypot(max(abs(r.minX), abs(r.maxX)), max(abs(r.minY), abs(r.maxY))) }
             reach = max(1, frames.map(farthest).max() ?? 1)
             disc = reduced ? reach + pad : layout.geometry.nameRadius + RadialField.discReach * s
@@ -300,16 +303,19 @@ struct RadialField {
             self.reduced = reduced
         }
 
-        func alpha(at p: CGPoint) -> CGFloat {
-            let r = hypot(p.x, p.y)
-            var d = r - disc
+        /// Full inside the shape, falling smoothly to 0 over `fade` outside it.
+        func blur(at p: CGPoint) -> CGFloat {
+            var d = hypot(p.x, p.y) - disc
             for box in boxes { d = RadialField.smoothMin(d, RadialField.distance(p, to: box) - pad, smoothing) }
             guard d < fade else { return 0 }
             let t = max(0, d / fade)
-            let out = 1 - t * t * t * (t * (t * 6 - 15) + 10)
-            let u = min(1, r / reach)
-            let core = 1 - RadialField.rim * u * u * (3 - 2 * u)
-            return out * core
+            return 1 - t * t * t * (t * (t * 6 - 15) + 10)
+        }
+
+        /// `blur`, weaker by up to `rim` toward the farthest word.
+        func tint(at p: CGPoint) -> CGFloat {
+            let u = min(1, hypot(p.x, p.y) / reach)
+            return blur(at: p) * (1 - RadialField.rim * u * u * (3 - 2 * u))
         }
     }
 
@@ -317,23 +323,33 @@ struct RadialField {
     /// this alpha. Where a word sits (the profile at least `readable`) a white word on a white
     /// desktop reads at better than 4.5 to 1.
     static let darkness: CGFloat = 0.7
-    /// The least strength of the field under any word.
+    /// The least strength of the tint's profile under any word.
     static let readable: CGFloat = 0.84
-    /// How much weaker the field is at the farthest word than in the middle.
+    /// How much weaker the tint's profile is at the farthest word than in the middle.
     static let rim: CGFloat = 0.14
     static let pad: CGFloat = 26
     static let fade: CGFloat = 72
     static let smoothing: CGFloat = 120
     /// How far past the names' anchors the field's disc reaches.
     static let discReach: CGFloat = 24
-    /// Points per pixel of the mask and tint images: the field is smooth enough to be stretched.
+    /// Points per pixel of the blur's and the tint's images: the field is smooth enough to be
+    /// stretched.
     static let step: CGFloat = 4
+
+    /// Every place a word can be: each word's box (a button's grown under the pointer, a name's
+    /// with its icons, the digits and the centre) and the hint's two-line zone.
+    static func places(_ layout: RadialLayout) -> [CGRect] {
+        layout.words.map { word in
+            if case .button = word.role { return RadialLayout.grown(word.frame, by: RadialWheelView.grow) }
+            return word.frame
+        } + [layout.hintZone]
+    }
 
     let shape: Shape
     var reduced: Bool { shape.reduced }
-    /// The field is 0 on and outside this rectangle's edge (whole points).
+    /// Both profiles are 0 on and outside this rectangle's edge (whole points).
     let support: CGRect
-    let maskImage: CGImage
+    let blurImage: CGImage
     let tintImage: CGImage
 
     var canvas: RadialMenu.Canvas {
@@ -350,10 +366,12 @@ struct RadialField {
             $0.union($1.insetBy(dx: -shape.pad, dy: -shape.pad))
         }
         let margin = shape.fade + shape.smoothing
-        (support, maskImage, tintImage) = Self.images(over: extent.insetBy(dx: -margin, dy: -margin).integral, alpha: shape.alpha)
+        (support, blurImage, tintImage) = Self.images(over: extent.insetBy(dx: -margin, dy: -margin).integral,
+                                                      blur: shape.blur, tint: shape.tint)
     }
 
-    func alpha(at p: CGPoint) -> CGFloat { shape.alpha(at: p) }
+    func blur(at p: CGPoint) -> CGFloat { shape.blur(at: p) }
+    func tint(at p: CGPoint) -> CGFloat { shape.tint(at: p) }
 
     /// Signed distance from `p` to `box`: negative inside.
     static func distance(_ p: CGPoint, to box: CGRect) -> CGFloat {
@@ -367,20 +385,22 @@ struct RadialField {
         return min(a, b) - h * h * k / 4
     }
 
-    /// The mask and the tint's profile (black, alpha the field), one pixel per `step` points, top
-    /// row first, cropped from `room` to where the field is not 0 with two empty pixels around
-    /// it; and the rectangle they cover.
-    private static func images(over room: CGRect, alpha: (CGPoint) -> CGFloat) -> (CGRect, CGImage, CGImage) {
+    /// The blur's and the tint's images (black, alpha the profile), one pixel per `step` points,
+    /// top row first, cropped from `room` to where `blur` is not 0 with two empty pixels around
+    /// it; and the rectangle they cover. `tint` is nowhere stronger than `blur`.
+    static func images(over room: CGRect, blur: (CGPoint) -> CGFloat,
+                       tint: (CGPoint) -> CGFloat) -> (CGRect, CGImage, CGImage) {
         let width = max(1, Int((room.width / step).rounded(.up)))
         let height = max(1, Int((room.height / step).rounded(.up)))
-        var field = [CGFloat](repeating: 0, count: width * height)
+        var values = [(blur: CGFloat, tint: CGFloat)](repeating: (0, 0), count: width * height)
         var (left, right, top, bottom) = (width, -1, height, -1)
         for row in 0..<height {
             let y = room.maxY - (CGFloat(row) + 0.5) * step
             for column in 0..<width {
-                let f = alpha(CGPoint(x: room.minX + (CGFloat(column) + 0.5) * step, y: y))
-                guard f > 0.5 / 255 else { continue }
-                field[row * width + column] = f
+                let p = CGPoint(x: room.minX + (CGFloat(column) + 0.5) * step, y: y)
+                let b = blur(p)
+                guard b > 0.5 / 255 else { continue }
+                values[row * width + column] = (b, tint(p))
                 (left, right, top, bottom) = (min(left, column), max(right, column), min(top, row), max(bottom, row))
             }
         }
@@ -388,20 +408,20 @@ struct RadialField {
         let margin = 2
         let x0 = left - margin, x1 = right + margin, y0 = top - margin, y1 = bottom + margin
         let w = x1 - x0 + 1, h = y1 - y0 + 1
-        var mask = [UInt8](repeating: 0, count: w * h * 4)
-        var tint = mask
+        var blurBytes = [UInt8](repeating: 0, count: w * h * 4)
+        var tintBytes = blurBytes
         for row in max(0, y0)...min(height - 1, y1) {
             for column in max(0, x0)...min(width - 1, x1) {
-                let f = field[row * width + column]
-                guard f > 0 else { continue }
+                let v = values[row * width + column]
+                guard v.blur > 0 else { continue }
                 let i = ((row - y0) * w + (column - x0)) * 4 + 3
-                mask[i] = UInt8((f * 255).rounded())
-                tint[i] = UInt8((f * 255).rounded())
+                blurBytes[i] = UInt8((v.blur * 255).rounded())
+                tintBytes[i] = UInt8((v.tint * 255).rounded())
             }
         }
         let support = CGRect(x: room.minX + CGFloat(x0) * step, y: room.maxY - CGFloat(y1 + 1) * step,
                              width: CGFloat(w) * step, height: CGFloat(h) * step)
-        return (support, image(mask, width: w, height: h), image(tint, width: w, height: h))
+        return (support, image(blurBytes, width: w, height: h), image(tintBytes, width: w, height: h))
     }
 
     private static func image(_ bytes: [UInt8], width: Int, height: Int) -> CGImage {

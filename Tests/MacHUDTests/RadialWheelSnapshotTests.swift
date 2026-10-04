@@ -5,9 +5,8 @@ import XCTest
 
 /// Renders the loadout wheel offscreen for review, as the screen would show it: a generated
 /// desktop (shapes and text, never a screenshot), sharp outside the field and, inside it,
-/// blurred (a Gaussian of radius 25 pt, as `HUDWindowBlur` asks of the window server) through
-/// the field's alpha, under the backdrop's tint and the wheel's own, with the wheel's view
-/// drawn on top. No window is ordered in and nothing acts on the desktop. Pictures go to
+/// blurred (a Gaussian of radius 25 pt, the soft backdrop's) through the field's blur profile,
+/// under the wheel's tint through its tint profile, with the wheel's view drawn on top. No window is ordered in and nothing acts on the desktop. Pictures go to
 /// `MACHUD_WHEEL_SNAPSHOT_DIR`; without it they are rendered and checked, and nothing is written.
 @MainActor
 final class RadialWheelSnapshotTests: XCTestCase {
@@ -51,9 +50,11 @@ final class RadialWheelSnapshotTests: XCTestCase {
         var selection: RadialGeometry.Selection
         var desktop: Desktop
         var resting: RadialMenu.RestingButtons = .faint
+        /// Reduce transparency on: the soft backdrop shows the system's opaque material.
         var reduced = false
-        /// The blur at full strength wherever the field is not zero, with no fade at its edge.
-        var unfeathered = false
+        /// The field's outline: the wheel's, or (for comparison, pictures only) a plain ellipse
+        /// around every word with the same full blur inside and the same fade.
+        var ellipse = false
         /// A whole screen of this visible size (a 24 pt menu bar above it), the wheel opened at `pointer`.
         var screen: CGSize?
         var pointer: CGPoint = .zero
@@ -128,12 +129,13 @@ final class RadialWheelSnapshotTests: XCTestCase {
         out.append(Shot(name: "variant-b-hover-12-long-top-inner-dark", wedges: Self.wedges(Self.long, loadouts: 9),
                         selection: .wedge(index: 0, ring: .inner), desktop: .dark, resting: .hidden))
 
-        // Reduce transparency: a plain dark soft disc.
-        out.append(Shot(name: "reduced-transparency-08-bright", wedges: eight, selection: .wedge(index: 1, ring: .middle),
-                        desktop: .bright, reduced: true))
-        // The window server's blur as the app asks for it now, if it does not fade with the field.
-        out.append(Shot(name: "unfeathered-blur-08-colourful", wedges: eight, selection: .wedge(index: 2, ring: .middle),
-                        desktop: .colourful, unfeathered: true))
+        // The system's material (Reduce transparency on): opaque and dark, through a plain soft disc.
+        out.append(Shot(name: "system-material-reduce-transparency-08-bright", wedges: eight,
+                        selection: .wedge(index: 1, ring: .middle), desktop: .bright, reduced: true))
+        // A plain ellipse around every word in place of the wheel's outline, for comparison.
+        out.append(Shot(name: "ellipse-rest-08-bright", wedges: eight, selection: .cancel, desktop: .bright, ellipse: true))
+        out.append(Shot(name: "ellipse-hover-08-side-middle-colourful", wedges: eight, selection: .wedge(index: 2, ring: .middle),
+                        desktop: .colourful, ellipse: true))
 
         // A 13-inch display at Larger Text (1024 by 640, less the menu bar), eight wedges, the
         // wheel opened near the bottom right corner.
@@ -146,12 +148,16 @@ final class RadialWheelSnapshotTests: XCTestCase {
 
     func testSnapshotsOfTheWheel() throws {
         if let directory { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true) }
-        for shot in shots() {
-            let rep = try XCTUnwrap(render(shot), shot.name)
-            try assertNotBlank(rep, shot.name)
+        var pictures = try shots().map { shot in (shot.name, try XCTUnwrap(render(shot), shot.name)) }
+        // The two profiles alone at eight wedges, white where they are full.
+        let field = RadialField(layout: RadialLayout(wedges: Self.wedges(Self.long, loadouts: 5)), reduced: false)
+        pictures.append(("profile-blur-08", try XCTUnwrap(Self.profile(field.blurImage, size: field.support.size))))
+        pictures.append(("profile-tint-08", try XCTUnwrap(Self.profile(field.tintImage, size: field.support.size))))
+        for (name, rep) in pictures {
+            try assertNotBlank(rep, name)
             if let directory {
                 let data = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
-                try data.write(to: directory.appendingPathComponent("wheel-\(shot.name).png"))
+                try data.write(to: directory.appendingPathComponent("wheel-\(name).png"))
             }
         }
         if let directory { print("Wheel snapshots: \(directory.path)") }
@@ -201,90 +207,131 @@ final class RadialWheelSnapshotTests: XCTestCase {
     }
 
     private func render(_ shot: Shot) -> NSBitmapImageRep? {
-        // The picture: the canvas with a margin, or a whole screen with its menu bar.
-        let placed: (layout: RadialLayout, center: CGPoint)
+        let layout: RadialLayout
+        let centre: CGPoint
         let size: CGSize
-        let field: RadialField
-        let canvasOrigin: CGPoint
         if let screen = shot.screen {
-            let visible = CGRect(origin: .zero, size: screen)
-            placed = RadialMenu.place(wedges: shot.wedges, at: shot.pointer, visibleFrame: visible)
-            field = RadialField(layout: placed.layout, reduced: shot.reduced)
+            // A whole screen with its menu bar, the wheel where it would open.
+            let placed = RadialMenu.place(wedges: shot.wedges, at: shot.pointer, visibleFrame: CGRect(origin: .zero, size: screen))
+            layout = placed.layout
+            centre = placed.center
             size = CGSize(width: screen.width, height: screen.height + 24)
-            canvasOrigin = CGPoint(x: placed.center.x - field.canvas.center.x, y: placed.center.y - field.canvas.center.y)
         } else {
-            placed = (RadialLayout(wedges: shot.wedges), .zero)
-            field = RadialField(layout: placed.layout, reduced: shot.reduced)
-            size = CGSize(width: field.canvas.size.width + 2 * Self.margin, height: field.canvas.size.height + 2 * Self.margin)
-            canvasOrigin = CGPoint(x: Self.margin, y: Self.margin)
+            layout = RadialLayout(wedges: shot.wedges)
+            centre = .zero
+            size = .zero
         }
-        guard let context = Self.context(size: size) else { return nil }
-        let bounds = CGRect(origin: .zero, size: size)
-        let canvas = CGRect(origin: canvasOrigin, size: field.canvas.size)
+        let field = RadialField(layout: layout, reduced: shot.reduced)
+        // The blur's and the tint's images and where they go, in the wheel's coordinates.
+        let profiles = shot.ellipse ? Self.ellipse(layout) : (rect: field.support, blur: field.blurImage, tint: field.tintImage)
+        // Otherwise the picture is the profiles' rectangle with a margin.
+        let (picture, wheelCentre) = shot.screen != nil ? (size, centre)
+            : (CGSize(width: profiles.rect.width + 2 * Self.margin, height: profiles.rect.height + 2 * Self.margin),
+               CGPoint(x: Self.margin - profiles.rect.minX, y: Self.margin - profiles.rect.minY))
+        guard let context = Self.context(size: picture) else { return nil }
+        let bounds = CGRect(origin: .zero, size: picture)
+        let rect = profiles.rect.offsetBy(dx: wheelCentre.x, dy: wheelCentre.y)
 
-        let desktop = Self.desktop(shot.desktop, size: size)
+        let desktop = Self.desktop(shot.desktop, size: picture)
         context.draw(desktop, in: bounds)
-        if shot.screen != nil { Self.menuBar(in: context, width: size.width, top: size.height) }
-        guard let mask = Self.grey(field.maskImage, binary: shot.unfeathered) else { return nil }
+        if shot.screen != nil { Self.menuBar(in: context, width: picture.width, top: picture.height) }
+        // The backdrop through the blur profile: the blurred desktop, or with Reduce
+        // transparency the system's material (opaque, dark; its grey here is a guess).
+        guard let blurMask = Self.grey(profiles.blur), let tintMask = Self.grey(profiles.tint) else { return nil }
         context.saveGState()
-        context.clip(to: canvas, mask: mask)
+        context.clip(to: rect, mask: blurMask)
         if shot.reduced {
-            // The classic material that HUDKit puts there under Reduce transparency: opaque, dark.
             context.setFillColor(NSColor(srgbRed: 0.16, green: 0.16, blue: 0.17, alpha: 1).cgColor)
             context.fill(bounds)
-        } else if let blurred = Self.blur(desktop, size: size) {
+        } else if let blurred = Self.blur(desktop) {
             context.draw(blurred, in: bounds)
         }
         context.restoreGState()
-
-        // The wheel's tint (its own view in the window, as dark as the backdrop's path asks),
-        // then its words.
+        // The wheel's tint through its profile, as dark as the backdrop's path asks.
         context.saveGState()
-        context.setAlpha(RadialBackdrop.darkness(for: shot.reduced ? .systemMaterial : .blur))
-        context.draw(field.tintImage, in: canvas)
+        context.clip(to: rect, mask: tintMask)
+        context.setFillColor(NSColor.black.withAlphaComponent(RadialBackdrop.darkness(for: shot.reduced ? .systemMaterial : .blur)).cgColor)
+        context.fill(bounds)
         context.restoreGState()
+        // The words.
         let view = RadialWheelView(frame: CGRect(origin: .zero, size: field.canvas.size))
         view.restingButtons = shot.resting
-        view.configure(layout: placed.layout, field: field, wedges: shot.wedges)
+        view.configure(layout: layout, field: field, wedges: shot.wedges)
         view.settle(selection: shot.selection)
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-        context.translateBy(x: canvas.minX, y: canvas.minY)
+        context.translateBy(x: wheelCentre.x - field.canvas.center.x, y: wheelCentre.y - field.canvas.center.y)
         NSAppearance(named: .darkAqua)?.performAsCurrentDrawingAppearance { view.draw(view.bounds) }
         NSGraphicsContext.restoreGraphicsState()
         guard let image = context.makeImage() else { return nil }
         let rep = NSBitmapImageRep(cgImage: image)
+        rep.size = picture
+        return rep
+    }
+
+    /// The profiles of a plain ellipse around every place a word can be (`RadialField.places`),
+    /// padded like the wheel's field: full inside, fading over the same distance, the tint weaker
+    /// toward the rim by the same amount. Pictures only.
+    private static func ellipse(_ layout: RadialLayout) -> (rect: CGRect, blur: CGImage, tint: CGImage) {
+        let places = RadialField.places(layout)
+        let box = places.reduce(places[0]) { $0.union($1) }
+        let c = CGPoint(x: box.midX, y: box.midY)
+        let corners = places.flatMap { r in [CGPoint(x: r.minX, y: r.minY), CGPoint(x: r.maxX, y: r.minY),
+                                              CGPoint(x: r.minX, y: r.maxY), CGPoint(x: r.maxX, y: r.maxY)] }
+        let (X, Y) = (box.width / 2, box.height / 2)
+        let reach = corners.map { hypot(($0.x - c.x) / X, ($0.y - c.y) / Y) }.max() ?? 1
+        let pad = RadialField.pad * layout.scale, fade = RadialField.fade * layout.scale
+        let (a, b) = (X * reach + pad, Y * reach + pad)
+        let farthest = corners.map { hypot($0.x, $0.y) }.max() ?? 1
+        func blur(_ p: CGPoint) -> CGFloat {
+            let (dx, dy) = (p.x - c.x, p.y - c.y)
+            let rho = hypot(dx / a, dy / b)
+            guard rho > 1 else { return 1 }
+            let d = hypot(dx, dy) * (1 - 1 / rho)
+            guard d < fade else { return 0 }
+            let t = d / fade
+            return 1 - t * t * t * (t * (t * 6 - 15) + 10)
+        }
+        func tint(_ p: CGPoint) -> CGFloat {
+            let u = min(1, hypot(p.x, p.y) / farthest)
+            return blur(p) * (1 - RadialField.rim * u * u * (3 - 2 * u))
+        }
+        let room = CGRect(x: c.x - a - fade - 8, y: c.y - b - fade - 8, width: 2 * (a + fade + 8), height: 2 * (b + fade + 8)).integral
+        let images = RadialField.images(over: room, blur: blur, tint: tint)
+        return (images.0, images.1, images.2)
+    }
+
+    /// A profile image as a picture: white where it is full, black where it is 0.
+    private static func profile(_ image: CGImage, size: CGSize) -> NSBitmapImageRep? {
+        guard let context = context(size: size), let mask = grey(image) else { return nil }
+        let bounds = CGRect(origin: .zero, size: size)
+        context.setFillColor(NSColor.black.cgColor)
+        context.fill(bounds)
+        context.clip(to: bounds, mask: mask)
+        context.setFillColor(NSColor.white.cgColor)
+        context.fill(bounds)
+        guard let out = context.makeImage() else { return nil }
+        let rep = NSBitmapImageRep(cgImage: out)
         rep.size = size
         return rep
     }
 
-    /// The field's mask as a grey image for clipping: white where the field is full. `binary`:
-    /// white wherever the field, smoothly stretched, is above 1 %.
-    private static func grey(_ mask: CGImage, binary: Bool) -> CGImage? {
-        let w = mask.width, h = mask.height
-        guard let data = mask.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else { return nil }
+    /// A profile's alpha as a grey image for clipping: white where the profile is full.
+    private static func grey(_ image: CGImage) -> CGImage? {
+        let w = image.width, h = image.height
+        guard let data = image.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else { return nil }
         var grey = [UInt8](repeating: 0, count: w * h)
         for y in 0..<h {
-            for x in 0..<w { grey[y * w + x] = bytes[y * mask.bytesPerRow + x * 4 + 3] }
+            for x in 0..<w { grey[y * w + x] = bytes[y * image.bytesPerRow + x * 4 + 3] }
         }
-        guard let provider = CGDataProvider(data: Data(grey) as CFData),
-              let smooth = CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 8, bytesPerRow: w,
-                                   space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
-                                   provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent) else { return nil }
-        guard binary else { return smooth }
-        // Stretched eight times, then cut just above zero.
-        let (bw, bh) = (w * 8, h * 8)
-        guard let context = CGContext(data: nil, width: bw, height: bh, bitsPerComponent: 8, bytesPerRow: bw,
-                                      space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue),
-              let big = context.data?.bindMemory(to: UInt8.self, capacity: bw * bh) else { return nil }
-        context.interpolationQuality = .medium
-        context.draw(smooth, in: CGRect(x: 0, y: 0, width: bw, height: bh))
-        for i in 0..<(bw * bh) { big[i] = big[i] > 2 ? 255 : 0 }
-        return context.makeImage()
+        guard let provider = CGDataProvider(data: Data(grey) as CFData) else { return nil }
+        return CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 8, bytesPerRow: w,
+                       space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+                       provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
     }
 
     /// A Gaussian of radius 25 pt (50 px at 2x) over the desktop, its edges clamped.
-    private static func blur(_ image: CGImage, size: CGSize) -> CGImage? {
+    private static func blur(_ image: CGImage) -> CGImage? {
         let input = CIImage(cgImage: image)
         guard let filter = CIFilter(name: "CIGaussianBlur") else { return nil }
         filter.setValue(input.clampedToExtent(), forKey: kCIInputImageKey)

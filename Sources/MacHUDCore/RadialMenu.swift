@@ -441,7 +441,7 @@ final class RadialMenu {
         let local = CGRect(x: center.x - screenFrame.minX - canvas.center.x, y: center.y - screenFrame.minY - canvas.center.y,
                            width: canvas.size.width, height: canvas.size.height)
         backdrop.view.frame = local
-        tint.darkness = RadialBackdrop.darkness(for: backdrop.show(field: field.maskImage))
+        tint.darkness = RadialBackdrop.darkness(for: backdrop.show(field: field.blurImage))
         tint.frame = local
         tint.image = field.tintImage
         wheel.frame = local

@@ -16,7 +16,7 @@ final class RadialBackdropTests: XCTestCase {
     }
 
     private var field: CGImage {
-        RadialField(layout: RadialLayout(wedges: RadialLayoutTests.wedges(6, RadialLayoutTests.short)), reduced: false).maskImage
+        RadialField(layout: RadialLayout(wedges: RadialLayoutTests.wedges(6, RadialLayoutTests.short)), reduced: false).blurImage
     }
 
     func testTheBackdropIsTheFamilysBlurWithNoTintOfItsOwn() {
@@ -66,7 +66,7 @@ final class RadialBackdropTests: XCTestCase {
         backdrop.show(field: image)
         XCTAssertTrue(backdrop.view.field === shown)
         backdrop.show(field: RadialField(layout: RadialLayout(wedges: RadialLayoutTests.wedges(9, RadialLayoutTests.short)),
-                                         reduced: false).maskImage)
+                                         reduced: false).blurImage)
         XCTAssertFalse(backdrop.view.field === shown)
     }
 
