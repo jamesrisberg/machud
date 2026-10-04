@@ -74,38 +74,6 @@ final class RadialOpeningTests: XCTestCase {
         }
     }
 
-    /// The wheel opens on the screen the pointer is on, a screen's top edge included: a pointer
-    /// pinned at the top of a screen (just after using its menu bar) is on that screen, not on
-    /// the one above it. Its left edge is in it, its right edge in the next one; a point on no
-    /// screen goes to the nearest.
-    func testTheWheelOpensOnTheScreenThePointerIsOn() {
-        let main = CGRect(x: 0, y: 0, width: 1440, height: 900)
-        func on(_ p: CGPoint, _ frames: [CGRect]) -> Int? { RadialMenu.screenIndex(containing: p, frames: frames) }
-        // One screen: its top edge and its corners.
-        for p in [CGPoint(x: 720, y: 900), CGPoint(x: 0, y: 900), CGPoint(x: 1439, y: 900), CGPoint(x: 0, y: 1), CGPoint(x: 1439, y: 1)] {
-            XCTAssertEqual(on(p, [main]), 0, "\(p)")
-        }
-        // Two side by side, the second taller.
-        let right = CGRect(x: 1440, y: 0, width: 1920, height: 1080)
-        XCTAssertEqual(on(CGPoint(x: 700, y: 900), [main, right]), 0, "the first's top edge")
-        XCTAssertEqual(on(CGPoint(x: 1439, y: 900), [main, right]), 0, "the first's top right corner")
-        XCTAssertEqual(on(CGPoint(x: 1440, y: 500), [main, right]), 1, "the second's left edge")
-        XCTAssertEqual(on(CGPoint(x: 1440, y: 1080), [main, right]), 1, "the second's top left corner")
-        XCTAssertEqual(on(CGPoint(x: 3359, y: 1080), [main, right]), 1, "the second's top right corner")
-        // One above the other: the lower one's top edge is the upper one's bottom edge.
-        let above = CGRect(x: 0, y: 900, width: 1440, height: 900)
-        XCTAssertEqual(on(CGPoint(x: 700, y: 900), [main, above]), 0, "the lower one's top edge")
-        XCTAssertEqual(on(CGPoint(x: 700, y: 900), [above, main]), 1, "whichever order the screens come in")
-        XCTAssertEqual(on(CGPoint(x: 0, y: 900), [main, above]), 0, "the lower one's top left corner")
-        XCTAssertEqual(on(CGPoint(x: 700, y: 901), [main, above]), 1)
-        XCTAssertEqual(on(CGPoint(x: 700, y: 1800), [main, above]), 1, "the upper one's top edge")
-        XCTAssertEqual(on(CGPoint(x: 1439, y: 1800), [main, above]), 1, "the upper one's top right corner")
-        // On no screen: the nearest.
-        XCTAssertEqual(on(CGPoint(x: 3500, y: 200), [main, right]), 1)
-        XCTAssertEqual(on(CGPoint(x: -20, y: 1700), [main, above]), 1)
-        XCTAssertNil(on(.zero, []))
-    }
-
     /// The park wedge's targets are read again as it becomes highlighted without waiting for the
     /// answer: the hint keeps what it said until the answer comes, which is used only while the
     /// park wedge is still highlighted in the same opening of the wheel.

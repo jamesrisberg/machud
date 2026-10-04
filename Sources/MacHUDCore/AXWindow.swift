@@ -36,8 +36,24 @@ enum ScreenCoords {
         CGRect(x: r.minX, y: primaryHeight - r.maxY, width: r.width, height: r.height)
     }
 
+    /// The screen the pointer at `p` is on (`screenIndex(containing:frames:)`).
     static func screen(containing p: CGPoint) -> NSScreen? {
-        NSScreen.screens.first { $0.frame.contains(p) } ?? NSScreen.main
+        let screens = NSScreen.screens
+        return screenIndex(containing: p, frames: screens.map(\.frame)).map { screens[$0] }
+    }
+
+    /// Which of the screens with these `frames` the pointer at `point` is on. A screen holds
+    /// its left and top edges and not its right and bottom ones (`NSMouseInRect`), as the
+    /// pointer reports them: pinned at the top of a screen it is at that screen's top edge,
+    /// which is the bottom edge of a screen above. A point on no screen (on an edge a screen
+    /// leaves out, or as a display goes away) goes to the nearest screen, which is the one the
+    /// pointer is at; nil only when there are no screens.
+    nonisolated static func screenIndex(containing point: CGPoint, frames: [CGRect]) -> Int? {
+        if let index = frames.firstIndex(where: { NSMouseInRect(point, $0, false) }) { return index }
+        func distance(_ r: CGRect) -> CGFloat {
+            hypot(max(r.minX - point.x, 0, point.x - r.maxX), max(r.minY - point.y, 0, point.y - r.maxY))
+        }
+        return frames.indices.min { distance(frames[$0]) < distance(frames[$1]) }
     }
 }
 
