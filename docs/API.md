@@ -991,9 +991,13 @@ gesturePending, cardMode, lastTakeEnd?}`; `cardMode` is the reply card's state (
 `wakeListening` is true while the wake word is armed; it pauses while a take records and listens
 again after. There is one listener for the phrase's model, `voice.wakeThreshold` and
 `voice.wakeFrames`: it keeps its model loaded while paused (the microphone closes) and other
-settings replace it. After a wake that starts no take the same listener is re-armed at once, with
-the microphone kept open, and drops the next second of what it hears, so the rest of the sound
-that woke it cannot wake it again; the re-arm is not logged on its own. While the wake word is on (and voice is on and not muted) but not listening,
+settings replace it. After a wake that is refused (its phrase not confirmed or not checked, the
+brain off or unable to take a turn, the agent still working) the same listener is re-armed at
+once, with the microphone kept open, and drops the next second of what it hears, so the rest of
+the sound that woke it cannot wake it again; the re-arm is not logged on its own. When the
+dictation refuses to start a wake's take instead (no speech model), the listener, paused for the
+take, is started again, with no quiet period. While the wake word is on (and voice is on and not
+muted) but not listening,
 `wakeProblem` says why: its phrase's model is not downloaded (`Download the Hey Jarvis model to
 use the wake word.`), is downloading or failed to, the microphone is not allowed, or listening
 stopped (an audio device change it could not recover from); turning the wake word on shows it
