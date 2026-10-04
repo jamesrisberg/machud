@@ -289,10 +289,37 @@ final class RadialMenu {
     /// The last field built: a wheel of the same shape opens with it.
     private var field: RadialField?
 
-    private var center: CGPoint = .zero          // screen coords
+    /// The wheel's centre, in screen coordinates.
+    private(set) var center: CGPoint = .zero
     private var screenFrame: CGRect = .zero
     private var pointerOffset: CGPoint = .zero   // relative to the wheel's centre
     private var keyboardIndex: Int?
+    /// The pointer has moved since the wheel opened: until it has, it is taken to be at the
+    /// centre, so nothing is lit and releasing cancels, wherever it really is.
+    private var pointerHasMoved = false
+
+    /// Moves the pointer to a point in display coordinates (y down from the primary display's
+    /// top), without a pause before it moves again. Tests record it instead.
+    var warpPointer: (CGPoint) -> Void = { point in
+        CGWarpMouseCursorPosition(point)
+        CGAssociateMouseAndMouseCursorPosition(1)
+    }
+    /// The modifier keys held now (tests give their own).
+    var modifiers: () -> NSEvent.ModifierFlags = { NSEvent.modifierFlags }
+
+    /// The screen a wheel opens on, in screen coordinates; `primaryHeight` is the height of the
+    /// primary display (the one at the origin), which turns screen points into display points.
+    struct Display: Equatable {
+        var frame: CGRect
+        var visibleFrame: CGRect
+        var primaryHeight: CGFloat
+    }
+
+    /// `point` in screen coordinates (y up from the primary display's bottom) as a display
+    /// point (y down from its top), which is what moving the pointer takes.
+    nonisolated static func displayPoint(_ point: CGPoint, primaryHeight: CGFloat) -> CGPoint {
+        CGPoint(x: point.x, y: primaryHeight - point.y)
+    }
 
     // MARK: Lifecycle
 
@@ -300,23 +327,40 @@ final class RadialMenu {
         guard !wedges.isEmpty else { return }
         let origin = point ?? NSEvent.mouseLocation
         guard let screen = NSScreen.screens.first(where: { $0.frame.contains(origin) }) ?? NSScreen.main else { return }
-        self.wedges = wedges
-        let placed = Self.place(wedges: wedges, at: origin, visibleFrame: screen.visibleFrame)
-        layout = placed.layout
-        center = placed.center
-        screenFrame = screen.frame
-        pointerOffset = .zero
-        keyboardIndex = nil
-        selection = .cancel
+        let display = Display(frame: screen.frame, visibleFrame: screen.visibleFrame,
+                              primaryHeight: NSScreen.screens.first?.frame.maxY ?? screen.frame.maxY)
+        // Opened at the pointer (the hotkey), the wheel moves the pointer to its centre when
+        // it cannot open around it; opened by a script at a point, it leaves the pointer alone.
+        prepare(wedges: wedges, at: origin, on: display, movesPointer: point == nil)
 
         let w = window ?? makeWindow()
         if w.frame != screenFrame { w.setFrame(screenFrame, display: false) }
-        wheel.selection = .cancel
-        applyField()
         w.orderFrontRegardless()
 
         startTracking()
         startAnimation()
+    }
+
+    /// Sets the wheel up to open at `origin` on `display`, with nothing selected and the pointer
+    /// taken to be at the centre until it moves. Where the centre had to move away from
+    /// `origin` to keep every word on screen and `movesPointer`, the pointer is moved to the
+    /// centre, so a gesture means the same direction and distance from the centre wherever
+    /// the wheel opens; it is not moved back. No window is shown and no event is watched.
+    func prepare(wedges: [Wedge], at origin: CGPoint, on display: Display, movesPointer: Bool) {
+        self.wedges = wedges
+        let placed = Self.place(wedges: wedges, at: origin, visibleFrame: display.visibleFrame)
+        layout = placed.layout
+        center = placed.center
+        screenFrame = display.frame
+        pointerOffset = .zero
+        pointerHasMoved = false
+        keyboardIndex = nil
+        selection = .cancel
+        wheel.selection = .cancel
+        applyField()
+        if movesPointer, hypot(center.x - origin.x, center.y - origin.y) > 0.5 {
+            warpPointer(Self.displayPoint(center, primaryHeight: display.primaryHeight))
+        }
     }
 
     func hide() {
@@ -333,18 +377,18 @@ final class RadialMenu {
         onCommit?(.cancelled)
     }
 
+    /// What releasing does now: what is highlighted, or cancel.
+    var releaseOutcome: Outcome {
+        guard case .wedge(let i, let ring) = selection, wedges.indices.contains(i) else { return .cancelled }
+        return Self.outcome(of: wedges[i].kind, ring: ring)
+    }
+
     /// The hotkey was released: act on whatever is highlighted.
     func commit() {
         guard isVisible else { return }
-        let picked = selection
+        let outcome = releaseOutcome
         hide()
-        switch picked {
-        case .cancel:
-            onCommit?(.cancelled)
-        case .wedge(let i, let ring):
-            guard wedges.indices.contains(i) else { onCommit?(.cancelled); return }
-            onCommit?(Self.outcome(of: wedges[i].kind, ring: ring))
-        }
+        onCommit?(outcome)
     }
 
     /// Move the highlight without the mouse (digits 1-9, and the control socket).
@@ -457,7 +501,7 @@ final class RadialMenu {
         return CGPoint(x: r * CGFloat(sin(a)), y: r * CGFloat(cos(a)))
     }
 
-    private var shiftHeld: Bool { shiftSelectsOuter && NSEvent.modifierFlags.contains(.shift) }
+    private var shiftHeld: Bool { shiftSelectsOuter && modifiers().contains(.shift) }
 
     private func refreshSelection() {
         let previous = selection.index
@@ -480,10 +524,20 @@ final class RadialMenu {
         wheel.update(wedges: fresh)
     }
 
-    private func pointerMoved(to location: CGPoint) {
+    /// A mouse-moved or dragged event: the pointer is at `location` (screen coordinates),
+    /// having moved by `delta`. An event that did not move it changes nothing until it has.
+    func pointerMoved(to location: CGPoint, delta: CGVector) {
+        guard pointerHasMoved || delta.dx != 0 || delta.dy != 0 else { return }
+        pointerHasMoved = true
         let o = CGPoint(x: location.x - center.x, y: location.y - center.y)
         if RadialGeometry.radius(of: o) >= geometry.deadZone { keyboardIndex = nil }
         pointerOffset = o
+        refreshSelection()
+    }
+
+    /// A modifier key changed (Shift reaches the last ring): the selection is read again with
+    /// the pointer where the wheel last saw it, the centre until it has moved.
+    func modifiersChanged() {
         refreshSelection()
     }
 
@@ -492,12 +546,12 @@ final class RadialMenu {
     private func startTracking() {
         guard monitors.isEmpty else { return }
         let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged, .flagsChanged]
-        let global = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] _ in
-            MainActor.assumeIsolated { self?.pointerMoved(to: NSEvent.mouseLocation) }
+        let global = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] event in
+            MainActor.assumeIsolated { self?.handle(event) }
         })
         if let global { monitors.append(global) }
         let local = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
-            MainActor.assumeIsolated { self?.pointerMoved(to: NSEvent.mouseLocation) }
+            MainActor.assumeIsolated { self?.handle(event) }
             return event
         })
         if let local { monitors.append(local) }
@@ -507,6 +561,14 @@ final class RadialMenu {
             forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { if self?.isVisible == true { self?.applyField() } }
+        }
+    }
+
+    private func handle(_ event: NSEvent) {
+        if event.type == .flagsChanged {
+            modifiersChanged()
+        } else {
+            pointerMoved(to: NSEvent.mouseLocation, delta: CGVector(dx: event.deltaX, dy: event.deltaY))
         }
     }
 
@@ -554,7 +616,7 @@ final class RadialMenu {
     }
 
     /// Returns true when the key was consumed.
-    private func handleKeyCode(_ code: UInt32) -> Bool {
+    func handleKeyCode(_ code: UInt32) -> Bool {
         if code == HotKeyCenter.keyCode(for: "escape") {
             cancel()
             return true
