@@ -99,7 +99,7 @@ struct HoverReveal: Equatable {
         }
     }
 
-    /// Reveal from outside (socket, radial menu). `pin` keeps it open like a click.
+    /// Reveal from outside (socket, tool dock). `pin` keeps it open like a click.
     mutating func reveal(pin: Bool) -> Action? {
         let was = isRevealed
         phase = pin ? .pinned : .revealed
