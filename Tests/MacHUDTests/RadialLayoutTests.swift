@@ -692,10 +692,13 @@ final class RadialLayoutTests: XCTestCase {
         for (image, value) in [(field.blurImage, field.blur), (field.tintImage, field.tint)] as [(CGImage, (CGPoint) -> CGFloat)] {
             let rep = NSBitmapImageRep(cgImage: image)
             let scale = CGFloat(rep.pixelsWide) / field.support.width
-            for p in [CGPoint(x: 0, y: 0), CGPoint(x: 120, y: -80), CGPoint(x: -200, y: 150), CGPoint(x: 0, y: -200),
-                      CGPoint(x: 230, y: 160)] where field.support.contains(p) {
+            // (-250, -190) lies on the field's steepest fade, where the image's 4-point pixels
+            // average a slope of about 0.06 across their width: a looser match there.
+            for (p, accuracy) in [(CGPoint(x: 0, y: 0), 0.03), (CGPoint(x: 120, y: -80), 0.03), (CGPoint(x: -200, y: 150), 0.03),
+                                  (CGPoint(x: 0, y: -200), 0.03), (CGPoint(x: 230, y: 160), 0.03), (CGPoint(x: -250, y: -190), 0.07)]
+                where field.support.contains(p) {
                 let pixel = try XCTUnwrap(rep.colorAt(x: Int((p.x - field.support.minX) * scale), y: Int((field.support.maxY - p.y) * scale)))
-                XCTAssertEqual(pixel.alphaComponent, value(p), accuracy: 0.03, "\(p)")
+                XCTAssertEqual(pixel.alphaComponent, value(p), accuracy: CGFloat(accuracy), "\(p)")
                 XCTAssertEqual(pixel.redComponent + pixel.greenComponent + pixel.blueComponent, 0, accuracy: 0.01, "black")
             }
         }
