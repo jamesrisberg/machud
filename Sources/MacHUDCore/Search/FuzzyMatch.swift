@@ -14,7 +14,7 @@ enum FuzzyMatch {
     static let initials = 700
     static let allWords = 600
     static let substring = 500
-    static let subsequence = 350
+    static let subsequence = 400
 
     static func score(_ query: String, _ candidate: String) -> Int? {
         let q = fold(query).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -61,7 +61,8 @@ enum FuzzyMatch {
 
     /// The query's characters in order: better when they fall on word starts or run together,
     /// worse the more the name spreads them out, and no match once more than two letters per
-    /// typed letter lie between them. Always below a substring match.
+    /// typed letter lie between them. Clamped to its band, like every tier: from half the gap
+    /// below `subsequence` up to it.
     private static func subsequenceScore(_ q: String, _ c: String) -> Int? {
         var starts = Set<Int>()
         var offset = 0
@@ -88,6 +89,7 @@ enum FuzzyMatch {
         }
         let spread = last - first + 1 - q.count
         guard spread <= 2 * q.count + 2 else { return nil }
-        return max(100, min(substring - tierGap / 2 - 10, subsequence + bonus - spread * 5))
+        let band = (subsequence - tierGap / 2)...subsequence
+        return min(band.upperBound, max(band.lowerBound, subsequence - tierGap / 4 + bonus - spread * 5))
     }
 }

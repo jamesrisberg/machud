@@ -321,10 +321,10 @@ Rows, each with an icon, a title, a subtitle and its kind:
 Apps, loadouts and snippets are ranked together, files below them (at most 8 and 5 rows). A
 name matches the query whole, at its start, at a word's start (camel case counts: "hud" in
 MacHUD), by its words' initials ("vsc"), with every word of a several-word query at a word's
-start, anywhere, or letter by letter in order, best first: tiers 100 points apart, a match losing
-at most 50 within its tier (a longer name, a later word). Each app's launches from the bar lift
-it by more with every doubling of the count but always by less than 100 (31 for one launch, 73
-for 120), so frequency orders apps within a tier and can pass a weaker match in the next tier
+start, anywhere, or letter by letter in order, best first: tiers 100 points apart, a match
+losing at most 50 within its tier (a longer name, a later word, letters further apart). Each
+app's launches from the bar lift it by more with every doubling of the count but always by less
+than 100 (31 for one launch, 73 for 120), so frequency orders apps within a tier and can pass a weaker match in the next tier
 up, never one two tiers up: an exact name beats a part of a name however often that was
 launched. Launches are counted in `state/launches.json` beside the config, keyed by the app's
 real path. The first time it runs, MacHUD adds the per-app launch counts in Alfred's history

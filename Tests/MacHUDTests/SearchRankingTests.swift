@@ -22,6 +22,15 @@ final class SearchRankingTests: XCTestCase {
         XCTAssertGreaterThan(substring, subsequence)
     }
 
+    func testLettersInOrderStayInTheirBand() throws {
+        // Like every tier, it spans half the gap: from 50 below its top to its top.
+        let top = FuzzyMatch.substring - FuzzyMatch.tierGap
+        for (q, name) in [("abc", "axxbxxc"), ("abcdef", "ab cd ef"), ("sfr", "Safari"), ("vscode", "Visual Studio Code")] {
+            let s = try XCTUnwrap(score(q, name), "\(q) in \(name)")
+            XCTAssertTrue((top - FuzzyMatch.tierGap / 2...top).contains(s), "\(q) in \(name): \(s)")
+        }
+    }
+
     func testLettersSpreadFarApartDoNotMatch() {
         XCTAssertNil(score("saf", "SoftwareUpdateNotificationManager"))
         XCTAssertNotNil(score("sfr", "Safari"))
