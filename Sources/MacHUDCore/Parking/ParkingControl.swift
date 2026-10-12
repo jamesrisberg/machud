@@ -171,7 +171,7 @@ extension LoadoutEngine {
         return title.isEmpty ? name : "\(name) · \(title)"
     }
 
-    /// The radial menu's park wedge: the frontmost app's focused window goes to its
+    /// The radial menu's Park › Park: the frontmost app's focused window goes to its
     /// nearest edge. Returns why it could not, if it could not.
     func parkFocusedWindow() -> String? {
         guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != getpid() else { return "no focused window" }

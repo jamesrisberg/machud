@@ -23,16 +23,16 @@ final class RadialMenuWindowTests: XCTestCase {
         XCTAssertEqual(window.contentView?.subviews.first, backdrop, "the backdrop is under everything")
     }
 
-    /// The wheel's view is the field's canvas: it holds every word, the hint's zone and the
-    /// field as it fades out, with or without Reduce transparency.
+    /// The wheel's view is the whole field's canvas: it holds every word that can show, every
+    /// hint zone and the field as it fades out, with or without Reduce transparency.
     @MainActor
     func testTheWheelsViewHoldsTheWordsTheHintAndTheField() {
-        for count in [3, 6, 9, 12] {
-            let layout = RadialLayout(wedges: RadialLayoutTests.wedges(count, RadialLayoutTests.long))
+        for count in [0, 3, 10, 14] {
+            let layout = RadialLayout(tree: RadialLayoutTests.tree(count, RadialLayoutTests.long))
             for reduced in [false, true] {
                 let field = RadialField(layout: layout, reduced: reduced)
                 let canvas = field.canvas
-                XCTAssertTrue(field.support.contains(layout.bounds), "\(count) wedges")
+                XCTAssertTrue(field.support.contains(layout.bounds), "\(count) loadouts")
                 XCTAssertEqual(canvas.size, field.support.size)
                 XCTAssertEqual(canvas.center, CGPoint(x: -field.support.minX, y: -field.support.minY))
             }
@@ -43,37 +43,37 @@ final class RadialMenuWindowTests: XCTestCase {
     /// the same wheel opened again reuses them, new words or another appearance draw them anew.
     @MainActor
     func testTheWordsAreDrawnOncePerLayoutScaleAndAppearance() throws {
-        let wedges = RadialLayoutTests.wedges(8, RadialLayoutTests.short)
-        let layout = RadialLayout(wedges: wedges)
+        let tree = RadialLayoutTests.tree(8, RadialLayoutTests.short)
+        let layout = RadialLayout(tree: tree)
         let field = RadialField(layout: layout, reduced: false)
         let view = RadialWheelView(frame: CGRect(origin: .zero, size: field.canvas.size))
         let context = try XCTUnwrap(CGContext(data: nil, width: 64, height: 64, bitsPerComponent: 8, bytesPerRow: 0,
                                               space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-        func open(_ layout: RadialLayout, _ wedges: [RadialMenu.Wedge], appearance: NSAppearance.Name = .darkAqua) {
+        func open(_ layout: RadialLayout, _ tree: [RadialNode], appearance: NSAppearance.Name = .darkAqua) {
             view.appearance = NSAppearance(named: appearance)
-            view.configure(layout: layout, field: field, wedges: wedges)
+            view.configure(layout: layout, canvas: field.canvas, tree: tree)
             NSGraphicsContext.saveGraphicsState()
             NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
             view.draw(view.bounds)
             NSGraphicsContext.restoreGraphicsState()
         }
-        open(layout, wedges)
+        open(layout, tree)
         XCTAssertEqual(view.wordRenders, 1)
-        open(RadialLayout(wedges: wedges), RadialLayoutTests.wedges(8, RadialLayoutTests.short))
+        open(RadialLayout(tree: tree), RadialLayoutTests.tree(8, RadialLayoutTests.short))
         XCTAssertEqual(view.wordRenders, 1, "the same words again")
-        let other = RadialLayoutTests.wedges(8, RadialLayoutTests.long)
-        open(RadialLayout(wedges: other), other)
+        let other = RadialLayoutTests.tree(8, RadialLayoutTests.long)
+        open(RadialLayout(tree: other), other)
         XCTAssertEqual(view.wordRenders, 2, "new words")
-        open(RadialLayout(wedges: other), other, appearance: .aqua)
+        open(RadialLayout(tree: other), other, appearance: .aqua)
         XCTAssertEqual(view.wordRenders, 3, "another appearance")
     }
 
-    /// The view redraws whenever what it shows changes (the selection, the wedges, the
+    /// The view redraws whenever what it shows changes (the selection, the tree, the
     /// appearance) and while its springs move, and not once they have settled.
     @MainActor
     func testTheWheelRedrawsOnlyWhileSomethingChanges() {
-        let wedges = RadialLayoutTests.wedges(6, RadialLayoutTests.short)
-        let layout = RadialLayout(wedges: wedges)
+        let tree = RadialLayoutTests.tree(6, RadialLayoutTests.short)
+        let layout = RadialLayout(tree: tree)
         let view = RadialWheelView(frame: CGRect(origin: .zero, size: RadialField(layout: layout, reduced: false).canvas.size))
         // In a window, which keeps the view's requests to redraw; it is never ordered in.
         let window = NSWindow(contentRect: view.frame, styleMask: [.borderless], backing: .buffered, defer: false)
@@ -81,7 +81,7 @@ final class RadialMenuWindowTests: XCTestCase {
         window.isReleasedWhenClosed = false
         window.contentView?.addSubview(view)
         XCTAssertFalse(window.isVisible)
-        view.configure(layout: layout, field: RadialField(layout: layout, reduced: false), wedges: wedges)
+        view.configure(layout: layout, canvas: RadialField(layout: layout, reduced: false).canvas, tree: tree)
         view.resetSprings()
         XCTAssertTrue(view.needsDisplay)
 
@@ -94,19 +94,19 @@ final class RadialMenuWindowTests: XCTestCase {
         }
         settle()
 
-        view.selection = .wedge(index: 1, ring: .middle)
+        view.selection = ["loadouts", "Mail"]
         XCTAssertTrue(view.needsDisplay, "a selection change redraws at once")
         view.displayIfNeeded()
         view.tick()
-        XCTAssertTrue(view.needsDisplay, "and keeps redrawing while the word grows")
+        XCTAssertTrue(view.needsDisplay, "and keeps redrawing while the word grows and the actions unfold")
         settle()
 
-        let more = RadialLayoutTests.wedges(9, RadialLayoutTests.short)
-        let bigger = RadialLayout(wedges: more)
-        view.configure(layout: bigger, field: RadialField(layout: bigger, reduced: false), wedges: more)
-        XCTAssertTrue(view.needsDisplay, "new wedges redraw")
+        let more = RadialLayoutTests.tree(9, RadialLayoutTests.short)
+        let bigger = RadialLayout(tree: more)
+        view.configure(layout: bigger, canvas: RadialField(layout: bigger, reduced: false).canvas, tree: more)
+        XCTAssertTrue(view.needsDisplay, "a new tree redraws")
         view.displayIfNeeded()
-        view.selection = .wedge(index: 8, ring: .inner)
+        view.selection = ["park", "restore"]
         XCTAssertTrue(view.needsDisplay)
         settle()
 

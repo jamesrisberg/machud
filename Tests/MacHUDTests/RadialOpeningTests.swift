@@ -17,10 +17,9 @@ final class RadialOpeningTests: XCTestCase {
                            visibleFrame: CGRect(x: 1024, y: -30, width: 1440, height: 805), primaryHeight: 640),
     ]
 
-    private func menu(warps: @escaping (CGPoint) -> Void = { _ in }, shift: Bool = false) -> RadialMenu {
+    private func menu(warps: @escaping (CGPoint) -> Void = { _ in }) -> RadialMenu {
         let menu = RadialMenu()
         menu.warpPointer = warps
-        menu.modifiers = { shift ? [.shift] : [] }
         return menu
     }
 
@@ -37,32 +36,29 @@ final class RadialOpeningTests: XCTestCase {
         return points
     }
 
-    /// Wherever the pointer is when the wheel opens, nothing is lit and releasing cancels,
-    /// a modifier change (Shift among them) leaves it so, and a pointer event that did not move
-    /// changes nothing either. Where the centre is not at the pointer, the pointer was moved to
-    /// the centre, once; where it is, the pointer was left alone.
+    /// Wherever the pointer is when the wheel opens, nothing is lit and releasing cancels, and
+    /// a pointer event that did not move changes nothing either. Where the centre is not at the
+    /// pointer, the pointer was moved to the centre, once; where it is, the pointer was left alone.
     func testAtOpenNothingIsLitAndReleasingCancelsWhereverThePointerIs() {
         for display in Self.displays {
-            for count in [3, 8, 12] {
-                let wedges = RadialLayoutTests.wedges(count, RadialLayoutTests.long)
+            for count in [3, 10, 14] {
+                let tree = RadialLayoutTests.tree(count, RadialLayoutTests.long)
                 var warps: [CGPoint] = []
-                let menu = menu(warps: { warps.append($0) }, shift: true)
+                let menu = menu(warps: { warps.append($0) })
                 for pointer in Self.grid(display.frame) {
                     warps = []
-                    menu.prepare(wedges: wedges, at: pointer, on: display, movesPointer: true)
-                    let what = "\(count) wedges at \(pointer) on \(display.frame)"
-                    XCTAssertEqual(menu.selection, .cancel, what)
+                    menu.prepare(tree: tree, at: pointer, on: display, movesPointer: true)
+                    let what = "\(count) loadouts at \(pointer) on \(display.frame)"
+                    XCTAssertEqual(menu.selection, [], what)
                     XCTAssertEqual(menu.releaseOutcome, .cancelled, what)
-                    menu.modifiersChanged()
-                    XCTAssertEqual(menu.selection, .cancel, "\(what), after a modifier change")
                     menu.pointerMoved(to: pointer, delta: .zero)
-                    XCTAssertEqual(menu.selection, .cancel, "\(what), after an event that did not move")
+                    XCTAssertEqual(menu.selection, [], "\(what), after an event that did not move")
                     // A pen or a remotely driven pointer reports where it really is, away from
                     // the centre the pointer was moved to, with a delta: still nothing.
                     menu.pointerMoved(to: CGPoint(x: pointer.x + 2, y: pointer.y - 1), delta: CGVector(dx: 2, dy: 1))
-                    XCTAssertEqual(menu.selection, .cancel, "\(what), after a first event that moved")
+                    XCTAssertEqual(menu.selection, [], "\(what), after a first event that moved")
                     menu.pointerMoved(to: CGPoint(x: pointer.x + 6, y: pointer.y + 1), delta: CGVector(dx: 4, dy: -2))
-                    XCTAssertEqual(menu.selection, .cancel, "\(what), within a few points of the first event")
+                    XCTAssertEqual(menu.selection, [], "\(what), within a few points of the first event")
                     XCTAssertEqual(menu.releaseOutcome, .cancelled, what)
                     if hypot(menu.center.x - pointer.x, menu.center.y - pointer.y) > 0.5 {
                         XCTAssertEqual(warps, [ScreenCoords.axPoint(fromCocoa: menu.center, primaryHeight: display.primaryHeight)], what)
@@ -74,58 +70,55 @@ final class RadialOpeningTests: XCTestCase {
         }
     }
 
-    /// The park wedge's targets are read again as it becomes highlighted without waiting for the
-    /// answer: the hint keeps what it said until the answer comes, which is used only while the
-    /// park wedge is still highlighted in the same opening of the wheel.
-    func testTheParkWedgeRereadsItsTargetsWithoutWaiting() {
+    /// The park petal's targets are read again as it is reached without waiting for the
+    /// answer: the hints keep what they said until the answer comes, which is used only while
+    /// the park petal is still on the path in the same opening of the wheel.
+    func testTheParkPetalRereadsItsTargetsWithoutWaiting() {
         let menu = menu()
-        var asked: [(RadialMenu.Wedge.ParkTargets) -> Void] = []
+        var asked: [(RadialMenu.ParkTargets) -> Void] = []
         menu.readParkTargets = { answer in asked.append(answer) }
         let display = Self.displays[1]
-        var wedges = RadialLayoutTests.wedges(8, RadialLayoutTests.short)
-        wedges[6].kind = .park(.init(focused: "Safari · Docs"))
+        let tree = RadialLayoutTests.tree(3, RadialLayoutTests.short, park: .init(focused: "Safari · Docs"))
         let at = CGPoint(x: display.frame.midX, y: display.frame.midY)
-        menu.prepare(wedges: wedges, at: at, on: display, movesPointer: true)
-        func hint() -> String { RadialMenu.hint(for: menu.selection, in: menu.wedges) }
+        menu.prepare(tree: tree, at: at, on: display, movesPointer: true)
+        func hint() -> String { RadialMenu.hint(for: ["park", "park"], in: menu.tree) }
         XCTAssertTrue(asked.isEmpty)
-        menu.select(index: 6, ring: .inner)
-        XCTAssertEqual(asked.count, 1, "asked as it became highlighted")
+        menu.select(path: ["park"])
+        XCTAssertEqual(asked.count, 1, "asked as it was reached")
         XCTAssertEqual(hint(), "Park Safari · Docs", "unchanged until the answer")
-        menu.select(index: 6, ring: .middle)
-        XCTAssertEqual(asked.count, 1, "still highlighted: not asked again")
-        menu.select(index: 6, ring: .inner)
+        menu.select(path: ["park", "restore"])
+        XCTAssertEqual(asked.count, 1, "still on the path: not asked again")
         asked[0](.init(focused: "Notes · Groceries"))
-        XCTAssertEqual(hint(), "Park Notes · Groceries", "the answer, while the park wedge is highlighted")
+        XCTAssertEqual(hint(), "Park Notes · Groceries", "the answer, while the park petal is on the path")
 
-        menu.select(index: 0, ring: .inner)
-        menu.select(index: 6, ring: .inner)
+        menu.select(path: ["loadouts"])
+        menu.select(path: ["park"])
         XCTAssertEqual(asked.count, 2)
-        menu.select(index: 1, ring: .inner)
+        menu.select(path: ["capture"])
         asked[1](.init(focused: "Terminal"))
-        menu.select(index: 6, ring: .inner)
+        menu.select(path: ["park"])
         XCTAssertEqual(asked.count, 3)
-        XCTAssertEqual(hint(), "Park Notes · Groceries", "an answer that came after the park wedge was left is not used")
+        XCTAssertEqual(hint(), "Park Notes · Groceries", "an answer that came after the park petal was left is not used")
 
-        menu.prepare(wedges: wedges, at: at, on: display, movesPointer: true)
-        menu.select(index: 6, ring: .inner)
+        menu.prepare(tree: tree, at: at, on: display, movesPointer: true)
+        menu.select(path: ["park"])
         asked[2](.init(focused: "Mail · Inbox"))
         XCTAssertEqual(hint(), "Park Safari · Docs", "an answer from an earlier opening is not used")
     }
 
-    /// Park left and highlighted again while a read is still out: that read's answer is older
+    /// Park left and reached again while a read is still out: that read's answer is older
     /// than the highlight, so it is not used, and the wheel asks again as it lands.
-    func testARehighlightAsksAgainRatherThanUseAnOlderAnswer() {
+    func testAReturnAsksAgainRatherThanUseAnOlderAnswer() {
         let menu = menu()
-        var asked: [(RadialMenu.Wedge.ParkTargets) -> Void] = []
+        var asked: [(RadialMenu.ParkTargets) -> Void] = []
         menu.readParkTargets = { answer in asked.append(answer) }
         let display = Self.displays[1]
-        var wedges = RadialLayoutTests.wedges(8, RadialLayoutTests.short)
-        wedges[6].kind = .park(.init(focused: "Safari · Docs"))
-        menu.prepare(wedges: wedges, at: CGPoint(x: display.frame.midX, y: display.frame.midY), on: display, movesPointer: true)
-        func hint() -> String { RadialMenu.hint(for: menu.selection, in: menu.wedges) }
-        menu.select(index: 6, ring: .inner)
-        menu.select(index: 0, ring: .inner)
-        menu.select(index: 6, ring: .inner)
+        let tree = RadialLayoutTests.tree(3, RadialLayoutTests.short, park: .init(focused: "Safari · Docs"))
+        menu.prepare(tree: tree, at: CGPoint(x: display.frame.midX, y: display.frame.midY), on: display, movesPointer: true)
+        func hint() -> String { RadialMenu.hint(for: ["park", "park"], in: menu.tree) }
+        menu.select(path: ["park"])
+        menu.select(path: ["loadouts"])
+        menu.select(path: ["park"])
         XCTAssertEqual(asked.count, 1, "one read out at a time")
         asked[0](.init(focused: "Notes · Groceries"))
         XCTAssertEqual(hint(), "Park Safari · Docs", "the older answer is not used")
@@ -134,37 +127,37 @@ final class RadialOpeningTests: XCTestCase {
         XCTAssertEqual(hint(), "Park Terminal")
 
         // Left again before the older answer lands: it is not used, and nothing is asked until
-        // Park is highlighted again.
-        menu.select(index: 0, ring: .inner)
-        menu.select(index: 6, ring: .inner)
+        // Park is reached again.
+        menu.select(path: ["loadouts"])
+        menu.select(path: ["park"])
         XCTAssertEqual(asked.count, 3)
-        menu.select(index: 0, ring: .inner)
-        menu.select(index: 6, ring: .inner)
-        menu.select(index: 0, ring: .inner)
+        menu.select(path: ["loadouts"])
+        menu.select(path: ["park"])
+        menu.select(path: ["loadouts"])
         asked[2](.init(focused: "Mail · Inbox"))
         XCTAssertEqual(asked.count, 3)
-        menu.select(index: 6, ring: .inner)
+        menu.select(path: ["park"])
         XCTAssertEqual(asked.count, 4)
         XCTAssertEqual(hint(), "Park Terminal")
     }
 
     /// A wheel opened again with the same words in the same room reuses its layout; any other
-    /// words (a widgets button that reads Lower now) or room lay it out anew.
+    /// words (a widgets action that reads Lower now) or room lay it out anew.
     func testALayoutIsReusedOnlyForTheSameWordsAndRoom() {
         let menu = menu()
         let display = Self.displays[1]
         let at = CGPoint(x: display.frame.midX, y: display.frame.midY)
-        func widgetsButton() -> [String]? { menu.layout.word(.button(7, .inner))?.fit.lines }
-        var wedges = RadialLayoutTests.wedges(8, RadialLayoutTests.short)
-        menu.prepare(wedges: wedges, at: at, on: display, movesPointer: true)
-        XCTAssertEqual(widgetsButton(), ["Reveal"])
+        func reveal() -> [String]? { menu.layout.word(["widgets", "reveal"])?.fit.lines }
+        menu.prepare(tree: RadialLayoutTests.tree(6, RadialLayoutTests.short), at: at, on: display, movesPointer: true)
+        XCTAssertEqual(reveal(), ["Reveal"])
         let first = menu.layout
-        menu.prepare(wedges: wedges, at: at, on: display, movesPointer: true)
+        menu.prepare(tree: RadialLayoutTests.tree(6, RadialLayoutTests.short), at: at, on: display, movesPointer: true)
         XCTAssertEqual(menu.layout, first)
-        wedges[7].kind = .widgets(.init(revealed: true))
-        menu.prepare(wedges: wedges, at: at, on: display, movesPointer: true)
-        XCTAssertEqual(widgetsButton(), ["Lower"])
-        menu.prepare(wedges: wedges, at: CGPoint(x: 100, y: 100), on: Self.displays[0], movesPointer: true)
+        menu.prepare(tree: RadialLayoutTests.tree(6, RadialLayoutTests.short, widgets: .init(revealed: true)), at: at, on: display,
+                     movesPointer: true)
+        XCTAssertEqual(reveal(), ["Lower"])
+        menu.prepare(tree: RadialLayoutTests.tree(14, RadialLayoutTests.long), at: CGPoint(x: 100, y: 100), on: Self.displays[0],
+                     movesPointer: true)
         XCTAssertLessThan(menu.layout.scale, 1, "the small screen's room")
     }
 
@@ -180,72 +173,108 @@ final class RadialOpeningTests: XCTestCase {
     func testAWheelOpenedElsewhereLeavesThePointerAlone() {
         var warps: [CGPoint] = []
         let menu = menu(warps: { warps.append($0) })
-        let display = Self.displays[0]
-        menu.prepare(wedges: RadialLayoutTests.wedges(8, RadialLayoutTests.short), at: CGPoint(x: 5, y: 5), on: display,
+        menu.prepare(tree: RadialLayoutTests.tree(8, RadialLayoutTests.short), at: CGPoint(x: 5, y: 5), on: Self.displays[0],
                      movesPointer: false)
         XCTAssertEqual(warps, [])
-        XCTAssertEqual(menu.selection, .cancel)
+        XCTAssertEqual(menu.selection, [])
     }
 
-    /// Once the pointer has really moved, the wheel follows it from the centre.
-    func testOnceThePointerMovesTheWheelFollowsIt() {
+    /// The pointer moved by `offset` from the centre, as one event from the last place.
+    private func move(_ menu: RadialMenu, to offset: CGPoint) {
+        menu.pointerMoved(to: CGPoint(x: menu.center.x + offset.x, y: menu.center.y + offset.y), delta: CGVector(dx: 3, dy: 0))
+    }
+
+    /// Once the pointer has really moved, the wheel follows its path: onto Apply Loadout (the
+    /// loadouts unfold), onto a loadout (its actions unfold, nothing is previewed), out to Apply;
+    /// releasing there applies, releasing on a petal with children cancels.
+    func testOnceThePointerMovesTheWheelFollowsItsPath() throws {
         let menu = menu()
         let display = Self.displays[1]
-        let wedges = RadialLayoutTests.wedges(8, RadialLayoutTests.short)
-        menu.prepare(wedges: wedges, at: CGPoint(x: display.frame.midX, y: display.frame.midY), on: display, movesPointer: true)
-        let g = menu.geometry
-        let band = g.band(.middle, of: 2)
-        let r = (band.r0 + band.r1) / 2
-        let a = g.centerAngle(of: 2)
-        let target = CGPoint(x: menu.center.x + r * CGFloat(sin(a)), y: menu.center.y + r * CGFloat(cos(a)))
-        menu.pointerMoved(to: CGPoint(x: menu.center.x + 1, y: menu.center.y), delta: CGVector(dx: 1, dy: 0))
-        XCTAssertEqual(menu.selection, .cancel)
-        menu.pointerMoved(to: target, delta: CGVector(dx: 3, dy: 0))
-        XCTAssertEqual(menu.selection, .wedge(index: 2, ring: .middle))
-        XCTAssertEqual(menu.releaseOutcome, RadialMenu.outcome(of: wedges[2].kind, ring: .middle))
+        let tree = RadialLayoutTests.tree(3, RadialLayoutTests.short)
+        menu.prepare(tree: tree, at: CGPoint(x: display.frame.midX, y: display.frame.midY), on: display, movesPointer: true)
+        var outcomes: [RadialMenu.Outcome] = []
+        menu.onCommit = { outcomes.append($0) }
+        move(menu, to: CGPoint(x: 1, y: 0))
+        XCTAssertEqual(menu.selection, [])
+        let top = try XCTUnwrap(menu.layout.word(["loadouts"]))
+        move(menu, to: CGPoint(x: top.frame.midX, y: top.frame.midY))
+        XCTAssertEqual(menu.selection, ["loadouts"])
+        XCTAssertEqual(menu.releaseOutcome, .cancelled, "a petal with children")
+        let mail = try XCTUnwrap(menu.layout.word(["loadouts", "Mail"]))
+        move(menu, to: CGPoint(x: mail.frame.midX, y: mail.frame.midY))
+        XCTAssertEqual(menu.selection, ["loadouts", "Mail"])
+        XCTAssertEqual(menu.releaseOutcome, .cancelled, "hovering a loadout does not preview it")
+        XCTAssertTrue(outcomes.isEmpty)
+        let apply = try XCTUnwrap(menu.layout.word(["loadouts", "Mail", "apply"]))
+        move(menu, to: CGPoint(x: apply.frame.midX, y: apply.frame.midY))
+        XCTAssertEqual(menu.selection, ["loadouts", "Mail", "apply"])
+        XCTAssertEqual(menu.releaseOutcome, .apply(loadout: "Mail", clear: false))
+        move(menu, to: CGPoint(x: 0, y: 2))
+        XCTAssertEqual(menu.selection, [], "back in the centre")
     }
 
     /// Where the pointer's first report after the wheel opens is far from the centre (a
     /// hovering pen, a remotely driven pointer: moving the pointer did not stick), nothing
     /// lights there; once the pointer has gone on a few points from that first report, the
     /// wheel lights what is under it.
-    func testAFirstReportAwayFromTheCentreLightsNothingUntilThePointerGoesOn() {
+    func testAFirstReportAwayFromTheCentreLightsNothingUntilThePointerGoesOn() throws {
         let menu = menu()
         let display = Self.displays[1]
-        let wedges = RadialLayoutTests.wedges(8, RadialLayoutTests.short)
-        menu.prepare(wedges: wedges, at: CGPoint(x: display.frame.minX + 3, y: display.frame.minY + 3), on: display, movesPointer: true)
-        let g = menu.geometry
-        let band = g.band(.outer, of: 1)
-        let r = (band.r0 + band.r1) / 2
-        let a = g.centerAngle(of: 1)
-        let pen = CGPoint(x: menu.center.x + r * CGFloat(sin(a)), y: menu.center.y + r * CGFloat(cos(a)))
+        menu.prepare(tree: RadialLayoutTests.tree(6, RadialLayoutTests.short), at: CGPoint(x: display.frame.minX + 3, y: display.frame.minY + 3),
+                     on: display, movesPointer: true)
+        let capture = try XCTUnwrap(menu.layout.word(["capture"]))
+        let pen = CGPoint(x: menu.center.x + capture.frame.midX, y: menu.center.y + capture.frame.midY)
         menu.pointerMoved(to: pen, delta: CGVector(dx: 140, dy: -90))
-        XCTAssertEqual(menu.selection, .cancel, "the first report, far from the centre")
+        XCTAssertEqual(menu.selection, [], "the first report, far from the centre")
         XCTAssertEqual(menu.releaseOutcome, .cancelled)
-        menu.pointerMoved(to: CGPoint(x: pen.x + 3, y: pen.y + 3), delta: CGVector(dx: 3, dy: 3))
-        XCTAssertEqual(menu.selection, .cancel, "a few points on")
-        let on = CGPoint(x: pen.x + 6 * CGFloat(sin(a)), y: pen.y + 6 * CGFloat(cos(a)))
-        menu.pointerMoved(to: on, delta: CGVector(dx: 3, dy: 3))
-        XCTAssertEqual(menu.selection, g.selection(at: CGPoint(x: on.x - menu.center.x, y: on.y - menu.center.y)))
-        XCTAssertEqual(menu.selection, .wedge(index: 1, ring: .outer), "past the threshold it lights what is under the pointer")
+        menu.pointerMoved(to: CGPoint(x: pen.x + 3, y: pen.y), delta: CGVector(dx: 3, dy: 0))
+        XCTAssertEqual(menu.selection, [], "a few points on")
+        menu.pointerMoved(to: CGPoint(x: pen.x + 6, y: pen.y), delta: CGVector(dx: 3, dy: 0))
+        XCTAssertEqual(menu.selection, ["capture"], "past the threshold it lights what is under the pointer")
     }
 
-    /// The keyboard works with no pointer movement: a digit picks a wedge's inner ring, Shift
-    /// its last ring, P previews the highlighted loadout.
+    /// The keyboard works with no pointer movement: a digit picks a petal among those showing
+    /// at the open branch, and P previews the loadout on the path.
     func testTheKeyboardWorksWithoutMovingThePointer() {
-        let menu = menu(shift: false)
-        let display = Self.displays[0]
-        let wedges = RadialLayoutTests.wedges(8, RadialLayoutTests.short)
-        menu.prepare(wedges: wedges, at: CGPoint(x: 1000, y: 30), on: display, movesPointer: true)
-        XCTAssertTrue(menu.handleKeyCode(HotKeyCenter.keyCode(for: "3")!))
-        XCTAssertEqual(menu.selection, .wedge(index: 2, ring: .inner))
-        menu.modifiers = { [.shift] }
-        menu.modifiersChanged()
-        XCTAssertEqual(menu.selection, .wedge(index: 2, ring: .outer))
+        let menu = menu()
+        let tree = RadialLayoutTests.tree(3, RadialLayoutTests.short)
+        menu.prepare(tree: tree, at: CGPoint(x: 1000, y: 30), on: Self.displays[0], movesPointer: true)
+        func press(_ key: String) { XCTAssertTrue(menu.handleKeyCode(HotKeyCenter.keyCode(for: key)!), key) }
+        press("1")
+        XCTAssertEqual(menu.selection, ["loadouts"])
+        press("3")
+        XCTAssertEqual(menu.selection, ["loadouts", "Focus"])
+        press("2")
+        XCTAssertEqual(menu.selection, ["loadouts", "Focus", "apply"])
+        press("3")
+        XCTAssertEqual(menu.selection, ["loadouts", "Focus", "clear"], "an action's siblings")
+        press("9")
+        XCTAssertEqual(menu.selection, ["loadouts", "Focus", "clear"], "a digit past the petals is swallowed")
+        // The pointer moving inside the dead zone leaves the keyboard's choice.
+        move(menu, to: CGPoint(x: 3, y: 0))
+        move(menu, to: CGPoint(x: 12, y: 0))
+        XCTAssertEqual(menu.selection, ["loadouts", "Focus", "clear"])
+        var outcomes: [RadialMenu.Outcome] = []
+        menu.onCommit = { outcomes.append($0) }
+        press("p")
+        XCTAssertEqual(outcomes, [.preview(loadout: "Focus")])
+    }
+
+    /// P with no loadout on the path previews the active loadout (nil); the socket's `select`
+    /// takes a path and refuses one the tree does not have.
+    func testPWithoutALoadoutAndSelectingByPath() {
+        let menu = menu()
+        menu.prepare(tree: RadialLayoutTests.tree(3, RadialLayoutTests.short), at: CGPoint(x: 500, y: 300), on: Self.displays[0],
+                     movesPointer: true)
+        XCTAssertTrue(menu.select(path: ["capture", "draw"]))
+        XCTAssertEqual(menu.releaseOutcome, .drawLayout)
+        XCTAssertFalse(menu.select(path: ["capture", "nope"]))
+        XCTAssertEqual(menu.selection, ["capture", "draw"])
         var outcomes: [RadialMenu.Outcome] = []
         menu.onCommit = { outcomes.append($0) }
         XCTAssertTrue(menu.handleKeyCode(HotKeyCenter.keyCode(for: "p")!))
-        guard case .loadout(let name) = wedges[2].kind else { return XCTFail("wedge 2 is a loadout") }
-        XCTAssertEqual(outcomes, [.preview(loadout: name)])
+        XCTAssertEqual(outcomes, [.preview(loadout: nil)])
+        let json = menu.json
+        XCTAssertEqual((json["selection"] as? [String: Any])?["path"] as? String, "capture/draw")
     }
 }

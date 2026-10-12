@@ -5,9 +5,11 @@ import XCTest
 
 /// Renders the loadout wheel offscreen for review, as the screen would show it: a generated
 /// desktop (shapes and text, never a screenshot), sharp outside the field and, inside it,
-/// blurred (a Gaussian of radius 25 pt, the soft backdrop's) through the field's blur profile,
-/// under the wheel's tint through its tint profile, with the wheel's view drawn on top. No window is ordered in and nothing acts on the desktop. Pictures go to
-/// `MACHUD_WHEEL_SNAPSHOT_DIR`; without it they are rendered and checked, and nothing is written.
+/// blurred (a Gaussian of radius 25 pt, the soft backdrop's) through the field's blur profile
+/// for what shows, under the wheel's tint through its tint profile, with the wheel's view drawn
+/// on top, settled with the shot's path highlighted. No window is ordered in and nothing acts on
+/// the desktop. Pictures go to `MACHUD_WHEEL_SNAPSHOT_DIR`; without it they are rendered and
+/// checked, and nothing is written.
 @MainActor
 final class RadialWheelSnapshotTests: XCTestCase {
     enum Desktop: String, CaseIterable { case bright, dark, colourful }
@@ -32,29 +34,23 @@ final class RadialWheelSnapshotTests: XCTestCase {
         apps.prefix(count).compactMap { RadialMenu.icon(for: .app(bundleID: $0, titleMatch: nil), panels: nil) }
     }
 
-    /// `loadouts` loadout wedges named from `names`, then Capture, Park and (when `widgets`) Widgets.
-    private static func wedges(_ names: [String], loadouts: Int, widgets: RadialMenu.Wedge.WidgetsState? = .init(),
-                               allScreens: Bool = false, park: RadialMenu.Wedge.ParkTargets = .init()) -> [RadialMenu.Wedge] {
-        var out = (0..<loadouts).map { i in
-            RadialMenu.Wedge(name: names[i % names.count], icons: appIcons(2 + i % 4), kind: .loadout(names[i % names.count]))
+    /// `loadouts` loadouts named from `names`, then Capture, Park and (when `widgets`) Widgets.
+    private static func tree(_ names: [String], loadouts: Int, widgets: RadialMenu.WidgetsState? = .init(),
+                             allScreens: Bool = false, park: RadialMenu.ParkTargets = .init()) -> [RadialNode] {
+        let entries = (0..<loadouts).map { i in
+            RadialMenu.LoadoutEntry(name: i < names.count ? names[i] : "\(names[i % names.count]) \(i / names.count + 1)",
+                                    icons: appIcons(2 + i % 3))
         }
-        out.append(RadialMenu.Wedge(name: "Capture", icons: symbol("camera.viewfinder"), kind: .capture(offersAllScreens: allScreens)))
-        out.append(RadialMenu.Wedge(name: "Park", icons: symbol("rectangle.portrait.and.arrow.right"), kind: .park(park)))
-        if let widgets { out.append(RadialMenu.Wedge(name: "Widgets", icons: symbol("square.grid.2x2"), kind: .widgets(widgets))) }
-        return out
+        return RadialMenu.tree(loadouts: entries, offersAllScreens: allScreens, park: park, widgets: widgets)
     }
 
     struct Shot {
         var name: String
-        var wedges: [RadialMenu.Wedge]
-        var selection: RadialGeometry.Selection
+        var tree: [RadialNode]
+        var selection: [String]
         var desktop: Desktop
-        var resting: RadialMenu.RestingButtons = .faint
         /// Reduce transparency on: the soft backdrop shows the system's opaque material.
         var reduced = false
-        /// The field's outline: the wheel's, or (for comparison, pictures only) a plain ellipse
-        /// around every word with the same full blur inside and the same fade.
-        var ellipse = false
         /// A whole screen of this visible size (a 24 pt menu bar above it), the wheel opened at `pointer`.
         var screen: CGSize?
         var pointer: CGPoint = .zero
@@ -63,93 +59,65 @@ final class RadialWheelSnapshotTests: XCTestCase {
     // MARK: The set
 
     /// What is rendered without `MACHUD_WHEEL_SNAPSHOT_DIR`.
-    private static let checked: Set<String> = ["hover-08-side-outer-colourful", "system-material-reduce-transparency-08-bright",
-                                               "screen-1024x640-08-corner-open-bright"]
+    private static let checked: Set<String> = ["stage-3-actions-03-bright", "system-material-reduce-transparency-06-bright",
+                                               "screen-1024x640-10-corner-open-bright"]
 
     private func shots() -> [Shot] {
         var out: [Shot] = []
-        let desktops = Desktop.allCases
-        func desktop(_ n: Int) -> Desktop { desktops[n % desktops.count] }
+        let three = Self.tree(Self.short, loadouts: 3)
 
-        // At rest: 3, 6, 8 and 12 wedges, and long names at 6 and 12.
-        out.append(Shot(name: "rest-03-bright", wedges: Self.wedges(Self.short, loadouts: 1, widgets: nil), selection: .cancel, desktop: .bright))
-        out.append(Shot(name: "rest-06-dark", wedges: Self.wedges(Self.short, loadouts: 3), selection: .cancel, desktop: .dark))
-        out.append(Shot(name: "rest-08-colourful", wedges: Self.wedges(Self.short, loadouts: 5), selection: .cancel, desktop: .colourful))
-        out.append(Shot(name: "rest-12-bright", wedges: Self.wedges(Self.short, loadouts: 9), selection: .cancel, desktop: .bright))
-        out.append(Shot(name: "rest-06-long-colourful", wedges: Self.wedges(Self.long, loadouts: 3), selection: .cancel, desktop: .colourful))
-        out.append(Shot(name: "rest-12-long-dark", wedges: Self.wedges(Self.long, loadouts: 9), selection: .cancel, desktop: .dark))
-
-        // A loadout wedge with each ring hovered at the top, a diagonal, the side and the bottom.
-        let eight = Self.wedges(Self.long, loadouts: 5)
-        var n = 0
-        for (place, index) in [("top", 0), ("diagonal", 1), ("side", 2), ("bottom", 4)] {
-            for ring in RadialGeometry.Ring.allCases {
-                out.append(Shot(name: "hover-08-\(place)-\(ring.rawValue)-\(desktop(n).rawValue)", wedges: eight,
-                                selection: .wedge(index: index, ring: ring), desktop: desktop(n)))
-                n += 1
-            }
+        // The three stages of a path, on a bright and a dark desktop: the top petals as the
+        // wheel opens, Apply Loadout reached with three loadouts out, and a loadout's actions out.
+        for desktop in [Desktop.bright, .dark] {
+            out.append(Shot(name: "stage-1-top-03-\(desktop.rawValue)", tree: three, selection: [], desktop: desktop))
+            out.append(Shot(name: "stage-2-loadouts-03-\(desktop.rawValue)", tree: three, selection: ["loadouts"], desktop: desktop))
+            out.append(Shot(name: "stage-3-actions-03-\(desktop.rawValue)", tree: three, selection: ["loadouts", "Reading", "apply"],
+                            desktop: desktop))
         }
-        out.append(Shot(name: "hover-12-long-side-outer-bright", wedges: Self.wedges(Self.long, loadouts: 9),
-                        selection: .wedge(index: 3, ring: .outer), desktop: .bright))
+        out.append(Shot(name: "stage-3-loadout-03-colourful", tree: three, selection: ["loadouts", "Code"], desktop: .colourful))
 
-        // Park: no focused window, focused, one parked, several parked; a two-line hint.
-        let park: [(String, RadialMenu.Wedge.ParkTargets, RadialGeometry.Ring)] = [
-            ("nothing-inner", .init(), .inner),
-            ("focused-inner", .init(focused: "Safari · Apple Developer Documentation"), .inner),
-            ("one-parked-middle", .init(focused: nil, parked: ["Mail · Inbox"]), .middle),
-            ("several-parked-middle", .init(focused: "Notes · Groceries", parked: ["Mail · Inbox", "Terminal", "Music"]), .middle),
-            ("long-title-inner", .init(focused: "Safari · How to design a radial menu that reads clearly over any desktop, with examples and a long subtitle"), .inner),
-        ]
-        for (k, (label, targets, ring)) in park.enumerated() {
-            out.append(Shot(name: "park-\(label)-\(desktop(k).rawValue)", wedges: Self.wedges(Self.long, loadouts: 3, park: targets),
-                            selection: .wedge(index: 4, ring: ring), desktop: desktop(k)))
-        }
+        // Many loadouts, and long names.
+        let ten = Self.tree(Self.short, loadouts: 10)
+        out.append(Shot(name: "loadouts-10-bright", tree: ten, selection: ["loadouts"], desktop: .bright))
+        out.append(Shot(name: "loadouts-10-side-clear-dark", tree: ten, selection: ["loadouts", "Music", "clear"], desktop: .dark))
+        out.append(Shot(name: "loadouts-10-bottom-preview-colourful", tree: ten, selection: ["loadouts", "Plan", "preview"],
+                        desktop: .colourful))
+        let long = Self.tree(Self.long, loadouts: 6)
+        out.append(Shot(name: "loadouts-06-long-dark", tree: long, selection: ["loadouts"], desktop: .dark))
+        out.append(Shot(name: "loadouts-06-long-apply-bright", tree: long, selection: ["loadouts", "dev: Browsers", "apply"],
+                        desktop: .bright))
+        out.append(Shot(name: "loadouts-14-colourful", tree: Self.tree(Self.short, loadouts: 14), selection: ["loadouts"],
+                        desktop: .colourful))
 
-        // Widgets: reveal, edit; and while revealed (Lower) and while editing (Done).
-        let widgets: [(String, RadialMenu.Wedge.WidgetsState, RadialGeometry.Ring)] = [
-            ("reveal", .init(), .inner), ("edit", .init(), .middle),
-            ("lower", .init(revealed: true), .inner), ("done", .init(editing: true), .middle),
-        ]
-        for (k, (label, state, ring)) in widgets.enumerated() {
-            out.append(Shot(name: "widgets-\(label)-\(desktop(k + 1).rawValue)", wedges: Self.wedges(Self.long, loadouts: 3, widgets: state),
-                            selection: .wedge(index: 5, ring: ring), desktop: desktop(k + 1)))
-        }
-
-        // Capture, with and without the every-screen ring.
-        out.append(Shot(name: "capture-one-screen-inner-dark", wedges: Self.wedges(Self.long, loadouts: 3),
-                        selection: .wedge(index: 3, ring: .inner), desktop: .dark))
-        out.append(Shot(name: "capture-one-screen-middle-bright", wedges: Self.wedges(Self.long, loadouts: 3),
-                        selection: .wedge(index: 3, ring: .middle), desktop: .bright))
-        for (k, ring) in RadialGeometry.Ring.allCases.enumerated() {
-            out.append(Shot(name: "capture-all-screens-\(ring.rawValue)-\(desktop(k + 2).rawValue)",
-                            wedges: Self.wedges(Self.long, loadouts: 3, allScreens: true),
-                            selection: .wedge(index: 3, ring: ring), desktop: desktop(k + 2)))
-        }
-
-        // Variant B: only the hovered wedge's buttons.
-        out.append(Shot(name: "variant-b-rest-08-bright", wedges: eight, selection: .cancel, desktop: .bright, resting: .hidden))
-        out.append(Shot(name: "variant-b-hover-08-side-middle-colourful", wedges: eight, selection: .wedge(index: 2, ring: .middle),
-                        desktop: .colourful, resting: .hidden))
-        out.append(Shot(name: "variant-b-hover-12-long-top-inner-dark", wedges: Self.wedges(Self.long, loadouts: 9),
-                        selection: .wedge(index: 0, ring: .inner), desktop: .dark, resting: .hidden))
+        // Capture (with All screens), Park with a long title, Widgets while revealed.
+        out.append(Shot(name: "capture-all-screens-dark", tree: Self.tree(Self.short, loadouts: 3, allScreens: true),
+                        selection: ["capture", "all"], desktop: .dark))
+        out.append(Shot(name: "capture-draw-bright", tree: three, selection: ["capture", "draw"], desktop: .bright))
+        out.append(Shot(name: "park-long-title-colourful",
+                        tree: Self.tree(Self.short, loadouts: 3,
+                                        park: .init(focused: "Safari · How to design a radial menu that reads clearly over any desktop, with examples")),
+                        selection: ["park", "park"], desktop: .colourful))
+        out.append(Shot(name: "park-restore-dark", tree: Self.tree(Self.short, loadouts: 3, park: .init(parked: ["Mail · Inbox", "Notes"])),
+                        selection: ["park", "restore"], desktop: .dark))
+        out.append(Shot(name: "widgets-lower-bright", tree: Self.tree(Self.short, loadouts: 3, widgets: .init(revealed: true)),
+                        selection: ["widgets", "reveal"], desktop: .bright))
+        out.append(Shot(name: "no-widgets-no-loadouts-dark", tree: Self.tree(Self.short, loadouts: 0, widgets: nil),
+                        selection: ["loadouts"], desktop: .dark))
 
         // The system's material (Reduce transparency on): opaque and dark, through a plain soft disc.
-        out.append(Shot(name: "system-material-reduce-transparency-08-bright", wedges: eight,
-                        selection: .wedge(index: 1, ring: .middle), desktop: .bright, reduced: true))
-        // A plain ellipse around every word in place of the wheel's outline, for comparison.
-        out.append(Shot(name: "ellipse-rest-08-bright", wedges: eight, selection: .cancel, desktop: .bright, ellipse: true))
-        out.append(Shot(name: "ellipse-hover-08-side-middle-colourful", wedges: eight, selection: .wedge(index: 2, ring: .middle),
-                        desktop: .colourful, ellipse: true))
+        out.append(Shot(name: "system-material-reduce-transparency-06-bright", tree: Self.tree(Self.short, loadouts: 6),
+                        selection: ["loadouts", "Mail"], desktop: .bright, reduced: true))
 
-        // A 13-inch display at Larger Text (1024 by 640, less the menu bar), eight wedges, the
+        // A 13-inch display at Larger Text (1024 by 640, less the menu bar), ten loadouts, the
         // wheel opened near the bottom right corner (as it shows, the pointer moved to its
-        // centre; and with a button lit) and in the middle.
-        out.append(Shot(name: "screen-1024x640-08-corner-open-bright", wedges: eight, selection: .cancel,
-                        desktop: .bright, screen: CGSize(width: 1024, height: 616), pointer: CGPoint(x: 960, y: 40)))
-        out.append(Shot(name: "screen-1024x640-08-corner-hover-bright", wedges: eight, selection: .wedge(index: 2, ring: .outer),
-                        desktop: .bright, screen: CGSize(width: 1024, height: 616), pointer: CGPoint(x: 960, y: 40)))
-        out.append(Shot(name: "screen-1024x640-08-middle-colourful", wedges: eight, selection: .cancel,
-                        desktop: .colourful, screen: CGSize(width: 1024, height: 616), pointer: CGPoint(x: 512, y: 308)))
+        // centre; and with an action lit) and in the middle.
+        let screen = CGSize(width: 1024, height: 616)
+        out.append(Shot(name: "screen-1024x640-10-corner-open-bright", tree: ten, selection: [], desktop: .bright, screen: screen,
+                        pointer: CGPoint(x: 960, y: 40)))
+        out.append(Shot(name: "screen-1024x640-10-corner-hover-bright", tree: ten, selection: ["loadouts", "Mail", "apply"],
+                        desktop: .bright, screen: screen, pointer: CGPoint(x: 960, y: 40)))
+        out.append(Shot(name: "screen-1024x640-10-middle-colourful", tree: ten, selection: ["loadouts"], desktop: .colourful,
+                        screen: screen, pointer: CGPoint(x: 512, y: 308)))
         return out
     }
 
@@ -160,10 +128,12 @@ final class RadialWheelSnapshotTests: XCTestCase {
         let shots = directory == nil ? shots().filter { Self.checked.contains($0.name) } : shots()
         var pictures = try shots.map { shot in (shot.name, try XCTUnwrap(render(shot), shot.name)) }
         if directory != nil {
-            // The two profiles alone at eight wedges, white where they are full.
-            let field = RadialField(layout: RadialLayout(wedges: Self.wedges(Self.long, loadouts: 5)), reduced: false)
-            pictures.append(("profile-blur-08", try XCTUnwrap(Self.profile(field.blurImage, size: field.support.size))))
-            pictures.append(("profile-tint-08", try XCTUnwrap(Self.profile(field.tintImage, size: field.support.size))))
+            // The two profiles alone, with a loadout's actions out, white where they are full.
+            let layout = RadialLayout(tree: Self.tree(Self.short, loadouts: 3))
+            let whole = RadialField(layout: layout, reduced: false)
+            let field = RadialField(shape: .init(layout: layout, open: ["loadouts", "Reading"], reduced: false), over: whole.support)
+            pictures.append(("profile-blur-03-actions", try XCTUnwrap(Self.profile(field.blurImage, size: field.support.size))))
+            pictures.append(("profile-tint-03-actions", try XCTUnwrap(Self.profile(field.tintImage, size: field.support.size))))
         }
         XCTAssertFalse(pictures.isEmpty)
         for (name, rep) in pictures {
@@ -178,23 +148,23 @@ final class RadialWheelSnapshotTests: XCTestCase {
 
     /// How long the wheel takes, offscreen at 2x, printed for review: from a hotkey press to
     /// its first frame (laying it out, its field, its words) the first time it opens and when it
-    /// opens again, at eight and twelve wedges on a large and a small display; and one frame
-    /// of twelve wedges' words with a button lit.
+    /// opens again, at three and ten loadouts on a large and a small display; how long a
+    /// loadout's actions take to unfold the first time (their field); and one frame with a
+    /// loadout's actions out and one lit.
     func testHowLongTheWheelTakesToOpenAndToDraw() throws {
         let displays = [("1440x900", RadialMenu.Display(frame: CGRect(x: 0, y: 0, width: 1440, height: 900),
                                                         visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 875), primaryHeight: 900)),
                         ("1024x640", RadialMenu.Display(frame: CGRect(x: 0, y: 0, width: 1024, height: 640),
                                                         visibleFrame: CGRect(x: 0, y: 0, width: 1024, height: 616), primaryHeight: 640))]
         for (label, display) in displays {
-            for loadouts in [5, 9] {
-                let wedges = Self.wedges(Self.long, loadouts: loadouts)
+            for loadouts in [3, 10] {
                 let menu = RadialMenu()
                 menu.warpPointer = { _ in }
                 let context = try XCTUnwrap(Self.context(size: CGSize(width: 1400, height: 1400)))
                 var times: [Double] = []
                 for _ in 0..<3 {
                     let start = Date()
-                    menu.prepare(wedges: Self.wedges(Self.long, loadouts: loadouts), at: CGPoint(x: display.frame.midX, y: display.frame.midY),
+                    menu.prepare(tree: Self.tree(Self.long, loadouts: loadouts), at: CGPoint(x: display.frame.midX, y: display.frame.midY),
                                  on: display, movesPointer: true)
                     NSGraphicsContext.saveGraphicsState()
                     NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
@@ -202,17 +172,20 @@ final class RadialWheelSnapshotTests: XCTestCase {
                     NSGraphicsContext.restoreGraphicsState()
                     times.append(Date().timeIntervalSince(start) * 1000)
                 }
-                print(String(format: "Wheel open to first frame, %d wedges on %@: first %.0f ms, then %.0f ms and %.0f ms",
-                             wedges.count, label, times[0], times[1], times[2]))
+                let unfold = Date()
+                _ = menu.field(open: ["loadouts", menu.tree[0].children[0].id])
+                let unfolding = Date().timeIntervalSince(unfold) * 1000
+                print(String(format: "Wheel open to first frame, %d loadouts on %@: first %.0f ms, then %.0f ms and %.0f ms; a loadout's actions' field %.1f ms",
+                             loadouts, label, times[0], times[1], times[2], unfolding))
             }
         }
 
-        let wedges = Self.wedges(Self.long, loadouts: 9)
-        let layout = RadialLayout(wedges: wedges)
+        let tree = Self.tree(Self.long, loadouts: 10)
+        let layout = RadialLayout(tree: tree)
         let field = RadialField(layout: layout, reduced: false)
         let view = RadialWheelView(frame: CGRect(origin: .zero, size: field.canvas.size))
-        view.configure(layout: layout, field: field, wedges: wedges)
-        view.settle(selection: .wedge(index: 3, ring: .middle))
+        view.configure(layout: layout, canvas: field.canvas, tree: tree)
+        view.settle(selection: ["loadouts", tree[0].children[3].id, "apply"])
         let context = try XCTUnwrap(Self.context(size: field.canvas.size))
         let frames = 30
         var elapsed: TimeInterval = 0
@@ -228,7 +201,7 @@ final class RadialWheelSnapshotTests: XCTestCase {
             elapsed = Date().timeIntervalSince(start)
         }
         NSGraphicsContext.restoreGraphicsState()
-        print(String(format: "Wheel frame at twelve wedges: %.2f ms", elapsed / Double(frames) * 1000))
+        print(String(format: "Wheel frame at ten loadouts, an action lit: %.2f ms", elapsed / Double(frames) * 1000))
     }
 
     // MARK: Rendering
@@ -247,18 +220,19 @@ final class RadialWheelSnapshotTests: XCTestCase {
         let size: CGSize
         if let screen = shot.screen {
             // A whole screen with its menu bar, the wheel where it would open.
-            let placed = RadialMenu.place(wedges: shot.wedges, at: shot.pointer, visibleFrame: CGRect(origin: .zero, size: screen))
+            let placed = RadialMenu.place(tree: shot.tree, at: shot.pointer, visibleFrame: CGRect(origin: .zero, size: screen))
             layout = placed.layout
             centre = placed.center
             size = CGSize(width: screen.width, height: screen.height + 24)
         } else {
-            layout = RadialLayout(wedges: shot.wedges)
+            layout = RadialLayout(tree: shot.tree)
             centre = .zero
             size = .zero
         }
-        let field = RadialField(layout: layout, reduced: shot.reduced)
-        // The blur's and the tint's images and where they go, in the wheel's coordinates.
-        let profiles = shot.ellipse ? Self.ellipse(layout) : (rect: field.support, blur: field.blurImage, tint: field.tintImage)
+        // The field of what shows with this selection, over the whole wheel's rectangle.
+        let whole = RadialField(layout: layout, reduced: shot.reduced)
+        let field = RadialField(shape: .init(layout: layout, open: shot.selection, reduced: shot.reduced), over: whole.support)
+        let profiles = (rect: field.support, blur: field.blurImage, tint: field.tintImage)
         // Otherwise the picture is the profiles' rectangle with a margin.
         let (picture, wheelCentre) = shot.screen != nil ? (size, centre)
             : (CGSize(width: profiles.rect.width + 2 * Self.margin, height: profiles.rect.height + 2 * Self.margin),
@@ -290,8 +264,7 @@ final class RadialWheelSnapshotTests: XCTestCase {
         context.restoreGState()
         // The words.
         let view = RadialWheelView(frame: CGRect(origin: .zero, size: field.canvas.size))
-        view.restingButtons = shot.resting
-        view.configure(layout: layout, field: field, wedges: shot.wedges)
+        view.configure(layout: layout, canvas: field.canvas, tree: shot.tree)
         view.settle(selection: shot.selection)
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
@@ -301,12 +274,11 @@ final class RadialWheelSnapshotTests: XCTestCase {
         context.restoreGState()
         NSGraphicsContext.restoreGraphicsState()
         // On a whole screen, the pointer: at the wheel's centre as it shows (moved there where
-        // the wheel could not open around it), or on the button it lights.
+        // the wheel could not open around it), or on the word it lights.
         if shot.screen != nil {
             var pointer = centre
-            if case .wedge(let i, let ring) = shot.selection {
-                let g = layout.geometry, band = g.band(ring, of: i), r = (band.r0 + band.r1) / 2, a = g.centerAngle(of: i)
-                pointer = CGPoint(x: centre.x + r * CGFloat(sin(a)), y: centre.y + r * CGFloat(cos(a)))
+            if let word = layout.word(shot.selection) {
+                pointer = CGPoint(x: centre.x + word.frame.midX, y: centre.y + word.frame.midY)
             }
             // An arrow pointer, its tip at `pointer` (the system's cursor image draws nothing offscreen).
             let tip = [(0.0, 0.0), (0, -17), (4, -13), (7, -20), (10, -19), (7, -12.5), (12, -12.5)]
@@ -334,38 +306,6 @@ final class RadialWheelSnapshotTests: XCTestCase {
         let rep = NSBitmapImageRep(cgImage: image)
         rep.size = picture
         return rep
-    }
-
-    /// The profiles of a plain ellipse around every place a word can be (`RadialField.places`),
-    /// padded like the wheel's field: full inside, fading over the same distance, the tint weaker
-    /// toward the rim by the same amount. Pictures only.
-    private static func ellipse(_ layout: RadialLayout) -> (rect: CGRect, blur: CGImage, tint: CGImage) {
-        let places = RadialField.places(layout)
-        let box = places.reduce(places[0]) { $0.union($1) }
-        let c = CGPoint(x: box.midX, y: box.midY)
-        let corners = places.flatMap { r in [CGPoint(x: r.minX, y: r.minY), CGPoint(x: r.maxX, y: r.minY),
-                                              CGPoint(x: r.minX, y: r.maxY), CGPoint(x: r.maxX, y: r.maxY)] }
-        let (X, Y) = (box.width / 2, box.height / 2)
-        let reach = corners.map { hypot(($0.x - c.x) / X, ($0.y - c.y) / Y) }.max() ?? 1
-        let pad = RadialField.pad * layout.scale, fade = RadialField.fade * layout.scale
-        let (a, b) = (X * reach + pad, Y * reach + pad)
-        let farthest = corners.map { hypot($0.x, $0.y) }.max() ?? 1
-        func blur(_ p: CGPoint) -> CGFloat {
-            let (dx, dy) = (p.x - c.x, p.y - c.y)
-            let rho = hypot(dx / a, dy / b)
-            guard rho > 1 else { return 1 }
-            let d = hypot(dx, dy) * (1 - 1 / rho)
-            guard d < fade else { return 0 }
-            let t = d / fade
-            return 1 - t * t * t * (t * (t * 6 - 15) + 10)
-        }
-        func tint(_ p: CGPoint) -> CGFloat {
-            let u = min(1, hypot(p.x, p.y) / farthest)
-            return blur(p) * (1 - RadialField.rim * u * u * (3 - 2 * u))
-        }
-        let room = CGRect(x: c.x - a - fade - 8, y: c.y - b - fade - 8, width: 2 * (a + fade + 8), height: 2 * (b + fade + 8)).integral
-        let images = RadialField.images(over: room) { p in (blur(p), tint(p)) }
-        return (images.0, images.1, images.2)
     }
 
     /// A profile image as a picture: white where it is full, black where it is 0.
@@ -407,10 +347,11 @@ final class RadialWheelSnapshotTests: XCTestCase {
         return CIContext(options: [.useSoftwareRenderer: false]).createCGImage(output, from: input.extent)
     }
 
+    /// Some pixel on the middle row differs from the corner's.
     private func assertNotBlank(_ rep: NSBitmapImageRep, _ name: String) throws {
         let corner = try XCTUnwrap(rep.colorAt(x: 1, y: 1))
-        let middle = try XCTUnwrap(rep.colorAt(x: rep.pixelsWide / 2, y: rep.pixelsHigh / 2))
-        XCTAssertNotEqual(corner, middle, "\(name) is blank")
+        let row = stride(from: 0, to: rep.pixelsWide, by: max(1, rep.pixelsWide / 64)).compactMap { rep.colorAt(x: $0, y: rep.pixelsHigh / 2) }
+        XCTAssertTrue(row.contains { $0 != corner }, "\(name) is blank")
     }
 
     // MARK: Fake desktops

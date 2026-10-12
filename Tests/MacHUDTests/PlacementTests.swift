@@ -351,13 +351,14 @@ final class ApplyReportSlotsTests: XCTestCase {
     }
 
     @MainActor
-    func testLoadoutWedgeReportsItsRings() {
-        let wedges = [RadialMenu.Wedge(name: "Work", kind: .loadout("Work")), RadialMenu.Wedge(name: "Park", kind: .park(.init()))]
-        let json = RadialMenu.json(wedges: wedges, layout: RadialLayout(wedges: wedges))
-        let out = json["wedges"] as? [[String: Any]]
-        XCTAssertEqual(out?[0]["kind"] as? String, "loadout")
-        XCTAssertEqual(out?[0]["rings"] as? [String], ["Preview", "Apply", "Clear + Apply"])
-        XCTAssertEqual(out?[1]["rings"] as? [String], ["Park", "Restore"])
+    func testALoadoutReportsItsActions() {
+        let tree = RadialMenu.tree(loadouts: [.init(name: "Work")], offersAllScreens: false, park: .init(), widgets: nil)
+        let json = RadialMenu.json(tree: tree, layout: RadialLayout(tree: tree))
+        let top = json["tree"] as? [[String: Any]]
+        let work = (top?[0]["children"] as? [[String: Any]])?.first
+        XCTAssertEqual(work?["kind"] as? String, "loadout")
+        XCTAssertEqual((work?["children"] as? [[String: Any]])?.map { $0["name"] as? String }, ["Preview", "Apply", "Clear + Apply"])
+        XCTAssertEqual((top?[2]["children"] as? [[String: Any]])?.map { $0["name"] as? String }, ["Park", "Restore"])
     }
 }
 

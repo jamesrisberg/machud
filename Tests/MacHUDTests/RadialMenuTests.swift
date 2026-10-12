@@ -5,12 +5,6 @@ import XCTest
 final class RadialGeometryTests: XCTestCase {
     private let tau = 2 * Double.pi
 
-    private func offset(angle: Double, radius: CGFloat) -> CGPoint {
-        CGPoint(x: radius * CGFloat(sin(angle)), y: radius * CGFloat(cos(angle)))
-    }
-
-    // MARK: angle
-
     func testAngleIsClockwiseFromStraightUp() {
         XCTAssertEqual(RadialGeometry.angle(of: CGPoint(x: 0, y: 10)), 0, accuracy: 1e-9)
         XCTAssertEqual(RadialGeometry.angle(of: CGPoint(x: 10, y: 0)), .pi / 2, accuracy: 1e-9)
@@ -21,325 +15,253 @@ final class RadialGeometryTests: XCTestCase {
     func testAngleIsAlwaysInRange() {
         for degrees in stride(from: -720, through: 720, by: 7) {
             let a = Double(degrees) * .pi / 180
-            let value = RadialGeometry.angle(of: offset(angle: a, radius: 100))
+            let value = RadialGeometry.angle(of: RadialGeometry.point(100, a))
             XCTAssertGreaterThanOrEqual(value, 0)
             XCTAssertLessThan(value, tau)
         }
     }
 
-    // MARK: angle -> wedge
+    func testTheDifferenceOfTwoAnglesIsTheShortWayRound() {
+        XCTAssertEqual(RadialGeometry.difference(0.1, tau - 0.1), 0.2, accuracy: 1e-9)
+        XCTAssertEqual(RadialGeometry.difference(tau - 0.1, 0.1), -0.2, accuracy: 1e-9)
+        XCTAssertEqual(RadialGeometry.difference(.pi / 2, 0), .pi / 2, accuracy: 1e-9)
+        XCTAssertEqual(RadialGeometry.normalized(-.pi / 2), 3 * .pi / 2, accuracy: 1e-9)
+    }
+}
 
-    func testFourWedgesFaceTheCompassPoints() {
-        let g = RadialGeometry(count: 4)
-        XCTAssertEqual(g.index(atAngle: 0), 0)              // up
-        XCTAssertEqual(g.index(atAngle: .pi / 2), 1)        // right
-        XCTAssertEqual(g.index(atAngle: .pi), 2)            // down
-        XCTAssertEqual(g.index(atAngle: 3 * .pi / 2), 3)    // left
+/// The wheel's tree: what each petal holds, says and does, and where it points.
+@MainActor
+final class RadialTreeTests: XCTestCase {
+    static func tree(_ names: [String], allScreens: Bool = false, park: RadialMenu.ParkTargets = .init(),
+                     widgets: RadialMenu.WidgetsState? = .init()) -> [RadialNode] {
+        RadialMenu.tree(loadouts: names.map { .init(name: $0) }, offersAllScreens: allScreens, park: park, widgets: widgets)
     }
 
-    func testWedgeBoundariesRoundToTheNeighbour() {
-        let g = RadialGeometry(count: 4)
-        let half = g.wedgeAngle / 2       // 45 degrees
-        XCTAssertEqual(g.index(atAngle: half - 0.001), 0)
-        XCTAssertEqual(g.index(atAngle: half + 0.001), 1)
-        // Just clockwise of straight up wraps back to wedge 0, not to the last wedge.
-        XCTAssertEqual(g.index(atAngle: tau - 0.001), 0)
-        XCTAssertEqual(g.index(atAngle: tau - half + 0.001), 0)
-        XCTAssertEqual(g.index(atAngle: tau - half - 0.001), 3)
+    private func degrees(_ a: Double) -> Double { (a * 180 / .pi * 1000).rounded() / 1000 }
+
+    /// Four top petals, each always in the same direction: Apply Loadout up, Capture right, Park
+    /// down, Widgets left; without widgets the others stay where they were.
+    func testTheTopPetalsKeepTheirDirections() {
+        let tree = Self.tree(["Code", "Mail"])
+        XCTAssertEqual(tree.map(\.id), ["loadouts", "capture", "park", "widgets"])
+        XCTAssertEqual(tree.map(\.name), ["Apply Loadout", "Capture", "Park", "Widgets"])
+        XCTAssertEqual(tree.map { degrees($0.angle) }, [0, 90, 180, 270])
+        let without = Self.tree(["Code", "Mail"], widgets: nil)
+        XCTAssertEqual(without.map(\.id), ["loadouts", "capture", "park"])
+        XCTAssertEqual(without.map { degrees($0.angle) }, [0, 90, 180])
     }
 
-    func testEveryWedgeCentreSelectsItself() {
-        for count in 1...12 {
-            let g = RadialGeometry(count: count)
-            for i in 0..<count {
-                XCTAssertEqual(g.index(atAngle: g.centerAngle(of: i)), i, "count \(count) wedge \(i)")
-                let inside = g.selection(at: offset(angle: g.centerAngle(of: i), radius: 70))
-                XCTAssertEqual(inside, .wedge(index: i, ring: .inner), "count \(count) wedge \(i)")
-            }
+    /// The loadouts unfold around Apply Loadout's direction: the first straight on, then
+    /// alternately clockwise and anticlockwise. A loadout added at the end moves none of the
+    /// others, so each is always in the same direction.
+    func testLoadoutsKeepTheirDirectionsAsMoreAreAdded() {
+        let three = Self.tree(["Code", "Mail", "Focus"])[0].children
+        XCTAssertEqual(three.map { degrees($0.angle) }, [0, 36, 324])
+        for count in 1...RadialMenu.loadoutsAround {
+            let names = (0..<count).map { "L\($0)" }
+            let angles = Self.tree(names)[0].children.map(\.angle)
+            let fewer = Self.tree(Array(names.dropLast()))[0].children.map(\.angle)
+            XCTAssertEqual(Array(angles.prefix(fewer.count)), fewer, "\(count) loadouts")
+            XCTAssertEqual(Set(angles.map(degrees)).count, count, "no two share a direction")
         }
+        // Past ten they share the whole circle, still none sharing a direction.
+        let many = Self.tree((0..<14).map { "L\($0)" })[0].children.map { degrees($0.angle) }
+        XCTAssertEqual(Set(many).count, 14)
+        XCTAssertEqual(many.first, 0)
     }
 
-    func testWedgeAnglesTileTheCircleWithoutGaps() {
-        let g = RadialGeometry(count: 5)
-        for i in 0..<5 {
-            XCTAssertEqual(g.endAngle(of: i), g.startAngle(of: i + 1), accuracy: 1e-12)
-            XCTAssertEqual(g.endAngle(of: i) - g.startAngle(of: i), g.wedgeAngle, accuracy: 1e-12)
+    /// A loadout's actions: Preview, Apply straight on, Clear + Apply; each says what releasing
+    /// does with the loadout's name, and does it.
+    func testALoadoutUnfoldsPreviewApplyAndClearApply() throws {
+        let code = try XCTUnwrap(Self.tree(["Code", "Mail"])[0].children.last)
+        XCTAssertEqual(code.id, "Mail")
+        XCTAssertEqual(code.kind, .loadout("Mail"))
+        XCTAssertEqual(code.children.map(\.id), ["preview", "apply", "clear"])
+        XCTAssertEqual(code.children.map(\.name), ["Preview", "Apply", "Clear + Apply"])
+        XCTAssertEqual(code.children.map(\.hint), ["Preview Mail", "Apply Mail", "Clear this screen and apply Mail"])
+        XCTAssertEqual(code.children.map(\.outcome), [.preview(loadout: "Mail"), .apply(loadout: "Mail", clear: false),
+                                                      .apply(loadout: "Mail", clear: true)])
+        XCTAssertEqual(code.children[1].angle, code.angle, accuracy: 1e-9, "Apply is straight on")
+        XCTAssertEqual(code.hint, "Move out to preview or apply Mail")
+    }
+
+    /// Capture unfolds This screen / Draw layout, with All screens between them while
+    /// multi-desktop loadouts are on.
+    func testCaptureUnfoldsThisScreenAndDrawLayout() throws {
+        let one = Self.tree([])[1]
+        XCTAssertEqual(one.kind, .capture(offersAllScreens: false))
+        XCTAssertEqual(one.children.map(\.name), ["This screen", "Draw layout"])
+        XCTAssertEqual(one.children.map(\.outcome), [.capture(allScreens: false), .drawLayout])
+        XCTAssertEqual(one.children.map(\.hint), ["Capture this screen as a loadout", "Draw a new layout"])
+        let every = Self.tree([], allScreens: true)[1]
+        XCTAssertEqual(every.children.map(\.id), ["screen", "all", "draw"])
+        XCTAssertEqual(every.children.map(\.name), ["This screen", "All screens", "Draw layout"])
+        XCTAssertEqual(every.children[1].outcome, .capture(allScreens: true))
+        XCTAssertEqual(every.children[1].hint, "Capture every screen as a loadout")
+    }
+
+    /// Park unfolds Park and Restore, whose hints name the window parked or the ones brought back.
+    func testParkUnfoldsParkAndRestoreNamingTheWindows() {
+        func hints(_ focused: String?, _ parked: [String]) -> [String] {
+            Self.tree([], park: .init(focused: focused, parked: parked))[2].children.map(\.hint)
         }
-        XCTAssertEqual(g.wedgeAngle * 5, tau, accuracy: 1e-12)
+        XCTAssertEqual(Self.tree([])[2].children.map(\.name), ["Park", "Restore"])
+        XCTAssertEqual(Self.tree([])[2].children.map(\.outcome), [.park(restore: false), .park(restore: true)])
+        XCTAssertEqual(hints(nil, []), ["Focus a window to park", "Focus a window to park"])
+        XCTAssertEqual(hints("Safari · Docs", []), ["Park Safari · Docs", "Nothing is parked"])
+        XCTAssertEqual(hints("Safari · Docs", ["Mail · Inbox"]), ["Park Safari · Docs", "Restore Mail · Inbox"])
+        XCTAssertEqual(hints(nil, ["Mail · Inbox", "Notes", "Terminal"]), ["Focus a window to park", "Restore 3 parked windows"])
     }
 
-    func testSingleWedgeSwallowsEveryAngle() {
-        let g = RadialGeometry(count: 1)
-        for degrees in stride(from: 0, to: 360, by: 3) {
-            let a = Double(degrees) * .pi / 180
-            XCTAssertEqual(g.index(atAngle: a), 0)
-        }
-    }
-
-    func testNoWedgesAlwaysCancels() {
-        let g = RadialGeometry(count: 0)
-        XCTAssertEqual(g.selection(at: CGPoint(x: 0, y: 500)), .cancel)
-    }
-
-    // MARK: radius -> ring
-
-    func testRadiusPicksTheRing() {
-        let g = RadialGeometry(count: 4)
-        XCTAssertEqual(g.ring(radius: g.innerEdge - 1), .inner)
-        XCTAssertEqual(g.ring(radius: g.innerEdge), .middle)
-        XCTAssertEqual(g.ring(radius: g.middleEdge - 1), .middle)
-        XCTAssertEqual(g.ring(radius: g.middleEdge), .outer)
-        XCTAssertEqual(g.ring(radius: g.outerEdge + 400), .outer)
-    }
-
-    func testDeadZoneCancels() {
-        let g = RadialGeometry(count: 4)
-        XCTAssertEqual(g.selection(at: .zero), .cancel)
-        XCTAssertEqual(g.selection(at: offset(angle: 0, radius: g.deadZone - 1)), .cancel)
-        XCTAssertEqual(g.selection(at: offset(angle: 0, radius: g.deadZone)), .wedge(index: 0, ring: .inner))
-    }
-
-    func testDraggingOutwardWalksTheRings() {
-        let g = RadialGeometry(count: 3)
-        let a = g.centerAngle(of: 2)
-        XCTAssertEqual(g.selection(at: offset(angle: a, radius: 60)), .wedge(index: 2, ring: .inner))
-        XCTAssertEqual(g.selection(at: offset(angle: a, radius: 120)), .wedge(index: 2, ring: .middle))
-        XCTAssertEqual(g.selection(at: offset(angle: a, radius: 170)), .wedge(index: 2, ring: .outer))
-        // Past the drawn edge the outer ring keeps selecting.
-        XCTAssertEqual(g.selection(at: offset(angle: a, radius: 900)), .wedge(index: 2, ring: .outer))
-    }
-
-    func testAWedgeWithFewerRingsKeepsItsLastOne() {
-        // Wedge 1 has two rings (the park wedge): its middle ring reaches the edge and beyond.
-        let g = RadialGeometry(count: 2, ringCounts: [3, 2])
-        let a = g.centerAngle(of: 1)
-        XCTAssertEqual(g.selection(at: offset(angle: a, radius: 60)), .wedge(index: 1, ring: .inner))
-        XCTAssertEqual(g.selection(at: offset(angle: a, radius: 120)), .wedge(index: 1, ring: .middle))
-        XCTAssertEqual(g.selection(at: offset(angle: a, radius: 170)), .wedge(index: 1, ring: .middle))
-        XCTAssertEqual(g.selection(at: offset(angle: a, radius: 900)), .wedge(index: 1, ring: .middle))
-        XCTAssertEqual(g.rings(of: 1), [.inner, .middle])
-        XCTAssertEqual(g.rings(of: 0), [.inner, .middle, .outer])
-        XCTAssertEqual(g.band(.middle, of: 1).r1, g.outerEdge, "the last ring runs to the edge")
-        XCTAssertEqual(g.band(.middle, of: 0).r1, g.middleEdge)
-        XCTAssertEqual(g.band(.inner, of: 0).r0, g.deadZone)
-    }
-
-    func testShiftForcesTheLastRing() {
-        let g = RadialGeometry(count: 3, ringCounts: [3, 2, 3])
-        let o = offset(angle: g.centerAngle(of: 0), radius: 70)
-        XCTAssertEqual(g.selection(at: o, shift: false), .wedge(index: 0, ring: .inner))
-        XCTAssertEqual(g.selection(at: o, shift: true), .wedge(index: 0, ring: .outer))
-        XCTAssertEqual(g.selection(at: offset(angle: g.centerAngle(of: 1), radius: 70), shift: true), .wedge(index: 1, ring: .middle))
-        // Shift does not defeat the dead zone.
-        XCTAssertEqual(g.selection(at: .zero, shift: true), .cancel)
-    }
-
-    func testSelectionAccessors() {
-        XCTAssertNil(RadialGeometry.Selection.cancel.index)
-        XCTAssertNil(RadialGeometry.Selection.cancel.ring)
-        let s = RadialGeometry.Selection.wedge(index: 7, ring: .outer)
-        XCTAssertEqual(s.index, 7)
-        XCTAssertEqual(s.ring, .outer)
-    }
-
-    /// Each wedge's name is anchored outside its last ring. It is not a button: a pointer over
-    /// it, or past it, still selects the wedge's last ring, whatever the wedge has.
-    func testThePointerOverANameSelectsTheLastRing() {
-        let g = RadialGeometry(count: 3, ringCounts: [3, 2, 3])
-        XCTAssertGreaterThan(g.nameRadius, g.outerEdge)
-        for r in [g.nameRadius, g.nameRadius + 40, g.nameRadius + 400] {
-            XCTAssertEqual(g.selection(at: offset(angle: g.centerAngle(of: 0), radius: r)), .wedge(index: 0, ring: .outer))
-            XCTAssertEqual(g.selection(at: offset(angle: g.centerAngle(of: 1), radius: r)), .wedge(index: 1, ring: .middle))
-        }
-    }
-
-    // MARK: rings: labels, outcomes, hints
-
-    @MainActor
-    func testRingLabelsDependOnWedgeKind() {
-        XCTAssertEqual(RadialMenu.ringLabel(.inner, for: .loadout("Work")), "Preview")
-        XCTAssertEqual(RadialMenu.ringLabel(.middle, for: .loadout("Work")), "Apply")
-        XCTAssertEqual(RadialMenu.ringLabel(.outer, for: .loadout("Work")), "Clear + Apply")
-        let everyScreen = RadialMenu.Wedge.Kind.capture(offersAllScreens: true)
-        XCTAssertEqual(RadialMenu.ringLabel(.inner, for: everyScreen), "This screen")
-        XCTAssertEqual(RadialMenu.ringLabel(.middle, for: everyScreen), "All screens")
-        XCTAssertEqual(RadialMenu.ringLabel(.outer, for: everyScreen), "Draw layout")
-        XCTAssertEqual(RadialMenu.ringCount(for: .loadout("Work")), 3)
-        XCTAssertEqual(RadialMenu.ringCount(for: everyScreen), 3)
-    }
-
-    @MainActor
-    func testEachRingCommitsItsOwnOutcome() {
-        XCTAssertEqual(RadialMenu.outcome(of: .loadout("Work"), ring: .inner), .preview(loadout: "Work"))
-        XCTAssertEqual(RadialMenu.outcome(of: .loadout("Work"), ring: .middle), .apply(loadout: "Work", clear: false))
-        XCTAssertEqual(RadialMenu.outcome(of: .loadout("Work"), ring: .outer), .apply(loadout: "Work", clear: true))
-        let everyScreen = RadialMenu.Wedge.Kind.capture(offersAllScreens: true)
-        XCTAssertEqual(RadialMenu.outcome(of: everyScreen, ring: .inner), .capture(allScreens: false))
-        XCTAssertEqual(RadialMenu.outcome(of: everyScreen, ring: .middle), .capture(allScreens: true))
-        XCTAssertEqual(RadialMenu.outcome(of: everyScreen, ring: .outer), .drawLayout)
-        let park = RadialMenu.Wedge.Kind.park(.init(focused: "Safari · Docs", parked: ["Mail"]))
-        XCTAssertEqual(RadialMenu.outcome(of: park, ring: .inner), .park(restore: false))
-        XCTAssertEqual(RadialMenu.outcome(of: park, ring: .middle), .park(restore: true))
-        XCTAssertEqual(RadialMenu.outcome(of: .park(.init()), ring: .middle), .park(restore: true))
-        XCTAssertEqual(RadialMenu.outcome(of: .widgets(.init()), ring: .inner), .widgets(edit: false, on: true))
-        XCTAssertEqual(RadialMenu.outcome(of: .widgets(.init()), ring: .outer), .widgets(edit: true, on: true))
-        let busy = RadialMenu.Wedge.Kind.widgets(.init(revealed: true, editing: true))
-        XCTAssertEqual(RadialMenu.outcome(of: busy, ring: .inner), .widgets(edit: false, on: false))
-        XCTAssertEqual(RadialMenu.outcome(of: busy, ring: .middle), .widgets(edit: true, on: false))
-    }
-
-    /// The widgets wedge's release does what its button says, whatever the widgets do by then:
-    /// Reveal reveals, Lower lowers, Edit starts editing, Done finishes; the target is the one
-    /// shown, not a toggle of the state at release.
-    @MainActor
-    func testTheWidgetsWedgeDoesWhatItsButtonSays() {
+    /// Widgets unfolds Reveal (Lower while revealed) and Edit (Done while editing); each does
+    /// what it says, whatever the widgets do by the release: the target is the one shown.
+    func testWidgetsUnfoldRevealAndEditAndDoWhatTheySay() {
+        func widgets(_ state: RadialMenu.WidgetsState) -> RadialNode { Self.tree([], widgets: state)[3] }
+        XCTAssertEqual(widgets(.init()).children.map(\.name), ["Reveal", "Edit"])
+        XCTAssertEqual(widgets(.init(revealed: true)).children.map(\.name), ["Lower", "Edit"])
+        XCTAssertEqual(widgets(.init(editing: true)).children.map(\.name), ["Reveal", "Done"])
+        XCTAssertEqual(widgets(.init(editing: true)).children.map(\.hint), ["Reveal widgets", "Finish editing widgets"])
+        XCTAssertEqual(widgets(.init(revealed: true)).children.map(\.hint), ["Lower widgets", "Edit widgets"])
         for revealed in [false, true] {
             for editing in [false, true] {
-                let kind = RadialMenu.Wedge.Kind.widgets(.init(revealed: revealed, editing: editing))
-                let inner = RadialMenu.outcome(of: kind, ring: .inner)
-                let outer = RadialMenu.outcome(of: kind, ring: .middle)
-                XCTAssertEqual(inner, .widgets(edit: false, on: RadialMenu.ringLabel(.inner, for: kind) == "Reveal"))
-                XCTAssertEqual(outer, .widgets(edit: true, on: RadialMenu.ringLabel(.middle, for: kind) == "Edit"))
+                let actions = widgets(.init(revealed: revealed, editing: editing)).children
+                XCTAssertEqual(actions.map(\.id), ["reveal", "edit"], "the ids stay whatever the words")
+                XCTAssertEqual(actions[0].outcome, .widgets(edit: false, on: actions[0].name == "Reveal"))
+                XCTAssertEqual(actions[1].outcome, .widgets(edit: true, on: actions[1].name == "Edit"))
             }
         }
     }
 
-    /// The line under the wheel says what releasing does, and nothing else: no section name,
-    /// no counts, no dash.
-    @MainActor
-    func testTheHintSaysOnlyWhatTheHighlightedButtonDoes() {
-        XCTAssertEqual(RadialMenu.hint(.inner, for: .loadout("Morning research")), "Preview Morning research")
-        XCTAssertEqual(RadialMenu.hint(.middle, for: .loadout("Morning research")), "Apply Morning research")
-        XCTAssertEqual(RadialMenu.hint(.outer, for: .loadout("Morning research")),
-                       "Clear this screen and apply Morning research")
-        let everyScreen = RadialMenu.Wedge.Kind.capture(offersAllScreens: true)
-        XCTAssertEqual(RadialMenu.hint(.inner, for: everyScreen), "Capture this screen as a loadout")
-        XCTAssertEqual(RadialMenu.hint(.middle, for: everyScreen), "Capture every screen as a loadout")
-        XCTAssertEqual(RadialMenu.hint(.outer, for: everyScreen), "Draw a new layout")
-        XCTAssertEqual(RadialMenu.hint(.middle, for: .capture(offersAllScreens: false)), "Draw a new layout")
-        XCTAssertEqual(RadialMenu.hint(.inner, for: .widgets(.init())), "Reveal widgets")
-        XCTAssertEqual(RadialMenu.hint(.middle, for: .widgets(.init())), "Edit widgets")
-
-        let wedges = [RadialMenu.Wedge(name: "Code", kind: .loadout("Code")),
-                      RadialMenu.Wedge(name: "Widgets", kind: .widgets(.init()))]
-        XCTAssertEqual(RadialMenu.hint(for: .cancel, in: wedges), "Release on a button · centre cancels")
-        XCTAssertEqual(RadialMenu.hint(for: .wedge(index: 0, ring: .middle), in: wedges), "Apply Code")
-        XCTAssertEqual(RadialMenu.hint(for: .wedge(index: 1, ring: .middle), in: wedges), "Edit widgets")
-        XCTAssertEqual(RadialMenu.hint(for: .wedge(index: 5, ring: .inner), in: wedges), "Release on a button · centre cancels")
-        for wedge in wedges {
-            for ring in RadialGeometry.Ring.allCases {
-                let hint = RadialMenu.hint(ring, for: wedge.kind)
-                XCTAssertFalse(hint.contains("—") || hint.contains(" · ") || hint.contains("…"), hint)
-            }
+    /// The line under the wheel says what releasing does, or where to go on from a petal that
+    /// has children; an action's hint has no section name, no dash and no ellipsis.
+    func testTheHintSaysWhatReleasingDoesOrWhereToGo() {
+        let tree = Self.tree(["Code"])
+        XCTAssertEqual(RadialMenu.hint(for: [], in: tree), "Release on an action · centre cancels")
+        XCTAssertEqual(RadialMenu.hint(for: ["loadouts"], in: tree), "Move out to a loadout")
+        XCTAssertEqual(RadialMenu.hint(for: ["loadouts"], in: Self.tree([])), "No loadouts yet: capture one")
+        XCTAssertEqual(RadialMenu.hint(for: ["loadouts", "Code"], in: tree), "Move out to preview or apply Code")
+        XCTAssertEqual(RadialMenu.hint(for: ["loadouts", "Code", "apply"], in: tree), "Apply Code")
+        XCTAssertEqual(RadialMenu.hint(for: ["widgets"], in: tree), "Move out to reveal or edit widgets")
+        XCTAssertEqual(RadialMenu.hint(for: ["nowhere"], in: tree), RadialMenu.idleHint)
+        func leaves(_ nodes: [RadialNode]) -> [RadialNode] { nodes.flatMap { $0.isLeaf ? [$0] : leaves($0.children) } }
+        for leaf in leaves(tree) {
+            XCTAssertFalse(leaf.hint.contains("—") || leaf.hint.contains(" · ") || leaf.hint.contains("…"), leaf.hint)
         }
     }
 
-    /// Without multi-desktop loadouts (experimental) the capture wedge captures the screen under
-    /// the pointer only: two rings, this screen and a new layout, and no all-screens ring.
-    @MainActor
-    func testWithoutMultiDesktopLoadoutsTheCaptureWedgeCapturesThisScreenOnly() {
-        let thisScreen = RadialMenu.Wedge.Kind.capture(offersAllScreens: false)
-        XCTAssertEqual(RadialMenu.ringCount(for: thisScreen), 2)
-        XCTAssertEqual(RadialMenu.ringLabel(.inner, for: thisScreen), "This screen")
-        XCTAssertEqual(RadialMenu.ringLabel(.middle, for: thisScreen), "Draw layout")
-        XCTAssertEqual(RadialMenu.outcome(of: thisScreen, ring: .inner), .capture(allScreens: false))
-        XCTAssertEqual(RadialMenu.outcome(of: thisScreen, ring: .middle), .drawLayout)
-        XCTAssertEqual(RadialMenu.outcome(of: thisScreen, ring: .outer), .drawLayout)
-
-        let wedges = [RadialMenu.Wedge(name: "Capture", kind: thisScreen)]
-        let json = RadialMenu.json(wedges: wedges, layout: RadialLayout(wedges: wedges))
-        let wedge = (json["wedges"] as? [[String: Any]])?.first
-        XCTAssertEqual(wedge?["kind"] as? String, "capture")
-        XCTAssertEqual(wedge?["name"] as? String, "Capture")
-        XCTAssertEqual(wedge?["rings"] as? [String], ["This screen", "Draw layout"])
-        XCTAssertEqual(wedge?["hints"] as? [String], ["Capture this screen as a loadout", "Draw a new layout"])
+    /// Releasing does the action on the path; on a petal with children, on nothing or off the
+    /// tree it cancels.
+    func testReleasingCommitsOnlyOnAnAction() {
+        let tree = Self.tree(["Code"])
+        XCTAssertEqual(RadialMenu.outcome(of: ["loadouts", "Code", "clear"], in: tree), .apply(loadout: "Code", clear: true))
+        XCTAssertEqual(RadialMenu.outcome(of: ["capture", "draw"], in: tree), .drawLayout)
+        XCTAssertEqual(RadialMenu.outcome(of: ["loadouts", "Code"], in: tree), .cancelled)
+        XCTAssertEqual(RadialMenu.outcome(of: ["loadouts"], in: tree), .cancelled)
+        XCTAssertEqual(RadialMenu.outcome(of: [], in: tree), .cancelled)
+        XCTAssertEqual(RadialMenu.outcome(of: ["loadouts", "Gone", "apply"], in: tree), .cancelled)
     }
 
-    /// The widgets wedge says what its buttons will do now: Reveal or Lower, Edit or Done.
-    @MainActor
-    func testTheWidgetsWedgeSaysWhatItsButtonsWillDoNow() {
-        func labels(_ state: RadialMenu.Wedge.WidgetsState) -> [String] {
-            [RadialMenu.ringLabel(.inner, for: .widgets(state)), RadialMenu.ringLabel(.middle, for: .widgets(state)),
-             RadialMenu.hint(.inner, for: .widgets(state)), RadialMenu.hint(.middle, for: .widgets(state))]
-        }
-        XCTAssertEqual(labels(.init()), ["Reveal", "Edit", "Reveal widgets", "Edit widgets"])
-        XCTAssertEqual(labels(.init(revealed: true)), ["Lower", "Edit", "Lower widgets", "Edit widgets"])
-        XCTAssertEqual(labels(.init(editing: true)), ["Reveal", "Done", "Reveal widgets", "Finish editing widgets"])
-        XCTAssertEqual(RadialMenu.ringCount(for: .widgets(.init(revealed: true, editing: true))), 2)
+    /// A path is written with slashes; a loadout's name may hold one, and the longest id that
+    /// matches wins.
+    func testAPathIsReadFromItsSlashedForm() {
+        let tree = Self.tree(["Code", "dev/web", "dev"])
+        XCTAssertEqual(RadialMenu.path("loadouts/Code/apply", in: tree), ["loadouts", "Code", "apply"])
+        XCTAssertEqual(RadialMenu.path("/loadouts/dev/web/preview/", in: tree), ["loadouts", "dev/web", "preview"])
+        XCTAssertEqual(RadialMenu.path("loadouts/dev/clear", in: tree), ["loadouts", "dev", "clear"])
+        XCTAssertEqual(RadialMenu.path("park", in: tree), ["park"])
+        XCTAssertNil(RadialMenu.path("loadouts/Nope", in: tree))
+        XCTAssertNil(RadialMenu.path("", in: tree))
     }
 
-    /// The park wedge's targets are asked for again when it becomes highlighted, and an answer
-    /// replaces them, so the hint names the window a release would park even after a click
-    /// under the wheel changed the focus.
-    @MainActor
-    func testTheParkWedgeAsksForItsTargetsWhenHighlighted() {
-        let wedges = [RadialMenu.Wedge(name: "Code", kind: .loadout("Code")),
-                      RadialMenu.Wedge(name: "Park", kind: .park(.init(focused: "Safari · Docs")))]
-        XCTAssertFalse(RadialMenu.asksForParkTargets(highlighting: 0, from: nil, in: wedges), "not the park wedge")
-        XCTAssertFalse(RadialMenu.asksForParkTargets(highlighting: 1, from: 1, in: wedges), "only on becoming highlighted")
-        XCTAssertTrue(RadialMenu.asksForParkTargets(highlighting: 1, from: 0, in: wedges))
-        XCTAssertTrue(RadialMenu.asksForParkTargets(highlighting: 1, from: nil, in: wedges))
-        let now = RadialMenu.Wedge.ParkTargets(focused: "Notes · Groceries", parked: ["Mail · Inbox"])
-        let fresh = RadialMenu.refreshed(wedges, park: 1, with: now)
-        XCTAssertEqual(fresh?[1].kind, .park(now))
-        XCTAssertEqual(fresh?[0].kind, wedges[0].kind)
-        XCTAssertEqual(fresh.map { RadialMenu.hint(for: .wedge(index: 1, ring: .inner), in: $0) }, "Park Notes · Groceries")
-        XCTAssertNil(RadialMenu.refreshed(fresh ?? [], park: 1, with: now), "unchanged targets")
-        XCTAssertNil(RadialMenu.refreshed(wedges, park: 0, with: now), "not the park wedge")
+    /// The digits pick among the petals showing at the open branch: the top petals, a branch's
+    /// children once it is reached, an action's siblings while it is highlighted.
+    func testTheDigitsPickAtTheOpenBranch() {
+        let tree = Self.tree(["Code", "Mail"])
+        XCTAssertEqual(RadialMenu.digitLevel(for: [], in: tree).ids, ["loadouts", "capture", "park", "widgets"])
+        XCTAssertEqual(RadialMenu.digitLevel(for: ["loadouts"], in: tree).ids, ["Code", "Mail"])
+        XCTAssertEqual(RadialMenu.digitLevel(for: ["loadouts", "Mail"], in: tree).branch, ["loadouts", "Mail"])
+        XCTAssertEqual(RadialMenu.digitLevel(for: ["loadouts", "Mail", "apply"], in: tree).ids, ["preview", "apply", "clear"])
+        XCTAssertEqual(RadialMenu.digitLevel(for: ["loadouts"], in: Self.tree([])).ids, ["loadouts", "capture", "park", "widgets"],
+                       "Apply Loadout with no loadouts opens nothing")
     }
 
-    /// `menu` lists each wedge's name, its rings' labels and the hint each ring shows, and the
-    /// selection with the hint showing now.
-    @MainActor
-    func testTheMenuJSONCarriesNamesLabelsAndHints() {
-        let wedges = [RadialMenu.Wedge(name: "Morning research and writing", kind: .loadout("Morning research and writing")),
-                      RadialMenu.Wedge(name: "Park", kind: .park(.init(focused: "Notes · Groceries")))]
-        let layout = RadialLayout(wedges: wedges)
-        let g = layout.geometry
-        let json = RadialMenu.json(wedges: wedges, layout: layout)
-        let out = json["wedges"] as? [[String: Any]]
-        XCTAssertEqual(out?[0]["name"] as? String, "Morning research and writing")
-        XCTAssertEqual(out?[0]["rings"] as? [String], ["Preview", "Apply", "Clear + Apply"])
-        XCTAssertEqual(out?[0]["hints"] as? [String], ["Preview Morning research and writing",
-                                                        "Apply Morning research and writing",
-                                                        "Clear this screen and apply Morning research and writing"])
-        XCTAssertEqual(out?[1]["rings"] as? [String], ["Park", "Restore"])
-        XCTAssertEqual(out?[1]["hints"] as? [String], ["Park Notes · Groceries", "Nothing is parked"])
-        XCTAssertEqual(out?[0]["digit"] as? Int, 1)
-        XCTAssertNil(out?[0]["subtitle"])
-        XCTAssertNil(out?[0]["title"])
-        let rings = json["rings"] as? [String: Double]
-        XCTAssertEqual(rings?["deadZone"], Double(g.deadZone))
-        XCTAssertEqual(rings?["inner"], Double(g.innerEdge))
-        XCTAssertEqual(rings?["middle"], Double(g.middleEdge))
-        XCTAssertEqual(rings?["outer"], Double(g.outerEdge))
-        XCTAssertEqual(rings?["names"], Double(g.nameRadius))
+    /// The park petal's targets are asked for again as it is reached, and an answer replaces
+    /// them, so the hints name the window a release would park even after a click under the
+    /// wheel changed the focus.
+    func testTheParkPetalAsksForItsTargetsWhenReached() {
+        let tree = Self.tree(["Code"], park: .init(focused: "Safari · Docs"))
+        XCTAssertFalse(RadialMenu.asksForParkTargets(highlighting: ["loadouts"], from: []))
+        XCTAssertFalse(RadialMenu.asksForParkTargets(highlighting: ["park", "restore"], from: ["park"]), "only as it is reached")
+        XCTAssertTrue(RadialMenu.asksForParkTargets(highlighting: ["park"], from: ["capture"]))
+        XCTAssertTrue(RadialMenu.asksForParkTargets(highlighting: ["park", "park"], from: []))
+        let now = RadialMenu.ParkTargets(focused: "Notes · Groceries", parked: ["Mail · Inbox"])
+        let fresh = RadialMenu.refreshed(tree, park: now)
+        XCTAssertEqual(fresh?[2].kind, .park(now))
+        XCTAssertEqual(fresh?[0], tree[0])
+        XCTAssertEqual(fresh.map { RadialMenu.hint(for: ["park", "park"], in: $0) }, "Park Notes · Groceries")
+        XCTAssertNil(RadialMenu.refreshed(fresh ?? [], park: now), "unchanged targets")
+    }
 
-        let selected = RadialMenu.json(wedges: wedges, layout: layout, selection: .wedge(index: 0, ring: .outer))["selection"] as? [String: Any]
-        XCTAssertEqual(selected?["name"] as? String, "Morning research and writing")
-        XCTAssertEqual(selected?["ring"] as? String, "outer")
-        XCTAssertEqual(selected?["hint"] as? String, "Clear this screen and apply Morning research and writing")
-        let idle = RadialMenu.json(wedges: wedges, layout: layout, selection: .cancel)["selection"] as? [String: Any]
+    /// `menu` describes the tree: each node's id, path, name, kind, hint, direction, digit,
+    /// and its children or the action it does; with a selection, the path highlighted and its hint.
+    func testTheMenuJSONIsTheTree() throws {
+        let tree = Self.tree(["Morning research and writing", "dev/web"], park: .init(focused: "Notes · Groceries"))
+        let layout = RadialLayout(tree: tree)
+        let json = RadialMenu.json(tree: tree, layout: layout)
+        XCTAssertNil(json["wedges"])
+        XCTAssertNil(json["rings"])
+        XCTAssertEqual(json["deadZone"] as? Double, Double(layout.deadZone))
+        let top = try XCTUnwrap(json["tree"] as? [[String: Any]])
+        XCTAssertEqual(top.map { $0["id"] as? String }, ["loadouts", "capture", "park", "widgets"])
+        XCTAssertEqual(top.map { $0["kind"] as? String }, ["loadouts", "capture", "park", "widgets"])
+        XCTAssertEqual(top.map { $0["digit"] as? Int }, [1, 2, 3, 4])
+        XCTAssertEqual(top[1]["angle"] as? Double ?? 0, .pi / 2, accuracy: 1e-9)
+        XCTAssertEqual(top[0]["hint"] as? String, "Move out to a loadout")
+        let loadouts = try XCTUnwrap(top[0]["children"] as? [[String: Any]])
+        XCTAssertEqual(loadouts.map { $0["path"] as? String }, ["loadouts/Morning research and writing", "loadouts/dev/web"])
+        XCTAssertEqual(loadouts.map { $0["kind"] as? String }, ["loadout", "loadout"])
+        let actions = try XCTUnwrap(loadouts[1]["children"] as? [[String: Any]])
+        XCTAssertEqual(actions.map { $0["path"] as? String }, ["loadouts/dev/web/preview", "loadouts/dev/web/apply", "loadouts/dev/web/clear"])
+        XCTAssertEqual(actions.map { $0["action"] as? String }, ["preview", "apply", "clearAndApply"])
+        XCTAssertEqual(actions.map { $0["kind"] as? String }, ["action", "action", "action"])
+        XCTAssertNil(actions[0]["children"], "a leaf has an action, not children")
+        XCTAssertEqual(actions[1]["hint"] as? String, "Apply dev/web")
+        XCTAssertGreaterThan(actions[1]["radius"] as? Double ?? 0, loadouts[1]["radius"] as? Double ?? .infinity)
+        let park = try XCTUnwrap(top[2]["children"] as? [[String: Any]])
+        XCTAssertEqual(park.map { $0["action"] as? String }, ["park", "restore"])
+        XCTAssertEqual(park.map { $0["hint"] as? String }, ["Park Notes · Groceries", "Nothing is parked"])
+        let widgets = try XCTUnwrap(top[3]["children"] as? [[String: Any]])
+        XCTAssertEqual(widgets.map { $0["action"] as? String }, ["revealWidgets", "editWidgets"])
+
+        let selected = RadialMenu.json(tree: tree, layout: layout, selection: ["loadouts", "dev/web", "clear"])["selection"] as? [String: Any]
+        XCTAssertEqual(selected?["kind"] as? String, "action")
+        XCTAssertEqual(selected?["path"] as? String, "loadouts/dev/web/clear")
+        XCTAssertEqual(selected?["name"] as? String, "Clear + Apply")
+        XCTAssertEqual(selected?["hint"] as? String, "Clear this screen and apply dev/web")
+        let branch = RadialMenu.json(tree: tree, layout: layout, selection: ["loadouts"])["selection"] as? [String: Any]
+        XCTAssertEqual(branch?["kind"] as? String, "branch")
+        let idle = RadialMenu.json(tree: tree, layout: layout, selection: [])["selection"] as? [String: Any]
         XCTAssertEqual(idle?["kind"] as? String, "cancel")
-        XCTAssertEqual(idle?["hint"] as? String, "Release on a button · centre cancels")
+        XCTAssertEqual(idle?["hint"] as? String, "Release on an action · centre cancels")
     }
 
-    /// `icons` counts the icons the wheel draws by each name: up to `RadialLayout.maxIcons` on
-    /// a wheel of up to eight wedges, none on a bigger one.
-    @MainActor
+    /// `icons` counts the icons the wheel draws by a petal: the top petals' symbols, and a
+    /// loadout's apps on a wheel of up to eight loadouts, none on a bigger one.
     func testTheMenuJSONCountsTheIconsDrawn() {
         let image = NSImage(systemSymbolName: "app", accessibilityDescription: nil) ?? NSImage()
         func icons(_ count: Int) -> [Int] {
-            let wedges = (0..<count).map { RadialMenu.Wedge(name: "L\($0)", icons: Array(repeating: image, count: 7), kind: .loadout("L\($0)")) }
-            let out = RadialMenu.json(wedges: wedges, layout: RadialLayout(wedges: wedges))["wedges"] as? [[String: Any]]
-            return out?.compactMap { $0["icons"] as? Int } ?? []
+            let tree = RadialMenu.tree(loadouts: (0..<count).map { .init(name: "L\($0)", icons: Array(repeating: image, count: 7)) },
+                                       offersAllScreens: false, park: .init(), widgets: nil)
+            let top = RadialMenu.json(tree: tree, layout: RadialLayout(tree: tree))["tree"] as? [[String: Any]]
+            let loadouts = top?.first?["children"] as? [[String: Any]]
+            return loadouts?.map { $0["icons"] as? Int ?? 0 } ?? []
         }
         XCTAssertEqual(icons(8), Array(repeating: RadialLayout.maxIcons, count: 8))
         XCTAssertEqual(icons(9), Array(repeating: 0, count: 9))
     }
 }
 
-final class ParkWedgeTests: XCTestCase {
+final class ParkPetalTests: XCTestCase {
     /// Park's release says the front app did not answer when its Accessibility call timed out,
     /// and otherwise why there was nothing to park.
     @MainActor
@@ -353,30 +275,5 @@ final class ParkWedgeTests: XCTestCase {
                        "window is not placeable")
         XCTAssertEqual(LoadoutEngine.parkRefusal(.success, otherwise: "window is not placeable", appName: "Finder"),
                        "window is not placeable")
-    }
-
-    @MainActor
-    func testParkWedgeHasTwoRings() {
-        XCTAssertEqual(RadialMenu.ringCount(for: .park(.init())), 2)
-        XCTAssertEqual(RadialMenu.ringLabel(.inner, for: .park(.init())), "Park")
-        XCTAssertEqual(RadialMenu.ringLabel(.middle, for: .park(.init())), "Restore")
-    }
-
-    /// Park says which window it would park, or asks for one; Restore says which window (or how
-    /// many) it would bring back, and with nothing parked says what Park says when there is
-    /// nothing to do.
-    @MainActor
-    func testTheParkHintsNameTheWindow() {
-        func hints(_ focused: String?, _ parked: [String]) -> [String] {
-            let kind = RadialMenu.Wedge.Kind.park(.init(focused: focused, parked: parked))
-            return [RadialMenu.hint(.inner, for: kind), RadialMenu.hint(.middle, for: kind)]
-        }
-        XCTAssertEqual(hints(nil, []), ["Focus a window to park", "Focus a window to park"])
-        XCTAssertEqual(hints("Safari · Docs", []), ["Park Safari · Docs", "Nothing is parked"])
-        XCTAssertEqual(hints("Safari · Docs", ["Mail · Inbox"]), ["Park Safari · Docs", "Restore Mail · Inbox"])
-        XCTAssertEqual(hints(nil, ["Mail · Inbox"]), ["Focus a window to park", "Restore Mail · Inbox"])
-        XCTAssertEqual(hints(nil, ["Mail · Inbox", "Notes", "Terminal"]), ["Focus a window to park", "Restore 3 parked windows"])
-        let kind = RadialMenu.Wedge.Kind.park(.init(focused: "Safari · Docs", parked: ["Mail"]))
-        XCTAssertEqual(RadialMenu.hint(.outer, for: kind), "Restore Mail", "a ring past the last is the last")
     }
 }

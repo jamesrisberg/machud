@@ -22,13 +22,13 @@ struct TextFit: Equatable {
             Style(weight: weight, preferred: preferred * factor, floor: floor * factor, maxLines: maxLines)
         }
 
-        /// A wedge's name, outside its last ring.
+        /// A petal's name: a top petal or a loadout.
         static let name = Style(weight: .semibold, preferred: 14, floor: 11, maxLines: 2)
-        /// A ring's button label.
+        /// An action's label.
         static let label = Style(weight: .semibold, preferred: 12, floor: 10, maxLines: 1)
         /// The line under the wheel.
         static let hint = Style(weight: .medium, preferred: 12.5, floor: 10.5, maxLines: 2)
-        /// A wedge's digit, by the dead zone.
+        /// A top petal's digit, by the dead zone.
         static let digit = Style(weight: .bold, preferred: 9, floor: 9, maxLines: 1)
         /// "Esc" and "Cancel" in the centre.
         static let centre = Style(weight: .semibold, preferred: 12, floor: 12, maxLines: 1)
