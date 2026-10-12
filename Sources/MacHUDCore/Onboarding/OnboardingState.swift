@@ -30,7 +30,7 @@ enum OnboardingStep: String, CaseIterable, Codable, Equatable {
         case .apps: return "HUD apps for the tool dock"
         case .toolDock: return "Where your HUD apps live"
         case .loadout: return "Save a window arrangement"
-        case .radial: return "Apply it with a flick"
+        case .radial: return "Apply it from the wheel"
         case .done: return ""
         }
     }
