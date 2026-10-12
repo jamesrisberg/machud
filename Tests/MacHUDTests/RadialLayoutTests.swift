@@ -127,21 +127,16 @@ final class RadialLayoutTests: XCTestCase {
         return points
     }
 
-    /// Where the words keep the pointer while an open petal holds it at `p`: under that petal
-    /// past where its children start, under its parent out at its own circle. Nil when no open
-    /// petal holds it.
+    /// Where the words keep the pointer while an open petal holds it at `p`
+    /// (`RadialLayout.Hold.scope`); nil when no open petal holds it.
     private static func scope(_ layout: RadialLayout, open: [String], at p: CGPoint) -> [String]? {
-        switch layout.hold(open, radius: RadialGeometry.radius(of: p), angle: RadialGeometry.angle(of: p)) {
-        case .beyond(let held)?: return held
-        case .at(let held)?: return Array(held.dropLast())
-        case nil: return nil
-        }
+        layout.hold(open, radius: RadialGeometry.radius(of: p), angle: RadialGeometry.angle(of: p))?.scope
     }
 
     /// Wherever on a word showing the pointer is, that word is the one selected, unless an open
     /// petal holds the pointer there and the word is not among the ones it keeps
-    /// (`RadialLayout.hold`), when what is selected is among them; and where the pointer is on
-    /// the highlighted word grown under it, that word stays selected.
+    /// (`RadialLayout.Hold.scope`), when what is selected is that petal or among them; and where
+    /// the pointer is on the highlighted word grown under it, that word stays selected.
     func testTheWordUnderThePointerIsTheOneThatLights() {
         everyLayout { layout, _, what in
             for (open, showing) in Self.states(layout) {
@@ -151,7 +146,7 @@ final class RadialLayoutTests: XCTestCase {
                         let selected = layout.selection(at: p, open: open)
                         func within(_ path: [String], _ scope: [String]) -> Bool { path.count > scope.count && path.starts(with: scope) }
                         if path != open, let scope = Self.scope(layout, open: open, at: p), !within(path, scope) {
-                            if !within(selected, scope) && selected != open {
+                            if !selected.starts(with: scope) || selected.isEmpty {
                                 XCTFail("\(what), open \(open): \(path) at \(p), held under \(scope), selects \(selected)")
                                 break
                             }
@@ -377,6 +372,34 @@ final class RadialLayoutTests: XCTestCase {
         let turn = RadialGeometry.difference(b, a)
         let steps = max(1, Int(abs(turn) * 180 / .pi))
         return (0...steps).map { RadialGeometry.point(radius, a + turn * Double($0) / Double(steps)) }
+    }
+
+    /// With Apply Loadout open, a straight move from its word to any loadout's word that stays
+    /// clear of the centre stays among the loadouts, even where it crosses Capture's, Park's or
+    /// Widgets' word on the way: once the loadouts are out, no other top petal takes the pointer
+    /// within their arc, so a release on the way never captures, parks or changes the widgets.
+    /// (A move through the centre is the controller's: `RadialOpeningTests`.)
+    func testAStraightMoveFromApplyLoadoutStaysAmongTheLoadouts() {
+        everyLayout { layout, tree, what in
+            let start = Self.middle(layout, ["loadouts"])
+            for loadout in tree[0].children {
+                let end = Self.middle(layout, ["loadouts", loadout.id])
+                let length = hypot(end.x - start.x, end.y - start.y)
+                guard abs(start.x * end.y - end.x * start.y) / max(1, length) >= layout.deadZone else { continue }
+                var selection = ["loadouts"]
+                let steps = max(1, Int(hypot(end.x - start.x, end.y - start.y) / 2))
+                for k in 1...steps {
+                    let t = CGFloat(k) / CGFloat(steps)
+                    let p = CGPoint(x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t)
+                    selection = layout.selection(at: p, open: selection)
+                    if selection.first != "loadouts" {
+                        XCTFail("\(what): toward \(loadout.id), at \(p) the wheel opened \(selection)")
+                        break
+                    }
+                }
+                XCTAssertEqual(selection, ["loadouts", loadout.id], what)
+            }
+        }
     }
 
     /// Out among the loadouts the pointer can go round to any of them past where they start,

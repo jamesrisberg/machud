@@ -78,7 +78,9 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   Park unfolds Park and Restore, Widgets unfolds Reveal (Lower while the widgets are up) and Edit
   (Done while you are editing them). Letting go on an action does it; letting go on a petal that
   has more beyond it, in the centre, or pressing Esc cancels. Hovering a loadout does not preview
-  it. Each petal is always in the same direction, so the same move reaches the same loadout every
+  it. Once your loadouts are out, Capture, Park and Widgets stay out of the way of the pointer
+  wherever loadouts are, even if you cross their words or sweep through the centre to reach a
+  loadout on the far side; rest in the centre a moment to start over on another petal. Each petal is always in the same direction, so the same move reaches the same loadout every
   time, and adding a loadout moves none of the others. However many loadouts you have, the wheel
   stays the same size; only the path you are on is drawn.
 - A quick tap of ⌃⌥Space no longer flashes the wheel: let go within 200 ms and the wheel does not

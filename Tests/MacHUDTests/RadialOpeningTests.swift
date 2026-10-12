@@ -213,6 +213,63 @@ final class RadialOpeningTests: XCTestCase {
         XCTAssertEqual(menu.selection, [], "back in the centre")
     }
 
+    /// With Apply Loadout open, a straight move from its word to any loadout's word stays among
+    /// the loadouts, crossing Capture's, Park's or Widgets' word or sweeping through the centre on
+    /// the way: in the centre nothing is lit (a release there cancels), and on the far side the
+    /// loadouts are open again, so a release on the way never captures, parks or changes the
+    /// widgets.
+    func testAStraightMoveFromApplyLoadoutToAnyLoadoutStaysAmongTheLoadouts() throws {
+        for names in [RadialLayoutTests.short, RadialLayoutTests.long] {
+            let tree = RadialLayoutTests.tree(10, names)
+            for loadout in tree[0].children {
+                let menu = menu()
+                var now: TimeInterval = 50
+                menu.clock = { now }
+                let display = Self.displays[1]
+                menu.prepare(tree: tree, at: CGPoint(x: display.frame.midX, y: display.frame.midY), on: display, movesPointer: true)
+                let from = try XCTUnwrap(menu.layout.word(["loadouts"])).frame
+                let to = try XCTUnwrap(menu.layout.word(["loadouts", loadout.id])).frame
+                let start = CGPoint(x: from.midX, y: from.midY), end = CGPoint(x: to.midX, y: to.midY)
+                move(menu, to: CGPoint(x: 1, y: 0))
+                move(menu, to: start)
+                XCTAssertEqual(menu.selection, ["loadouts"])
+                let steps = Int(hypot(end.x - start.x, end.y - start.y) / 3)
+                for k in 1...steps {
+                    now += 0.004
+                    let t = CGFloat(k) / CGFloat(steps)
+                    let p = CGPoint(x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t)
+                    move(menu, to: p)
+                    let inCentre = RadialGeometry.radius(of: p) < menu.layout.deadZone
+                    if inCentre ? !menu.selection.isEmpty : menu.selection.first != "loadouts" {
+                        XCTFail("toward \(loadout.id), at \(p) the wheel shows \(menu.selection)")
+                        break
+                    }
+                }
+                XCTAssertEqual(menu.selection, ["loadouts", loadout.id])
+            }
+        }
+    }
+
+    /// Resting in the centre starts over: moving out from there opens the top petal that way.
+    func testRestingInTheCentreStartsOver() throws {
+        let menu = menu()
+        var now: TimeInterval = 50
+        menu.clock = { now }
+        let display = Self.displays[1]
+        menu.prepare(tree: RadialLayoutTests.tree(10, RadialLayoutTests.short), at: CGPoint(x: display.frame.midX, y: display.frame.midY),
+                     on: display, movesPointer: true)
+        let top = try XCTUnwrap(menu.layout.word(["loadouts"])).frame
+        move(menu, to: CGPoint(x: 1, y: 0))
+        move(menu, to: CGPoint(x: top.midX, y: top.midY))
+        move(menu, to: CGPoint(x: 0, y: 4))
+        XCTAssertEqual(menu.selection, [], "nothing lit in the centre")
+        now += RadialMenu.centreRest + 0.05
+        move(menu, to: CGPoint(x: 0, y: 3))
+        let park = try XCTUnwrap(menu.layout.word(["park"])).frame
+        move(menu, to: CGPoint(x: park.midX, y: park.midY))
+        XCTAssertEqual(menu.selection, ["park"])
+    }
+
     /// Where the pointer's first report after the wheel opens is far from the centre (a
     /// hovering pen, a remotely driven pointer: moving the pointer did not stick), nothing
     /// lights there; once the pointer has gone on a few points from that first report, the

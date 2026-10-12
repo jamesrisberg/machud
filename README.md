@@ -76,7 +76,7 @@ permissions request=1` shows every missing prompt (Accessibility and Automation)
 | --- | --- |
 | Shift while dragging a window | Snap it into the region under the cursor |
 | Tab / Esc mid-drag | Next layout / cancel the snap |
-| ⌃⌥Space (hold) | Radial wheel: four petals, Apply Loadout (up), Capture (right: this screen, or draw a new layout), Park (down: park the front window / restore parked) and, when an app serves widgets, Widgets (left: reveal / edit). Moving onto a petal unfolds what lies beyond it: Apply Loadout your loadouts, a loadout its Preview / Apply (straight on) / Clear + Apply. Let go on an action to do it; anywhere else, or Esc, cancels. Digits pick among the petals showing, **P** previews the highlighted loadout. A quick tap (under 200 ms, a setting) does not open it. The hotkey is a setting |
+| ⌃⌥Space (hold) | Radial wheel: four petals, Apply Loadout (up), Capture (right: this screen, or draw a new layout), Park (down: park the front window / restore parked) and, when an app serves widgets, Widgets (left: reveal / edit). Moving onto a petal unfolds what lies beyond it: Apply Loadout your loadouts, a loadout its Preview / Apply (straight on) / Clear + Apply. Let go on an action to do it; anywhere else, or Esc, cancels. While a petal is open the others keep out of its way; rest in the centre a moment to start over. Digits pick among the petals showing, **P** previews the highlighted loadout. A quick tap (under 200 ms, a setting) does not open it. The hotkey is a setting |
 | ⌃⌥D | Show / hide the tool dock |
 | ⌃⌥W | Raise the desktop widgets above your windows; again or Esc lowers them |
 | ⌃⌥B | Collapse / expand the menu bar (when menu bar management is on) |

@@ -428,8 +428,17 @@ final class RadialMenu {
     private var pointerHasMoved = false
     /// Where the first pointer report after the wheel opened found it.
     private var firstReport: CGPoint?
+    /// The path the pointer swept into the centre from, and when: moving out again before
+    /// `centreRest` it is open still, so a move straight across the centre (Apply Loadout's
+    /// word to a loadout below it) does not open Capture, Park or Widgets on the far side.
+    private var sweptFrom: (path: [String], at: TimeInterval)?
     /// How far the pointer goes from its first report before the wheel follows it.
     static let pointerTravel: CGFloat = 6
+    /// How long the pointer rests in the centre before the path it swept in from is forgotten
+    /// (`pointerMoved(to:delta:)`).
+    static let centreRest: TimeInterval = 0.35
+    /// Seconds, from any fixed start (tests give their own).
+    var clock: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
 
     /// Moves the pointer to a point in display coordinates, which are AX coordinates (y down
     /// from the primary display's top), without a pause before it moves again. Tests record it
@@ -487,6 +496,7 @@ final class RadialMenu {
         pointerOffset = .zero
         pointerHasMoved = false
         firstReport = nil
+        sweptFrom = nil
         opening += 1
         parkTargetsAsked = false
         parkTargetsStale = false
@@ -618,9 +628,18 @@ final class RadialMenu {
     private func refreshSelection() {
         if let keyboardPath {
             highlight(keyboardPath)
-        } else {
-            highlight(layout.selection(at: pointerOffset, open: selection))
+            return
         }
+        // In the centre nothing is lit, but the path the pointer came from is kept a moment.
+        if RadialGeometry.radius(of: pointerOffset) < layout.deadZone {
+            if !selection.isEmpty { sweptFrom = (selection, clock()) }
+            highlight([])
+            return
+        }
+        var open = selection
+        if open.isEmpty, let swept = sweptFrom, clock() - swept.at < Self.centreRest { open = swept.path }
+        sweptFrom = nil
+        highlight(layout.selection(at: pointerOffset, open: open))
     }
 
     /// The park petal asks for its targets again as it is reached (`asksForParkTargets`).
@@ -655,7 +674,8 @@ final class RadialMenu {
 
     /// A mouse-moved or dragged event: the pointer is at `location` (screen coordinates),
     /// having moved by `delta`. Nothing changes until the pointer has gone `pointerTravel` from
-    /// where the first report found it.
+    /// where the first report found it. Swept through the centre (less than `centreRest` there),
+    /// the pointer comes out with the path it went in with still open; rested there, it starts over.
     func pointerMoved(to location: CGPoint, delta: CGVector) {
         if !pointerHasMoved {
             guard delta.dx != 0 || delta.dy != 0 else { return }
