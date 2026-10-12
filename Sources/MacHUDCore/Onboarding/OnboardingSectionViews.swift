@@ -431,7 +431,8 @@ struct RadialStep: View {
             StepTitle(title: "The radial menu",
                       subtitle: "Hold \(model.hotkeys.radialWheel) anywhere and a small wheel opens under the pointer. Move up onto Apply Loadout, on to a loadout, on to Apply, and let go: your windows jump into place.")
             HStack(alignment: .top, spacing: 18) {
-                RadialDiagram(target: model.practiceTarget ?? "Your loadout", hotkey: model.hotkeys.radialWheel)
+                RadialDiagram(target: model.practiceTarget ?? "Your loadout", hotkey: model.hotkeys.radialWheel,
+                              widgets: model.wheelOffersWidgets())
                     .frame(width: 300, height: 300)
                 VStack(alignment: .leading, spacing: 12) {
                     if let target = model.practiceTarget {
@@ -475,7 +476,7 @@ struct RadialStep: View {
                 action("Preview", "Draws where each window would go first.")
                 action("Apply", "Straight on: apply the loadout.")
                 action("Clear + Apply", "Clear this screen, then apply.")
-                Text("Letting go anywhere but on an action, or in the centre, cancels. A quick tap of the key does not open the wheel. Capture, Park and Widgets are on the wheel too.")
+                Text("Letting go anywhere but on an action, or in the centre, cancels. A quick tap of the key does not open the wheel. \(model.wheelOffersWidgets() ? "Capture, Park and Widgets" : "Capture and Park") are on the wheel too.")
                     .font(.system(size: 11)).foregroundStyle(OnboardingStyle.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -508,18 +509,19 @@ struct RadialStep: View {
     }
 }
 
-/// The wheel as a picture, along the path the practice takes: the four top petals around the
-/// hotkey, Apply Loadout lit, the loadout beyond it and its three actions beyond that, Apply lit,
+/// The wheel as a picture, along the path the practice takes: the top petals around the hotkey
+/// (Widgets only while the wheel has it), Apply Loadout lit, the loadout beyond it and its three actions beyond that, Apply lit,
 /// with the pointer on it and a line showing the way it came.
 struct RadialDiagram: View {
     let target: String
     let hotkey: String
+    let widgets: Bool
 
     private static let petals: [(name: String, angle: Double, radius: Double, lit: Bool)] = [
         ("Apply Loadout", 0, 0.36, true), ("Capture", 90, 0.5, false), ("Park", 180, 0.36, false), ("Widgets", 270, 0.5, false),
     ]
-    private static let actions: [(name: String, angle: Double, lit: Bool)] = [("Preview", -32, false), ("Apply", 0, true),
-                                                                               ("Clear + Apply", 32, false)]
+    private static let actions: [(name: String, angle: Double, lit: Bool)] = [("Preview", -28, false), ("Apply", 0, true),
+                                                                               ("Clear + Apply", 28, false)]
 
     /// The point `radius` (a fraction of `r`) out from `c` at `degrees` clockwise from straight up.
     private static func at(_ c: CGPoint, _ r: CGFloat, _ degrees: Double, _ radius: Double) -> CGPoint {
@@ -530,31 +532,35 @@ struct RadialDiagram: View {
     var body: some View {
         GeometryReader { geo in
             let side = min(geo.size.width, geo.size.height)
-            let c = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2 + side * 0.2)
-            diagram(centre: c, r: side / 2)
+            let c = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2 + side * 0.1)
+            diagram(centre: c, r: side / 2, frame: geo.size)
         }
     }
 
-    private func diagram(centre c: CGPoint, r: CGFloat) -> some View {
-        let pointer = Self.at(c, r, 0, 0.84)
+    private func diagram(centre c: CGPoint, r: CGFloat, frame: CGSize) -> some View {
+        let pointer = Self.at(c, r, 0, 0.8)
+        // The dark disc and its soft edge stay inside the frame.
+        let blur: CGFloat = 14
+        let disc = min(frame.width, frame.height) - 2 * blur
         return ZStack {
-            Circle().fill(Color.black.opacity(0.35)).frame(width: r * 1.9, height: r * 1.9).position(c).blur(radius: 18)
+            Circle().fill(Color.black.opacity(0.35)).frame(width: disc, height: disc)
+                .position(x: frame.width / 2, y: frame.height / 2).blur(radius: blur)
             // The way the pointer goes, in the gaps between the words.
             Path { p in
-                for (from, to) in [(0.12, 0.28), (0.43, 0.52), (0.67, 0.75)] {
+                for (from, to) in [(0.12, 0.28), (0.43, 0.52), (0.67, 0.72)] {
                     p.move(to: Self.at(c, r, 0, from))
                     p.addLine(to: Self.at(c, r, 0, to))
                 }
             }
             .stroke(OnboardingStyle.accent.opacity(0.6), style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [3, 4]))
-            ForEach(Self.petals.indices, id: \.self) { i in
+            ForEach(Self.petals.indices.filter { widgets || Self.petals[$0].name != "Widgets" }, id: \.self) { i in
                 petal(Self.petals[i].name, lit: Self.petals[i].lit)
                     .position(Self.at(c, r, Self.petals[i].angle, Self.petals[i].radius))
             }
             Text(target).font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.white)
                 .lineLimit(1).frame(maxWidth: r * 0.9).position(Self.at(c, r, 0, 0.6))
             ForEach(Self.actions.indices, id: \.self) { i in
-                action(Self.actions[i].name, lit: Self.actions[i].lit).position(Self.at(c, r, Self.actions[i].angle, 0.84))
+                action(Self.actions[i].name, lit: Self.actions[i].lit).position(Self.at(c, r, Self.actions[i].angle, 0.8))
             }
             KeyCap(text: hotkey).position(c)
             Image(systemName: "cursorarrow").font(.system(size: 18)).foregroundStyle(Color.white)

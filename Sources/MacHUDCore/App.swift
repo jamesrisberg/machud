@@ -398,6 +398,7 @@ extension AppDelegate {
     /// Tool dock section drives.
     fileprivate func installOnboarding() {
         let model = OnboardingModel(voice: voice, apps: catalog.tab, permissions: LiveOnboardingPermissions())
+        model.wheelOffersWidgets = { LoadoutMenu.shared?.widgetsState?() != nil }
         model.hotkeys = OnboardingHotkeys(radialWheel: store.hotkeys.loadoutMenu?.display ?? "the wheel hotkey",
                                           toolDock: store.hotkeys.dock?.display ?? "the dock hotkey")
         model.toolDock = LiveOnboardingToolDock(dock: toolDock)

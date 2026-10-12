@@ -805,7 +805,8 @@ final class OnboardingTests: XCTestCase {
     /// Renders every step offscreen (never on screen) into `MACHUD_ONBOARDING_SNAPSHOT_DIR`,
     /// else a temporary folder, and checks each image has the card drawn on it. The checklist
     /// is mid-way (some sections done, one skipped, the rest to do); `fresh-` shows the welcome
-    /// checklist before anything, `after-` the radial menu once practised.
+    /// checklist before anything, `after-` the radial menu once practised (and its wheel's picture
+    /// with a Widgets petal).
     func testSnapshotsEveryStep() throws {
         let model = makeModel()
         connect()
@@ -856,6 +857,10 @@ final class OnboardingTests: XCTestCase {
         loadouts.apply("Deep Work", placed: 3)
         XCTAssertEqual(model.status(of: .radial), .done)
         try OnboardingSnapshot.write(model, shot: .init(file: "", step: .radial), to: out.appendingPathComponent("onboarding-after-radial.png"))
+        // The wheel's picture with a Widgets petal, as the wheel has one while an app serves widgets.
+        model.wheelOffersWidgets = { true }
+        try OnboardingSnapshot.write(model, shot: .init(file: "", step: .radial), to: out.appendingPathComponent("onboarding-after-radial-widgets.png"))
+        model.wheelOffersWidgets = { false }
         try OnboardingSnapshot.write(model, shot: .init(file: "", step: .done), to: out.appendingPathComponent("onboarding-after-done.png"))
         XCTAssertEqual(model.step, .radial, "snapshots do not move the overlay")
     }
