@@ -78,6 +78,11 @@ final class LoadoutMenu {
         summon.onHold = { [weak self] in self?.showRadial() }
         summon.onRelease = { [weak self] in self?.radial.commit() }
         summon.onTap = { [weak self] in self?.onTap() }
+        summon.onIdle = { [weak self] in
+            guard let self, self.registrationDeferred, !self.radial.isVisible else { return }
+            self.registrationDeferred = false
+            self.registerHotkeys()
+        }
     }
 
     // MARK: The tree
@@ -454,12 +459,13 @@ final class LoadoutMenu {
 
     /// The wheel's hotkey goes through `summon`, which tells a tap from a hold. Carbon delivers
     /// the release event only to a still-registered hotkey, so re-register only when the keys
-    /// actually changed, and never while the wheel is being held open.
+    /// actually changed, and never while the key is down or the wheel is showing
+    /// (`defersRegistration`): then it waits until the wheel goes away or the key is up again.
     func registerHotkeys() {
         let menuKey = Env.noHotkeys ? nil : store.hotkeys.loadoutMenu
         let perLoadout = Env.noHotkeys ? [:] : Self.loadoutHotkeys(in: store.config)
         if let registered, registered.menu == menuKey, registered.loadouts == perLoadout { return }
-        if radial.isVisible {
+        if Self.defersRegistration(wheelShowing: radial.isVisible, key: summon.phase) {
             registrationDeferred = true
             return
         }
@@ -484,6 +490,12 @@ final class LoadoutMenu {
                 hotkeyIDs.append(id)
             }
         }
+    }
+
+    /// Whether registering the hotkeys again has to wait: while the wheel's key is down (its
+    /// release would be lost) or the wheel is showing.
+    nonisolated static func defersRegistration(wheelShowing: Bool, key: TapOrHold.Phase) -> Bool {
+        wheelShowing || key != .idle
     }
 
     /// The hotkeys of the loadouts offered (`ExperimentalLoadouts.offered`), by loadout name: a
@@ -852,6 +864,8 @@ final class TapOrHold {
     var onTap: () -> Void = {}
     var onHold: () -> Void = {}
     var onRelease: () -> Void = {}
+    /// The key is up again (after `onTap` or `onRelease`, or a late release).
+    var onIdle: () -> Void = {}
     /// Whether what a hold shows is already showing.
     var isShowing: () -> Bool = { false }
     /// Read at each press, so a changed setting takes effect at once.
@@ -889,9 +903,11 @@ final class TapOrHold {
             // A release that comes late (the main thread was busy past the threshold) is neither:
             // the hold never showed.
             if clock.now() - at < threshold() { onTap() }
+            onIdle()
         case .held:
             phase = .idle
             onRelease()
+            onIdle()
         case .idle:
             // Registered while the key was down: the press was missed. A wheel showing (opened
             // by a script) still commits.

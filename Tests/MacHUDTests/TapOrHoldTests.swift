@@ -133,6 +133,36 @@ final class TapOrHoldTests: XCTestCase {
         XCTAssertEqual(events, ["release", "release"], "nothing showing, no press: nothing")
     }
 
+    /// Back to idle after a tap or after a hold's release, `onIdle` runs once, after the tap's
+    /// or the release's own hook; never on a press or on the hold showing.
+    func testItSaysWhenTheKeyIsUpAgain() {
+        let steps = Steps()
+        let key = key(steps: steps)
+        key.onIdle = { [unowned self] in self.events.append("idle") }
+        key.press()
+        steps.advance(0.1)
+        key.release()
+        XCTAssertEqual(events, ["tap", "idle"])
+        key.press()
+        steps.advance(0.3)
+        XCTAssertEqual(events, ["tap", "idle", "hold"])
+        key.release()
+        XCTAssertEqual(events, ["tap", "idle", "hold", "release", "idle"])
+        key.press()
+        steps.now += 0.3
+        key.release()
+        XCTAssertEqual(events.last, "idle", "a late release is up again too")
+    }
+
+    /// The wheel's hotkeys are registered again only while the key is up and the wheel is not
+    /// showing: Carbon delivers a release only to a hotkey still registered.
+    func testHotkeysWaitForTheKeyToBeUp() {
+        XCTAssertFalse(LoadoutMenu.defersRegistration(wheelShowing: false, key: .idle))
+        XCTAssertTrue(LoadoutMenu.defersRegistration(wheelShowing: true, key: .idle))
+        XCTAssertTrue(LoadoutMenu.defersRegistration(wheelShowing: false, key: .pressed(at: 3)))
+        XCTAssertTrue(LoadoutMenu.defersRegistration(wheelShowing: false, key: .held))
+    }
+
     /// The setting: 200 ms by default, kept within 50 to 1000, read from `hotkeys.tapMilliseconds`.
     func testTheThresholdSetting() throws {
         XCTAssertEqual(Hotkeys.defaults.tapThreshold, 0.2, accuracy: 1e-9)
