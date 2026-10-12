@@ -10,8 +10,9 @@ import AppKit
 ///   blending between; above the centre it stands on its anchor, below it hangs from it. The top
 ///   petals sit at `topRadius`; a branch's children sit together on one circle beyond it, as near
 ///   as they can be without touching any word that shows while that branch is open (its
-///   ancestors, their siblings, the top petals, the centre and the digits). How far out that is
-///   depends on the words, never on how many loadouts there are: their directions are fixed.
+///   ancestors, their siblings, the top petals, the centre and the digits). Up to ten loadouts
+///   their directions are fixed and how far out they sit depends on the words beside them, not on
+///   how many there are; more share the whole circle (`RadialMenu.loadoutOffsets`).
 ///   Under the pointer a petal grows from its anchor (away from the centre), as far as
 ///   `RadialWheelView.grow` without touching a word that shows with it.
 /// - A name is fitted to its width (wrap to two lines, then shrink, then cut after a whole word);

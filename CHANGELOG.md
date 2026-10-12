@@ -49,7 +49,7 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - A loadout is the screen you are looking at. **Capture This Screen as Loadout…** (the Loadouts
   menu, the wheel and the Loadouts settings tab alike) captures the display under the pointer,
   on the desktop showing, even when other displays have windows; the capture sheet no longer
-  offers to walk desktops, and the wheel's capture wedge has one capture ring.
+  offers to walk desktops, and Capture on the wheel has one capture action, This screen.
 - Loadouts that span several desktops or displays are experimental, behind **Multi-desktop
   loadouts** under Experimental in MacHUD's settings (off by default). While it is off they are
   hidden from the Loadouts menu, the wheel, their hotkeys, the Loadouts settings tab and the
@@ -81,8 +81,9 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   it. Once your loadouts are out, Capture, Park and Widgets stay out of the way of the pointer
   wherever loadouts are, even if you cross their words or sweep through the centre to reach a
   loadout on the far side; rest in the centre a moment to start over on another petal. Each petal is always in the same direction, so the same move reaches the same loadout every
-  time, and adding a loadout moves none of the others. However many loadouts you have, the wheel
-  stays the same size; only the path you are on is drawn.
+  time, and adding a loadout moves none of the others. Up to ten loadouts, how big the wheel gets
+  depends on their names, not on how many there are (more share the whole circle and sit a
+  little further out); only the path you are on is drawn.
 - A quick tap of ⌃⌥Space no longer flashes the wheel: let go within 200 ms and the wheel does not
   show. Held longer, it fades in. The time is a setting (**Radial menu tap**, or
   `machud settings set hotkeys.tapMilliseconds=250`), and your hotkey is kept as it was.
@@ -108,8 +109,9 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - For scripts, `machud menu` and `machud radial` describe the wheel as a tree: `tree[]` of
   nodes with `id`, `path` (such as `loadouts/Messaging/apply`), `name`, `kind`, `hint`, `angle`,
   `radius`, `digit`, `icons`, `hotkey` and either `children` or, for an action, `action`; the
-  selection is `{kind, path, name, hint}`. The flat `wedges[]` with their `rings`/`hints` and the
-  `rings` radii are gone. `machud radial action=select` now takes `path=` (for example
+  selection is `{kind, path, name, hint}`. The flat `wedges[]` (each with its `index`, `title`,
+  `subtitle`, `rings` and `angleStart`/`angleCenter`/`angleEnd`) and the `rings` radii are gone,
+  and so are the selection's `index` and `ring`. `machud radial action=select` now takes `path=` (for example
   `path=loadouts/Messaging/apply`); `index=` and `ring=` are gone, and selecting while the wheel
   is hidden or on a path it does not have is refused.
 - From scripts too: while **Multi-desktop loadouts** is off, `machud loadouts` leaves out the

@@ -184,7 +184,7 @@ final class LoadoutMenuTests: XCTestCase {
     // MARK: - What a capture covers
 
     func testACaptureCoversTheScreenUnderThePointerUnlessMultiDesktopLoadoutsAreOn() {
-        // Off: one screen, whatever has windows and whichever ring was asked for.
+        // Off: one screen, whatever has windows and whichever capture was asked for.
         XCTAssertFalse(LoadoutMenu.capturesEveryScreen(allScreens: nil, screensWithWindows: 2, multiDesktop: false))
         XCTAssertFalse(LoadoutMenu.capturesEveryScreen(allScreens: false, screensWithWindows: 2, multiDesktop: false))
         XCTAssertFalse(LoadoutMenu.capturesEveryScreen(allScreens: true, screensWithWindows: 2, multiDesktop: false))
