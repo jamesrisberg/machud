@@ -47,8 +47,9 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - A **search bar** for launching apps, opening files, applying loadouts and inserting snippets
   without leaving the keyboard. Type part of a name: apps (from your Applications folders and the
   apps Spotlight finds in your home folder), loadouts and Stash's snippets are ranked together,
-  with files Spotlight finds below. The apps you launch from it most rise to the top, and the
-  first time it runs it borrows your app launch counts from Alfred, only reading them. Return runs
+  with files Spotlight finds below. Of similar matches, the app you launch from it most comes
+  first (a name typed in full still wins), and the first time it runs it borrows your app launch
+  counts from Alfred, only reading them. Return runs
   the selected row, ⌘1–⌘9 run the first nine; on a loadout ⌥Return previews it and ⇧Return clears
   the screen first; on a file or app ⌘Return reveals it in Finder. A snippet is pasted into the
   app you were in. Esc or clicking away closes the bar. Open it with `machud search show`; scripts

@@ -306,33 +306,40 @@ Rows, each with an icon, a title, a subtitle and its kind:
   their subfolders, plus the apps Spotlight finds in your home folder (not in ~/Library, hidden
   folders or `node_modules`) and Xcode's Developer/Applications. Several copies of an app
   outside the app folders (build folders) show as one row: the one you launch most. The index
-  is rebuilt in the background when the bar opens and it is over a minute old.
+  is rebuilt in the background when the bar opens and it is over a minute old; a Spotlight
+  listing that takes over 10 s is stopped, and the apps found before stay.
 - **Loadouts** by name: the ones the wheel offers.
-- **Snippets** from Stash: `snippets list query= limit=8` on Stash's socket
-  (`~/Library/Application Support/MacHUD/sockets/stash.sock`), asked only of a running Stash. No
-  Stash, or one without the verb, means no snippet rows and no error.
+- **Snippets** from Stash: `snippets list query= limit=8` on the socket MacHUD's supervisor
+  recorded for Stash (`xyz.machud.stash`), asked only of a running Stash, one request at a time
+  (a query typed while one waits replaces the one queued behind it). No Stash, or one without
+  the verb, means no snippet rows and no error. An isolated instance asks no Stash unless
+  `MACHUD_STASH_SOCKET` names a socket.
 - **Files**: Spotlight by name in your home folder (not ~/Library, hidden folders or
   `node_modules`, and not apps), asked once typing pauses for 0.15 s and at least two
   characters are typed. Files you have opened before come first.
 
 Apps, loadouts and snippets are ranked together, files below them (at most 8 and 5 rows). A
 name matches the query whole, at its start, at a word's start (camel case counts: "hud" in
-MacHUD), by its words' initials ("vsc"), anywhere, or letter by letter in order, best first.
-Each app's launches from the bar lift it (60 points per doubling of the count, where the
-whole name scores 1000 and its start 900), so of two similar matches the one you launch more
-comes first; they are counted in
-`state/launches.json` beside the config, keyed by the app's real path. The first time it runs,
-MacHUD adds the per-app launch counts in Alfred's history
-(`~/Library/Application Support/Alfred/Databases/knowledge.alfdb`), read from a temporary copy so
-Alfred's files are never opened or written; without Alfred it tries again next launch. Apps
-and loadouts are listed at once, snippets as Stash answers and files as Spotlight does; until
-then the previous ones that still match stay. The top row is selected unless you moved the
-selection.
+MacHUD), by its words' initials ("vsc"), with every word of a several-word query at a word's
+start, anywhere, or letter by letter in order, best first: tiers 100 points apart, a match losing
+at most 50 within its tier (a longer name, a later word). Each app's launches from the bar lift
+it by more with every doubling of the count but always by less than 100 (31 for one launch, 73
+for 120), so frequency orders apps within a tier and can pass a weaker match in the next tier
+up, never one two tiers up: an exact name beats a part of a name however often that was
+launched. Launches are counted in `state/launches.json` beside the config, keyed by the app's
+real path. The first time it runs, MacHUD adds the per-app launch counts in Alfred's history
+(`~/Library/Application Support/Alfred/Databases/knowledge.alfdb`). Alfred's file is opened
+read-only and never written: SQLite copies it into memory as one consistent snapshot, and only a
+copy read to the end counts; otherwise, or without Alfred, it tries again next launch. An
+isolated instance reads no Alfred history unless `MACHUD_ALFRED_DB` names a database. Apps and
+loadouts are listed at once, snippets as Stash answers and files as Spotlight does; until then
+the previous ones that still match stay. The top row is selected unless you moved the
+selection. While an input method is composing text, Return, Esc and the arrows are the field's.
 
 | Key | Does |
 | --- | --- |
 | ↑ ↓ | move the selection |
-| Return | app: open it (a running app comes forward); file: open it; loadout: apply; snippet: hide the bar, then Stash pastes it into the app you were in (`snippets insert id=`; when Stash cannot paste, a toast gives its hint) |
+| Return | app: open it (a running app comes forward); file: open it; loadout: apply; snippet: hide the bar, then ask Stash to paste it into the app you were in (`snippets insert id=`, which waits for the keyboard to reach that app; when Stash cannot paste, a toast gives its hint) |
 | ⌘Return | app or file: reveal in Finder |
 | ⌥Return | loadout: preview |
 | ⇧Return | loadout: clear this screen and apply |

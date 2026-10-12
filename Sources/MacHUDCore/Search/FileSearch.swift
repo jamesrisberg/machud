@@ -15,8 +15,8 @@ protocol FileSearching: AnyObject {
 
 /// Spotlight (`NSMetadataQuery`) over the home folder, by display name, most recently used
 /// first. Leaves out apps (the bar lists those itself), anything under ~/Library (mail, caches),
-/// hidden files and folders, and packages' `node_modules`. Answers once Spotlight has gathered its matches, once it has plenty, or
-/// after `timeout` with whatever it has by then.
+/// hidden files and folders, and packages' `node_modules`. Answers once Spotlight has gathered
+/// its matches, once it has plenty, or after `timeout` with whatever it has by then.
 @MainActor
 final class SpotlightFileSearch: FileSearching {
     var timeout: TimeInterval = 1.5

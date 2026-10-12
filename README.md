@@ -23,9 +23,10 @@ apps that make up the rest of the HUD:
 - **Radial wheel**: hold **⌃⌥Space**, drag toward a loadout, release. Three rings: preview,
   apply, clear this screen and apply.
 - **Tool dock**: a Dock-like strip of the sibling apps (**⌃⌥D**).
-- **Search bar**: an Alfred-style bar that launches apps (the ones you launch most rise to the
-  top), opens files Spotlight finds, applies or previews loadouts by name and inserts Stash's
-  snippets, all from the keyboard. `machud search show` opens it ([docs/API.md#search-bar](docs/API.md#search-bar)).
+- **Search bar**: an Alfred-style bar that launches apps (of similar matches, the one you launch
+  most first), opens files Spotlight finds, applies or previews loadouts by name and inserts
+  Stash's snippets, all from the keyboard. `machud search show` opens it
+  ([docs/API.md#search-bar](docs/API.md#search-bar)).
 - **Widgets**: glass tiles on the desktop that any sibling can serve (widgetHUD's clock, weather
   sessions), placed on a grid, under your windows until **⌃⌥W** raises them.
 - **Parking**: tuck windows off an edge behind a hover orb.
@@ -491,6 +492,8 @@ MACHUD_SOCKET=/tmp/machud-try.sock scripts/machud quit
 | `MACHUD_VOICE_CONVERSATION_FILE` | Where the voice host keeps the conversation with the agent (default `~/Library/Application Support/MacHUD/Voice/conversation.json`), with the take journal beside it (`takes.jsonl`, or `<name>-takes.jsonl` beside `<name>-conversation.json`, or `<file name without its extension>-takes.jsonl` beside a conversation file with any other name) |
 | `SPEAKFREE_CONFIG_DIR` | SpeakFree's config folder the voice host reads (`saveRecordings`) and shares history into (default `~/.config/speakfree`) |
 | `MACHUD_VOICE_KEYCHAIN_SERVICE` | The Keychain service the voice host keeps the Grok key under |
+| `MACHUD_STASH_SOCKET` | The Stash socket the search bar asks for snippets. An isolated copy without it asks no Stash |
+| `MACHUD_ALFRED_DB` | The Alfred `knowledge.alfdb` the search bar seeds its launch counts from, read-only. An isolated copy without it reads none |
 | `MACHUD_VOICE_LIVE` | `1`: an isolated copy runs its voice host with the microphone, brain, orb, sound and the real models folder |
 | `MACHUD_VOICE_PARENT_PIPE` | Set by MacHUD for the voice host: it exits when MacHUD's end of its stdin closes |
 
