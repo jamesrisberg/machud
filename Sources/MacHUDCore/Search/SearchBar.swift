@@ -108,14 +108,16 @@ final class SearchBar: NSObject, SearchBarPresenting, NSWindowDelegate, NSTextFi
 }
 
 /// The bar's window: a HUD panel that gives the bar's keys (arrows, Return, ⌘1–9, Esc) to the
-/// bar before the text field sees them; every other key edits the field.
+/// bar before the text field sees them, unless an input method is composing; every other key
+/// edits the field.
 final class SearchPanelWindow: HUDPanelWindow {
     var onCommand: ((SearchCommand) -> Bool)?
 
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown,
            let command = SearchKeys.command(keyCode: event.keyCode, characters: event.charactersIgnoringModifiers,
-                                            modifiers: event.modifierFlags),
+                                            modifiers: event.modifierFlags,
+                                            composing: (firstResponder as? NSTextView)?.hasMarkedText() ?? false),
            onCommand?(command) == true {
             return
         }

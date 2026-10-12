@@ -34,7 +34,12 @@ enum SearchKeys {
     static let up: UInt16 = 126
     static let down: UInt16 = 125
 
-    static func command(keyCode: UInt16, characters: String?, modifiers: NSEvent.ModifierFlags) -> SearchCommand? {
+    /// The bar's command for a key; nil for a key the text field should get. While an input
+    /// method is `composing` (the field editor has marked text) every key is the field's:
+    /// Return commits the text, Esc cancels it, the arrows pick a candidate.
+    static func command(keyCode: UInt16, characters: String?, modifiers: NSEvent.ModifierFlags,
+                        composing: Bool = false) -> SearchCommand? {
+        guard !composing else { return nil }
         let mods = modifiers.intersection([.command, .option, .shift, .control])
         switch keyCode {
         case returnKey, enter:

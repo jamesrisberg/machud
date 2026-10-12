@@ -24,6 +24,15 @@ final class SearchKeysTests: XCTestCase {
         XCTAssertEqual(command(SearchKeys.returnKey, "", [.capsLock, .function]), .run(.plain))
     }
 
+    func testAnInputMethodComposingKeepsTheKeys() {
+        // While marked text is being composed (Japanese, Chinese), Return commits it, Esc
+        // cancels it and the arrows pick a candidate: the field editor gets them.
+        for key in [SearchKeys.returnKey, SearchKeys.escape, SearchKeys.up, SearchKeys.down] {
+            XCTAssertNil(SearchKeys.command(keyCode: key, characters: "", modifiers: [], composing: true))
+        }
+        XCTAssertNil(SearchKeys.command(keyCode: 18, characters: "1", modifiers: .command, composing: true))
+    }
+
     func testCommandDigitsRunTheNthRow() {
         XCTAssertEqual(command(18, "1", .command), .runRow(0))
         XCTAssertEqual(command(25, "9", .command), .runRow(8))
