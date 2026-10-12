@@ -87,8 +87,11 @@ final class RadialWheelSnapshotTests: XCTestCase {
         out.append(Shot(name: "loadouts-10-outer-row-actions-bright", tree: ten, selection: ["loadouts", "Chat", "apply"],
                         desktop: .bright))
         out.append(Shot(name: "loadouts-10-inner-row-actions-dark", tree: ten, selection: ["loadouts", "Focus", "clear"], desktop: .dark))
+        for (count, desktop) in [(3, Desktop.bright), (6, .dark), (10, .colourful), (14, .bright)] {
+            out.append(Shot(name: "loadouts-\(String(format: "%02d", count))-long-open-\(desktop.rawValue)",
+                            tree: Self.tree(Self.long, loadouts: count), selection: ["loadouts"], desktop: desktop))
+        }
         let long = Self.tree(Self.long, loadouts: 6)
-        out.append(Shot(name: "loadouts-06-long-dark", tree: long, selection: ["loadouts"], desktop: .dark))
         out.append(Shot(name: "loadouts-06-long-apply-bright", tree: long, selection: ["loadouts", "dev: Browsers", "apply"],
                         desktop: .bright))
 
