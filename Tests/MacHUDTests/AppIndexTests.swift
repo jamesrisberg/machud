@@ -168,6 +168,14 @@ final class AppIndexTests: XCTestCase {
         XCTAssertEqual(AlfredHistory.launchCounts(at: url), ["/Applications/Fake Notes.app": 2])
     }
 
+    func testWhichAlfredHistoryIsRead() {
+        XCTAssertEqual(SearchServices.alfredDatabase(environment: [:]), AlfredHistory.defaultURL)
+        XCTAssertNil(SearchServices.alfredDatabase(environment: ["MACHUD_CONFIG": "/tmp/t/layouts.json"]),
+                     "an isolated instance reads no Alfred history")
+        XCTAssertEqual(SearchServices.alfredDatabase(environment: ["MACHUD_SOCKET": "/tmp/t.sock", "MACHUD_ALFRED_DB": "/tmp/k.alfdb"]),
+                       URL(fileURLWithPath: "/tmp/k.alfdb"))
+    }
+
     // MARK: Spotlight that never finishes
 
     @MainActor

@@ -13,17 +13,22 @@ protocol SnippetSource: AnyObject {
 /// Stash's snippets over its socket: `snippets list [query=] [limit=]` →
 /// `{snippets: [{id, name, keyword, collection, preview}]}`, and `snippets insert id=` →
 /// `{ok: true, pasted: true}` or `{ok: true, pasted: false, hint}`. Asks only a Stash that is
-/// already running (MacHUD's supervisor would launch it); a missing Stash, or one without the
-/// verb, lists nothing.
+/// already running (MacHUD's supervisor would launch it); a missing Stash (no path, or nothing
+/// listening), or one without the verb, lists nothing. One list request is out at a time: a
+/// query typed while one waits replaces the one queued behind it, so a slow or hung Stash
+/// never builds up a backlog of old queries.
 @MainActor
 final class StashSnippets: SnippetSource {
-    private let path: () -> String
+    private let path: () -> String?
     /// Listing answers within a keystroke or two, or not at all.
     private let lister: SocketConnector
     /// Inserting waits for Stash to paste.
     private let inserter: SocketConnector
 
-    init(path: @escaping () -> String, lister: SocketConnector? = nil, inserter: SocketConnector? = nil) {
+    private var listing = false
+    private var queued: (query: String, limit: Int, completion: ([SnippetHit]) -> Void)?
+
+    init(path: @escaping () -> String?, lister: SocketConnector? = nil, inserter: SocketConnector? = nil) {
         self.path = path
         self.lister = lister ?? Self.connector(timeout: 1)
         self.inserter = inserter ?? Self.connector(timeout: 5)
@@ -42,16 +47,29 @@ final class StashSnippets: SnippetSource {
     }
 
     func list(query: String, limit: Int, completion: @escaping ([SnippetHit]) -> Void) {
+        guard let path = path() else { completion([]); return }
+        guard !listing else {
+            queued?.completion([])
+            queued = (query, limit, completion)
+            return
+        }
+        listing = true
         var args = ["limit": String(limit)]
         if !query.isEmpty { args["query"] = query }
-        lister.request(path: path(), command: "snippets", args: Self.args("list", args)) { result in
-            guard case .success(let reply) = result else { completion([]); return }
-            completion(Self.parse(reply))
+        lister.request(path: path, command: "snippets", args: Self.args("list", args)) { [weak self] result in
+            if case .success(let reply) = result { completion(Self.parse(reply)) } else { completion([]) }
+            guard let self else { return }
+            self.listing = false
+            if let next = self.queued {
+                self.queued = nil
+                self.list(query: next.query, limit: next.limit, completion: next.completion)
+            }
         }
     }
 
     func insert(id: String, completion: @escaping ([String: Any]) -> Void) {
-        inserter.request(path: path(), command: "snippets", args: Self.args("insert", ["id": id])) { result in
+        guard let path = path() else { completion(["ok": false, "error": "Stash is not running"]); return }
+        inserter.request(path: path, command: "snippets", args: Self.args("insert", ["id": id])) { result in
             switch result {
             case .success(let reply): completion(reply)
             case .failure(HUDSocketError.notRunning): completion(["ok": false, "error": "Stash is not running"])

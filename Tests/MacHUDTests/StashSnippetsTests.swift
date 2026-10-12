@@ -88,4 +88,53 @@ final class StashSnippetsTests: XCTestCase {
         XCTAssertNotNil(StashSnippets.problem(in: try XCTUnwrap(reply)))
         XCTAssertNil(StashSnippets.problem(in: ["ok": true, "pasted": true]))
     }
+
+    // MARK: A slow or hung Stash
+
+    /// Holds each request until the test answers it.
+    @MainActor
+    final class HoldingConnector: SocketConnector {
+        var requests: [(args: [String: String], done: (Result<[String: Any], Error>) -> Void)] = []
+        func subscribe(path: String, onEvent: @escaping ([String: Any]) -> Void, onClose: @escaping () -> Void,
+                       completion: @escaping (Result<SocketSubscription, Error>) -> Void) {}
+        func request(path: String, command: String, args: [String: String],
+                     completion: @escaping (Result<[String: Any], Error>) -> Void) {
+            requests.append((args, completion))
+        }
+    }
+
+    func testOnlyTheLatestQueryWaitsBehindOneInFlight() {
+        let connector = HoldingConnector()
+        let client = StashSnippets(path: { "/nowhere.sock" }, lister: connector)
+        var answers: [String: [SnippetHit]] = [:]
+        for q in ["a", "ab", "abc"] { client.list(query: q, limit: 5) { answers[q] = $0 } }
+        XCTAssertEqual(connector.requests.map { $0.args["query"] }, ["a"], "one request at a time")
+        XCTAssertEqual(answers["ab"], [], "a query typed over is answered empty, never sent")
+        connector.requests[0].done(.failure(HUDSocketError.timeout))
+        XCTAssertEqual(answers["a"], [])
+        XCTAssertEqual(connector.requests.map { $0.args["query"] }, ["a", "abc"], "the latest goes next")
+        connector.requests[1].done(.success(["ok": true, "snippets": [["id": "1", "name": "abc"]]]))
+        XCTAssertEqual(answers["abc"]?.map(\.id), ["1"])
+    }
+
+    func testNoPathMeansNoSnippets() {
+        let connector = HoldingConnector()
+        var hits: [SnippetHit]?
+        StashSnippets(path: { nil }, lister: connector).list(query: "a", limit: 5) { hits = $0 }
+        XCTAssertEqual(hits, [])
+        XCTAssertTrue(connector.requests.isEmpty)
+    }
+
+    // MARK: Which Stash
+
+    func testWhichStashTheBarAsks() {
+        let recorded = { "/Users/u/Library/Application Support/MacHUD/sockets/stash.sock" }
+        XCTAssertEqual(SearchServices.stashSocket(environment: [:], recorded: recorded), recorded(),
+                       "the real instance asks the Stash the supervisor knows")
+        XCTAssertNil(SearchServices.stashSocket(environment: ["MACHUD_SOCKET": "/tmp/t.sock"], recorded: recorded),
+                     "an isolated instance asks no Stash")
+        XCTAssertEqual(SearchServices.stashSocket(environment: ["MACHUD_SOCKET": "/tmp/t.sock", "MACHUD_STASH_SOCKET": "/tmp/s.sock"],
+                                                  recorded: recorded), "/tmp/s.sock")
+        XCTAssertNil(SearchServices.stashSocket(environment: [:], recorded: { nil }), "no Stash discovered")
+    }
 }

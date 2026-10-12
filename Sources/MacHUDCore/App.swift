@@ -358,7 +358,7 @@ extension AppDelegate {
     /// The search bar (`search.bar.show(query:)`, `search.bar.hide()`) and the `search` verb;
     /// its loadout rows apply and preview through the loadout menu.
     fileprivate func installSearch(_ menu: LoadoutMenu) {
-        search = SearchServices(store: store, menu: menu)
+        search = SearchServices(store: store, menu: menu, externals: externals)
         search.registerControl(control)
     }
 
