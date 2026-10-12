@@ -8,10 +8,19 @@ protocol AppSource: AnyObject {
     func refreshIfStale()
 }
 
+/// Finds application bundles anywhere on the Mac (Spotlight).
+@MainActor
+protocol AppBundleFinding: AnyObject {
+    /// Calls back once, on the main thread, with the bundles' paths, unless cancelled first.
+    func find(_ done: @escaping ([String]) -> Void) -> SearchCancellable
+}
+
 /// The applications in /Applications, /System/Applications and ~/Applications (and their
-/// subfolders, never inside a bundle), plus every application bundle Spotlight knows (a build
+/// subfolders, never inside a bundle), plus the application bundles Spotlight knows (a build
 /// folder's app, Xcode's Simulator). Built in the background at launch and again on a show
-/// once it is a minute old, so a newly installed app shows up the next time the bar opens.
+/// once it is a minute old, so a newly installed app shows up the next time the bar opens. A
+/// Spotlight gather that has not finished after `spotlightTimeout` is stopped; the folders'
+/// apps (and Spotlight's from last time) stay, and a later show tries again.
 @MainActor
 final class AppIndex: AppSource {
     nonisolated static let defaultRoots: [URL] = [
@@ -21,27 +30,29 @@ final class AppIndex: AppSource {
     ]
 
     private(set) var apps: [AppEntry] = []
+    private(set) var isBuilding = false
     var maxAge: TimeInterval = 60
+    var spotlightTimeout: TimeInterval = 10
     private let roots: [URL]
-    private let spotlight: Bool
+    private let spotlight: AppBundleFinding?
     private var builtAt: Date?
-    private var building = false
-    private var query: NSMetadataQuery?
-    private var observer: NSObjectProtocol?
+    private var awaitingSpotlight = false
+    private var finding: SearchCancellable?
+    private var findTimer: Timer?
 
-    init(roots: [URL] = AppIndex.defaultRoots, spotlight: Bool = true) {
+    init(roots: [URL] = AppIndex.defaultRoots, spotlight: AppBundleFinding? = SpotlightAppFinder()) {
         self.roots = roots
         self.spotlight = spotlight
     }
 
     func refreshIfStale() {
-        guard !building, builtAt.map({ Date().timeIntervalSince($0) > maxAge }) ?? true else { return }
+        guard !isBuilding, builtAt.map({ Date().timeIntervalSince($0) > maxAge }) ?? true else { return }
         refresh()
     }
 
     /// Scans the folders off the main thread and shows what they hold, then adds Spotlight's.
     func refresh() {
-        building = true
+        isBuilding = true
         let roots = roots
         Self.queue.async {
             let folder = Self.scan(roots: roots)
@@ -49,55 +60,56 @@ final class AppIndex: AppSource {
                 MainActor.assumeIsolated {
                     // The folders' apps now; the ones Spotlight added last time until it answers.
                     self.apps = Self.merge(folder, self.apps)
-                    guard self.spotlight else { self.finish(folder); return }
-                    self.querySpotlight { paths in
-                        Self.queue.async {
-                            let found = paths.filter { Self.includesSpotlightApp($0) }.map { path in
-                                var entry = Self.entry(path)
-                                entry.foundBySpotlight = !roots.contains { path.hasPrefix($0.path + "/") }
-                                return entry
-                            }
-                            let merged = Self.merge(folder, found)
-                            DispatchQueue.main.async { MainActor.assumeIsolated { self.finish(merged) } }
-                        }
-                    }
+                    guard let spotlight = self.spotlight else { self.finish(folder); return }
+                    self.gather(spotlight, folder: folder)
                 }
             }
         }
     }
 
+    private func gather(_ spotlight: AppBundleFinding, folder: [AppEntry]) {
+        let roots = roots
+        awaitingSpotlight = true
+        findTimer = Timer.scheduledTimer(withTimeInterval: spotlightTimeout, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.giveUpOnSpotlight() }
+        }
+        finding = spotlight.find { [weak self] paths in
+            guard let self, self.awaitingSpotlight else { return }
+            self.stopGathering()
+            Self.queue.async {
+                let found = paths.filter { Self.includesSpotlightApp($0) }.map { path in
+                    var entry = Self.entry(path)
+                    entry.foundBySpotlight = !roots.contains { path.hasPrefix($0.path + "/") }
+                    return entry
+                }
+                let merged = Self.merge(folder, found)
+                DispatchQueue.main.async { MainActor.assumeIsolated { self.finish(merged) } }
+            }
+        }
+    }
+
+    private func giveUpOnSpotlight() {
+        guard awaitingSpotlight else { return }
+        finding?.cancel()
+        stopGathering()
+        NSLog("MacHUD: search bar: Spotlight listed no apps within %.0f s; keeping the folders' apps", spotlightTimeout)
+        finish(apps)
+    }
+
+    private func stopGathering() {
+        awaitingSpotlight = false
+        finding = nil
+        findTimer?.invalidate()
+        findTimer = nil
+    }
+
     private func finish(_ apps: [AppEntry]) {
         self.apps = apps
         builtAt = Date()
-        building = false
+        isBuilding = false
     }
 
     private nonisolated static let queue = DispatchQueue(label: "machud.search.apps", qos: .userInitiated)
-
-    /// Spotlight's application bundles on this Mac; an empty list if the query cannot run.
-    private func querySpotlight(_ done: @escaping ([String]) -> Void) {
-        let q = NSMetadataQuery()
-        q.predicate = NSPredicate(format: "%K == %@", "kMDItemContentType", "com.apple.application-bundle")
-        q.searchScopes = [NSMetadataQueryLocalComputerScope]
-        observer = NotificationCenter.default.addObserver(forName: .NSMetadataQueryDidFinishGathering, object: q,
-                                                          queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
-                q.stop()
-                let paths = (q.results as? [NSMetadataItem] ?? []).compactMap { $0.value(forAttribute: NSMetadataItemPathKey) as? String }
-                if let observer = self?.observer { NotificationCenter.default.removeObserver(observer) }
-                self?.observer = nil
-                self?.query = nil
-                done(paths)
-            }
-        }
-        query = q
-        if !q.start() {
-            if let observer { NotificationCenter.default.removeObserver(observer) }
-            observer = nil
-            query = nil
-            done([])
-        }
-    }
 
     // MARK: Pure parts
 
@@ -173,5 +185,58 @@ final class AppIndex: AppSource {
             out.append(e)
         }
         return out
+    }
+}
+
+/// Spotlight's application bundles on this Mac (`NSMetadataQuery`); an empty list if the query
+/// cannot run.
+@MainActor
+final class SpotlightAppFinder: AppBundleFinding {
+    nonisolated init() {}
+
+    func find(_ done: @escaping ([String]) -> Void) -> SearchCancellable {
+        let gather = Gather(done)
+        gather.start()
+        return gather
+    }
+
+    @MainActor
+    final class Gather: SearchCancellable {
+        private let query = NSMetadataQuery()
+        private var done: (([String]) -> Void)?
+        private var observer: NSObjectProtocol?
+
+        init(_ done: @escaping ([String]) -> Void) {
+            self.done = done
+            query.predicate = NSPredicate(format: "%K == %@", "kMDItemContentType", "com.apple.application-bundle")
+            query.searchScopes = [NSMetadataQueryLocalComputerScope]
+        }
+
+        func start() {
+            observer = NotificationCenter.default.addObserver(forName: .NSMetadataQueryDidFinishGathering, object: query,
+                                                              queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, let done = self.done else { return }
+                    self.query.disableUpdates()
+                    let paths = (0..<self.query.resultCount).compactMap {
+                        (self.query.result(at: $0) as? NSMetadataItem)?.value(forAttribute: NSMetadataItemPathKey) as? String
+                    }
+                    self.cancel()
+                    done(paths)
+                }
+            }
+            if !query.start() {
+                let done = self.done
+                cancel()
+                done?([])
+            }
+        }
+
+        func cancel() {
+            done = nil
+            query.stop()
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            observer = nil
+        }
     }
 }

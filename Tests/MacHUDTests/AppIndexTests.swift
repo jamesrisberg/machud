@@ -167,4 +167,36 @@ final class AppIndexTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path + "-wal"))
         XCTAssertEqual(AlfredHistory.launchCounts(at: url), ["/Applications/Fake Notes.app": 2])
     }
+
+    // MARK: Spotlight that never finishes
+
+    @MainActor
+    final class SilentFinder: AppBundleFinding {
+        var finds = 0
+        var cancelled = 0
+        final class Find: SearchCancellable {
+            let onCancel: () -> Void
+            init(_ onCancel: @escaping () -> Void) { self.onCancel = onCancel }
+            func cancel() { onCancel() }
+        }
+        func find(_ done: @escaping ([String]) -> Void) -> SearchCancellable {
+            finds += 1
+            return Find { [weak self] in self?.cancelled += 1 }
+        }
+    }
+
+    @MainActor
+    func testASpotlightGatherThatNeverEndsStillFinishes() {
+        makeApp("Safari.app")
+        let finder = SilentFinder()
+        let index = AppIndex(roots: [dir], spotlight: finder)
+        index.spotlightTimeout = 0.2
+        index.maxAge = 0
+        index.refreshIfStale()
+        XCTAssertTrue(spin { !index.isBuilding }, "gives up on Spotlight")
+        XCTAssertEqual(index.apps.map(\.fileName), ["Safari"], "the folders' apps are kept")
+        XCTAssertEqual(finder.cancelled, 1, "the query is stopped")
+        index.refreshIfStale()
+        XCTAssertTrue(spin { finder.finds == 2 }, "a later show refreshes again")
+    }
 }
