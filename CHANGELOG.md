@@ -70,30 +70,46 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   so the desktop behind their dimmed screen stays sharp.
 - The setup guide's cards use the classic frosted material, since the guide already blurs the
   desktop behind them.
-- The loadout wheel is words on one soft, dark blur that fades out at its edge rather than
-  ending in a line, with no tiles and no hard edges. Every word reads upright, and the wheel is
-  dark in light mode too, so its white words stay readable. Each loadout's name sits around the
-  outside, wrapping to a second line and then shrinking to fit (a very long one ends in an
-  ellipsis after a whole word), with its apps' icons on wheels of up to eight slices. Each
-  slice's buttons line up from the centre out toward its name: Preview, Apply and Clear +
-  Apply; This screen and Draw layout for Capture (All screens between them while multi-desktop
-  loadouts are on); Park and Restore; Reveal (Lower while the widgets are up) and Edit (Done
-  while you are editing them) for Widgets. Each ring is as deep as its words need, so the
-  wheel's size depends on its labels; on a screen too small for it the whole wheel is drawn
-  smaller.
-- Over the wheel, the button under the pointer grows and glows, its slice's name lights up and
-  the other slices fade back a little; letting go does what that button said, even if the
-  widgets changed while the wheel was open. The line under the wheel says only what letting go
-  does, such as "Apply Code", "Park Safari · Docs", "Focus a window to park" or "Finish editing
-  widgets", on up to two lines (a very long window title ends in an ellipsis); the Park hint
-  names the window letting go would park, even after a click under the wheel changed the focus.
+- The loadout wheel opens small and shows only the path you take. Holding ⌃⌥Space opens four
+  petals around the pointer: Apply Loadout (up), Capture (right), Park (down) and, while an app
+  serves widgets, Widgets (left). Moving onto Apply Loadout unfolds your loadouts beyond it;
+  moving onto a loadout unfolds Preview, Apply (straight on) and Clear + Apply; Capture unfolds
+  This screen and Draw layout (All screens between them while multi-desktop loadouts are on),
+  Park unfolds Park and Restore, Widgets unfolds Reveal (Lower while the widgets are up) and Edit
+  (Done while you are editing them). Letting go on an action does it; letting go on a petal that
+  has more beyond it, in the centre, or pressing Esc cancels. Hovering a loadout does not preview
+  it. Each petal is always in the same direction, so the same move reaches the same loadout every
+  time, and adding a loadout moves none of the others. However many loadouts you have, the wheel
+  stays the same size; only the path you are on is drawn.
+- A quick tap of ⌃⌥Space no longer flashes the wheel: let go within 200 ms and the wheel does not
+  show. Held longer, it fades in. The time is a setting (**Radial menu tap**, or
+  `machud settings set hotkeys.tapMilliseconds=250`), and your hotkey is kept as it was.
+- Digits pick among the petals showing (the top petals, then the loadouts, then a loadout's
+  actions), and **P** still previews the highlighted loadout. ⇧ no longer jumps to Clear + Apply:
+  it sits beside Apply, or press 3 once a loadout is open.
+- The wheel's words are upright on one soft, dark blur that fades out at its edge rather than
+  ending in a line, and the blur grows with the petals that unfold. The wheel is dark in light
+  mode too, so its white words stay readable. A long loadout name wraps to a second line and then
+  shrinks to fit (a very long one ends in an ellipsis after a whole word), with its apps' icons on
+  wheels of up to eight loadouts. On a screen too small for it the whole wheel is drawn smaller.
+- Over the wheel, the petal under the pointer grows and glows, the others beside it fade back,
+  and letting go does what that action said, even if the widgets changed while the wheel was
+  open. The line under the wheel says what letting go does ("Apply Code", "Park Safari · Docs",
+  "Focus a window to park", "Finish editing widgets"), or where to go on from a petal with more
+  beyond it ("Move out to a loadout"); a very long window title ends in an ellipsis. The Park
+  hint names the window letting go would park, even after a click under the wheel changed the focus.
 - Where the wheel cannot open around the pointer (near a screen's edge) the pointer moves to the
   wheel's centre, and nothing lights until you move it, so pressing and letting go without
   moving cancels. With Reduce transparency on, the wheel's blur gives way to a plain dark disc.
-- In the replies of `machud menu` and `machud radial`, each wedge's `title` is now `name` and its
-  `subtitle` is gone, in `wedges[]` and in `selection`. Each wedge also lists the `hints` its rings
-  show under the wheel, the selection carries the `hint` showing, `icons` counts the icons the
-  wheel draws by the name, and `rings.names` is the radius the names are anchored at.
+- The setup guide's radial menu step teaches the new path: hold, onto Apply Loadout, on to your
+  loadout, on to Apply, let go.
+- For scripts, `machud menu` and `machud radial` describe the wheel as a tree: `tree[]` of
+  nodes with `id`, `path` (such as `loadouts/Messaging/apply`), `name`, `kind`, `hint`, `angle`,
+  `radius`, `digit`, `icons`, `hotkey` and either `children` or, for an action, `action`; the
+  selection is `{kind, path, name, hint}`. The flat `wedges[]` with their `rings`/`hints` and the
+  `rings` radii are gone. `machud radial action=select` now takes `path=` (for example
+  `path=loadouts/Messaging/apply`); `index=` and `ring=` are gone, and selecting while the wheel
+  is hidden or on a path it does not have is refused.
 - From scripts too: while **Multi-desktop loadouts** is off, `machud loadouts` leaves out the
   loadouts that span several desktops or displays (and says how many), and `machud apply` refuses
   one by name, saying how to turn the setting on, before anything moves, as does `machud loadouts

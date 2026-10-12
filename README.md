@@ -20,8 +20,8 @@ apps that make up the rest of the HUD:
   the HUD itself: the tool dock and every sibling's panels. Loadouts that span several
   desktops or displays are [experimental](#multi-desktop-loadouts-experimental) and off by
   default.
-- **Radial wheel**: hold **⌃⌥Space**, drag toward a loadout, release. Three rings: preview,
-  apply, clear this screen and apply.
+- **Radial wheel**: hold **⌃⌥Space** and a small wheel opens; move onto Apply Loadout, on to
+  a loadout, on to Preview, Apply or Clear + Apply, and let go. Only the path you take unfolds.
 - **Tool dock**: a Dock-like strip of the sibling apps (**⌃⌥D**).
 - **Widgets**: glass tiles on the desktop that any sibling can serve (widgetHUD's clock, weather
   sessions), placed on a grid, under your windows until **⌃⌥W** raises them.
@@ -76,7 +76,7 @@ permissions request=1` shows every missing prompt (Accessibility and Automation)
 | --- | --- |
 | Shift while dragging a window | Snap it into the region under the cursor |
 | Tab / Esc mid-drag | Next layout / cancel the snap |
-| ⌃⌥Space (hold) | Radial wheel: drag to a loadout, release. Inner ring previews, middle ring applies, outer ring clears this screen first; **P** previews the highlighted loadout too. Capture (this screen, or draw a new layout), Park (park the front window / restore parked) and, when an app serves widgets, Widgets (reveal / edit). The hotkey is a setting |
+| ⌃⌥Space (hold) | Radial wheel: four petals, Apply Loadout (up), Capture (right: this screen, or draw a new layout), Park (down: park the front window / restore parked) and, when an app serves widgets, Widgets (left: reveal / edit). Moving onto a petal unfolds what lies beyond it: Apply Loadout your loadouts, a loadout its Preview / Apply (straight on) / Clear + Apply. Let go on an action to do it; anywhere else, or Esc, cancels. Digits pick among the petals showing, **P** previews the highlighted loadout. A quick tap (under 200 ms, a setting) does not open it. The hotkey is a setting |
 | ⌃⌥D | Show / hide the tool dock |
 | ⌃⌥W | Raise the desktop widgets above your windows; again or Esc lowers them |
 | ⌃⌥B | Collapse / expand the menu bar (when menu bar management is on) |
@@ -207,14 +207,14 @@ applies to whichever you are on. What apply does with each slot's window:
 - **No window**: the app is launched, or asked for a window.
 
 Without `clear=1`, apply never closes a window. One loadout is applied at a time: a second apply while one runs is
-refused ("<name> is still being applied"). `clear=1` (the wheel's outer ring, the menu's
+refused ("<name> is still being applied"). `clear=1` (a loadout's Clear + Apply on the wheel, the menu's
 **Clear This Screen + Apply**) first minimises the other windows showing on that screen and
 closes the web windows MacHUD opened that the loadout does not want; `machud restore` or
 Loadouts › Restore Cleared Windows brings the minimised ones back. `machud clear` on its own
 does the same without applying: it clears the screen under the pointer, on the desktop
 showing (`screen=<display>` picks another), and leaves windows on other displays and desktops.
 
-**Preview** (a loadout's Preview…, the wheel's inner ring, or `machud
+**Preview** (a loadout's Preview…, its Preview on the wheel, or `machud
 apply loadout=Work plan=1` for the JSON) shows every region coloured by what
 apply will do: green placed/moved, blue launched, orange a desktop switch (a window fetched
 from another desktop), red cannot (with the reason). Regions can be dragged and
@@ -234,8 +234,8 @@ once and needs no relaunch. It turns on:
   bound to a desktop (`"space": N`), with `whenScreenMissing` for a display that is not
   attached (see docs/API.md).
 - Capturing every screen: the menu item reads **Capture Windows as Loadout…** and takes every
-  display when more than one has windows, the wheel's capture wedge gains an **All screens**
-  button, and `machud capture name=Studio screens=all` does the same. Walking
+  display when more than one has windows, Capture on the wheel gains an **All screens**
+  action, and `machud capture name=Studio screens=all` does the same. Walking
   desktops while capturing: the capture sheet's "Also walk desktops 1…N" box and
   `desktops=1,2`. Filling one layout per display: `screens=<layout>@<display>,…`.
 - Slots bound to a desktop: apply switches to that desktop, places the slot's window there and
@@ -262,7 +262,7 @@ the windows on every desktop of every display.
 ### Layouts and the visual editor
 
 Menu bar → Loadouts → a loadout → **Edit Layout…** (its regions, with its occupants),
-**Draw a New Layout…** for an empty canvas (also the wheel's Capture wedge, last ring),
+**Draw a New Layout…** for an empty canvas (also Capture › Draw layout on the wheel),
 or Snap Layout → **Edit Snap Layout…**. With no layout yet, a Shift-drag offers
 the editor in a toast. The screen dims and shows a fine snap grid
 (96 × 54 by default; pick 24 × 12 up to 192 × 108 from the panel).
