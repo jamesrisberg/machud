@@ -210,7 +210,8 @@ machud orb show|hide                      # orbs are hidden while the tool dock 
 
 ## Isolated instances (development and tests)
 
-The user's live MacHUD runs from `/Applications/MacHUD.app` on `/tmp/machud-<uid>.sock`.
+The user's live MacHUD is the dev build `build/MacHUD.app` of `~/dev/machud` (check with `ps`), on
+`/tmp/machud-<uid>.sock`.
 **Never quit, kill (`pkill MacHUD`), relaunch or install over it** unless the user asks.
 To test, run a separate copy with its own socket, config and no hotkeys:
 
