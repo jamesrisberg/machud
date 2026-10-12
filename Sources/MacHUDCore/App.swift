@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var diagnostics: DiagnoseMenu!
     private var startup: StartupLoadout?
     private var library: LoadoutLibrary!
+    private var search: SearchServices!
     private var trustTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -170,6 +171,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if edit { widgets.setEditing(on) } else { widgets.setRevealed(on) }
         }
         installLoadoutsTab(loadoutMenu)
+        installSearch(loadoutMenu)
         scheduleStartupLoadout()
 
         if CommandLine.arguments.contains("--edit") {
@@ -351,6 +353,13 @@ extension AppDelegate {
             MainActor.assumeIsolated { tab?.reload() }
         }
         tab.reload()
+    }
+
+    /// The search bar (`search.bar.show(query:)`, `search.bar.hide()`) and the `search` verb;
+    /// its loadout rows apply and preview through the loadout menu.
+    fileprivate func installSearch(_ menu: LoadoutMenu) {
+        search = SearchServices(store: store, menu: menu, externals: externals)
+        search.registerControl(control)
     }
 
     /// The app catalog, the installer (`catalog`, `apps install`) and the Apps tab.

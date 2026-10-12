@@ -285,6 +285,71 @@ works as described there, for any app rather than only a single-window one.
 ffmpeg and ImageMagick presets and the dev servers list are the sibling apps ffmpegHUD,
 magickHUD and serversHUD, not MacHUD panels.
 
+## Search bar
+
+A keyboard-first bar for launching apps, finding files, inserting snippets and applying
+loadouts. It opens centred on the screen with the pointer, with its field focused, without
+making MacHUD the active app (the app you were in stays frontmost), and closes on Esc, when it
+loses the keyboard, and before a row runs.
+
+| Command | Args | Effect |
+| --- | --- | --- |
+| `search` (or `search state`) | | `visible`, `query` |
+| `search show` | `query=` (optional) | opens the bar with that text typed (empty without it); answers like `state` |
+| `search hide` | | closes it |
+| `search query` | `text=`, `files=0` (optional) | the bar untouched: `query` and `results[] {rank, kind, id, title, subtitle, score}`, ranked as the bar would list them. `kind` is `app` (`id` the bundle path), `loadout` (`id` the name), `snippet` (`id` Stash's snippet id) or `file` (`id` the path). Waits up to 2 s for Stash and Spotlight; one that has not answered by then is left out. `files=0` skips Spotlight |
+| `search snapshot` | `path=<png>`, `query=` (optional, default the bar's) | renders the bar with that query's results to a PNG, offscreen (a dark stand-in for the glass); answers `path`, `query`, `results` |
+
+Rows, each with an icon, a title, a subtitle and its kind:
+
+- **Apps**: the `.app` bundles in /Applications, /System/Applications and ~/Applications and
+  their subfolders, plus the apps Spotlight finds in your home folder (not in ~/Library, hidden
+  folders or `node_modules`) and Xcode's Developer/Applications. Several copies of an app
+  outside the app folders (build folders) show as one row: the one you launch most. The index
+  is rebuilt in the background when the bar opens and it is over a minute old; a Spotlight
+  listing that takes over 10 s is stopped, and the apps found before stay.
+- **Loadouts** by name: the ones the wheel offers.
+- **Snippets** from Stash: `snippets list query= limit=8` on the socket MacHUD's supervisor
+  recorded for Stash (`xyz.machud.stash`), asked only of a running Stash. The bar and
+  `search query` each keep one request out at a time (a query typed while one waits replaces
+  the one queued behind it, never the other's). No Stash, or one without
+  the verb, means no snippet rows and no error. An isolated instance asks no Stash unless
+  `MACHUD_STASH_SOCKET` names a socket.
+- **Files**: Spotlight by name in your home folder (not ~/Library, hidden folders or
+  `node_modules`, and not apps), asked once typing pauses for 0.15 s and at least two
+  characters are typed. Files you have opened before come first.
+
+Apps, loadouts and snippets are ranked together, files below them (at most 8 and 5 rows). A
+name matches the query whole, at its start, at a word's start (camel case counts: "hud" in
+MacHUD), by its words' initials ("vsc"), with every word of a several-word query at a word's
+start, anywhere, or letter by letter in order, best first: tiers 100 points apart, a match
+losing at most 50 within its tier (a longer name, a later word, letters further apart). Each
+app's launches from the bar lift it by more with every doubling of the count but always by less
+than 100 (31 for one launch, 73 for 120), so frequency orders apps within a tier and can pass a weaker match in the next tier
+up, never one two tiers up: an exact name beats a part of a name however often that was
+launched. Launches are counted in `state/launches.json` beside the config, keyed by the app's
+real path. The first time it runs, MacHUD adds the per-app launch counts in Alfred's history
+(`~/Library/Application Support/Alfred/Databases/knowledge.alfdb`). Alfred's file is opened
+read-only and never written: SQLite copies it into memory as one consistent snapshot, and only a
+copy read to the end counts; otherwise, or without Alfred, it tries again next launch. An
+isolated instance reads no Alfred history unless `MACHUD_ALFRED_DB` names a database. Apps and
+loadouts are listed at once, snippets as Stash answers and files as Spotlight does; until then
+the previous ones that still match stay. The top row is selected unless you moved the
+selection. While an input method is composing text, Return, Esc and the arrows are the field's.
+
+| Key | Does |
+| --- | --- |
+| ↑ ↓ | move the selection |
+| Return | app: open it (a running app comes forward); file: open it; loadout: apply; snippet: hide the bar, then ask Stash to paste it into the app you were in (`snippets insert id=`, which waits for the keyboard to reach that app; when Stash cannot paste, a toast gives its hint) |
+| ⌘Return | app or file: reveal in Finder |
+| ⌥Return | loadout: preview |
+| ⇧Return | loadout: clear this screen and apply |
+| ⌘1 to ⌘9 | run that row as Return would |
+| Esc | close |
+
+Loadouts apply and preview as from the wheel and the menu (multi-desktop ones only while
+[Multi-desktop loadouts](#multi-desktop-loadouts-experimental) is on).
+
 ## Menu bar
 
 Hidden Bar-style menu bar management, off until `menuBar.enabled`. MacHUD adds a
@@ -1211,6 +1276,8 @@ are in [MCP.md](MCP.md).
   it; MacHUD reads only `enabled`, to decide whether to start it.
 - `~/.config/machud/state/catalog.json` — the last catalog fetched; `state/onboarding.json` records the onboarding (`status`, `step`).
 - `~/.config/machud/state/tooldock.json` — frames of panels dismissed from the tool dock (restored by summon).
+- `~/.config/machud/state/launches.json` — how often each app was launched from the search bar, and whether
+  Alfred's history has been added (see Search bar).
 - `~/Library/Logs/MacHUD/diagnose-<yyyyMMdd-HHmmss>.json` — `diagnose` snapshots, the newest 20 (see Diagnostics).
 - `~/Library/Application Support/MacHUD/docks.json` — where each dock strip sits (`HUDDockRegistry`);
   `MACHUD_DOCKS_FILE` overrides it.

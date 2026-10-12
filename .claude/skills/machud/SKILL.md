@@ -204,10 +204,14 @@ machud orb show|hide                      # orbs are hidden while the tool dock 
   (`hide|toggle|state`, `activate=0` to not take focus).
 - Setup guide (a checklist overlay: permissions, voice, brain, apps, tooldock, loadout, radial): `machud onboarding status|show [step=brain]|hide|next|back|skip|reset`;
   `machud onboarding snapshot dir=<folder>` renders every step to PNGs offscreen.
+- Search bar (apps, files, loadouts, Stash's snippets): `machud search show [query=saf]|hide|state`;
+  `machud search query text=saf [files=0]` lists the ranked results without opening the bar;
+  `machud search snapshot path=<png> [query=]` renders it offscreen.
 
 ## Isolated instances (development and tests)
 
-The user's live MacHUD runs from `/Applications/MacHUD.app` on `/tmp/machud-<uid>.sock`.
+The user's live MacHUD is the dev build `build/MacHUD.app` of `~/dev/machud` (check with `ps`), on
+`/tmp/machud-<uid>.sock`.
 **Never quit, kill (`pkill MacHUD`), relaunch or install over it** unless the user asks.
 To test, run a separate copy with its own socket, config and no hotkeys:
 
