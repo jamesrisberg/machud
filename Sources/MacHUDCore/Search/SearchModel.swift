@@ -28,9 +28,6 @@ final class SearchModel: ObservableObject {
 
     /// How long typing must pause before Spotlight is asked.
     var fileDebounce: TimeInterval = 0.15
-    /// How long after the bar hides a snippet is inserted: ordering the bar out hands the
-    /// keyboard back to the previous app's window asynchronously, and the paste must reach it.
-    static let snippetDelay: TimeInterval = 0.15
 
     private var immediate: [SearchResult] = []
     private var snippetHits: [SnippetHit] = []
@@ -120,15 +117,15 @@ final class SearchModel: ObservableObject {
         return true
     }
 
-    /// Hides the bar, then runs the row.
+    /// Hides the bar, then runs the row (the bar is gone before a snippet is pasted).
     func run(row: Int, _ modifier: SearchModifier) {
         guard results.indices.contains(row) else { return }
         let action = SearchKeys.action(for: results[row], modifier)
         onHide()
         if case .launch(let path) = action { recordLaunch(path) }
-        let delay: TimeInterval
-        if case .insertSnippet = action { delay = Self.snippetDelay } else { delay = 0 }
-        schedule(delay) { [weak self] in self?.perform(action) }
+        // On the next turn of the run loop, out of the key event. A snippet needs no wait of
+        // MacHUD's: Stash's `snippets insert` waits for the keyboard to reach the app first.
+        schedule(0) { [weak self] in self?.perform(action) }
     }
 
     /// Stops any search still out (the bar closed).

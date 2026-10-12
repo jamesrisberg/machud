@@ -133,14 +133,14 @@ final class SearchModelTests: XCTestCase {
         XCTAssertEqual(launches, [], "revealing is not launching")
     }
 
-    func testASnippetIsInsertedOnceFocusIsBack() throws {
+    func testASnippetIsInsertedAfterTheBarHides() throws {
         model.setQuery("sig")
         XCTAssertTrue(spin { self.titles.first == "Signature" })
         scheduled = []
         model.handle(.run(.plain))
         XCTAssertEqual(events, ["hide"], "the bar is gone before anything is pasted")
         let deferred = try XCTUnwrap(scheduled.last)
-        XCTAssertGreaterThan(deferred.delay, 0, "the previous app gets the keyboard back first")
+        XCTAssertEqual(deferred.delay, 0, "Stash waits for the keyboard to come back; MacHUD adds no wait")
         flush()
         XCTAssertEqual(events, ["hide", "\(SearchAction.insertSnippet("s1"))"])
     }
