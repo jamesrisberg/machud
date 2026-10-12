@@ -86,10 +86,14 @@ enum SearchRanking {
     /// File rows.
     static let maxFiles = 5
 
-    /// How much launching an app from the bar lifts it: 60 points per doubling of its count,
-    /// so frequency orders apps within a match tier but rarely lifts one over a better tier.
+    /// How much launching an app from the bar lifts it: more with every doubling of its count
+    /// but always less than `FuzzyMatch.tierGap` (31 for one launch, 73 for 120, never 95).
+    /// Frequency orders apps within a match tier and can pass a weaker match in the next tier
+    /// up, never one two tiers up: an exact name beats a part of a name however often launched.
     static func launchBoost(_ count: Int) -> Int {
-        count > 0 ? Int((60 * log2(Double(count) + 1)).rounded()) : 0
+        guard count > 0 else { return 0 }
+        let doublings = log2(Double(count) + 1)
+        return Int(95 * doublings / (doublings + 2))
     }
 
     /// Best first; equal scores keep their order.

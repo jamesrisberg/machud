@@ -1,35 +1,36 @@
 import Foundation
 
 /// How well a typed query matches a name, from 0 to 1000; nil when it does not match.
-/// Case and diacritics are ignored. The tiers, best first: the whole name; the start of the
-/// name (shorter names first); the start of a word (spaces, punctuation and camel case
-/// separate words: "hud" starts a word of "MacHUD"); the words' initials ("vsc" for Visual
-/// Studio Code); anywhere in the name; the query's letters in order. A query of several words
-/// matches when each word does.
+/// Case and diacritics are ignored. The tiers, best first and `tierGap` apart: the whole name;
+/// the start of the name (shorter names first); the start of a word (spaces, punctuation and
+/// camel case separate words: "hud" starts a word of "MacHUD"); the words' initials ("vsc" for
+/// Visual Studio Code); every word of a several-word query at a word's start; anywhere in the
+/// name; the query's letters in order. Within a tier a match loses at most half the gap.
 enum FuzzyMatch {
+    static let tierGap = 100
     static let exact = 1000
     static let prefix = 900
     static let wordPrefix = 800
-    static let initials = 750
-    static let allWords = 700
-    static let substring = 600
-    static let subsequence = 450
+    static let initials = 700
+    static let allWords = 600
+    static let substring = 500
+    static let subsequence = 350
 
     static func score(_ query: String, _ candidate: String) -> Int? {
         let q = fold(query).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty, !candidate.isEmpty else { return nil }
         let c = fold(candidate)
         if c == q { return exact }
-        if c.hasPrefix(q) { return prefix - min(50, c.count - q.count) }
+        if c.hasPrefix(q) { return prefix - min(tierGap / 2, 2 * (c.count - q.count)) }
         let words = Self.words(candidate)
-        if let i = words.firstIndex(where: { $0.hasPrefix(q) }) { return wordPrefix - min(40, i * 10) }
+        if let i = words.firstIndex(where: { $0.hasPrefix(q) }) { return wordPrefix - min(tierGap / 2, i * 10) }
         if q.count >= 2, String(words.compactMap(\.first)).hasPrefix(q) { return initials }
         let tokens = q.split(whereSeparator: { $0 == " " }).map(String.init)
         if tokens.count > 1 {
             guard tokens.allSatisfy({ t in words.contains { $0.hasPrefix(t) } || c.contains(t) }) else { return nil }
-            return tokens.allSatisfy { t in words.contains { $0.hasPrefix(t) } } ? allWords : substring - 50
+            return tokens.allSatisfy { t in words.contains { $0.hasPrefix(t) } } ? allWords : substring - tierGap / 2
         }
-        if let range = c.range(of: q) { return substring - min(50, c.distance(from: c.startIndex, to: range.lowerBound)) }
+        if let range = c.range(of: q) { return substring - min(tierGap / 2, c.distance(from: c.startIndex, to: range.lowerBound)) }
         return subsequenceScore(q, c)
     }
 
@@ -87,6 +88,6 @@ enum FuzzyMatch {
         }
         let spread = last - first + 1 - q.count
         guard spread <= 2 * q.count + 2 else { return nil }
-        return max(100, min(substring - 60, subsequence + bonus - spread * 5))
+        return max(100, min(substring - tierGap / 2 - 10, subsequence + bonus - spread * 5))
     }
 }

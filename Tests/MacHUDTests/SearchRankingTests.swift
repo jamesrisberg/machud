@@ -74,6 +74,29 @@ final class SearchRankingTests: XCTestCase {
         XCTAssertEqual(ranked.first?.title, "Notes")
     }
 
+    func testAnExactNameBeatsAPartOfNameMatchHoweverOftenLaunched() {
+        // Alfred-scale counts: a part-of-name match launched 120 times, an exact one never.
+        let apps = [app("Notes Archive"), app("Notes")]
+        let ranked = SearchRanking.apps(apps, query: "notes", counts: ["/Applications/Notes Archive.app": 120])
+        XCTAssertEqual(ranked.map(\.title), ["Notes", "Notes Archive"])
+    }
+
+    func testTheLaunchBoostStaysBelowTheGapBetweenTiers() {
+        XCTAssertLessThan(SearchRanking.launchBoost(1_000_000), FuzzyMatch.tierGap)
+        XCTAssertEqual(SearchRanking.launchBoost(0), 0)
+        XCTAssertLessThan(SearchRanking.launchBoost(3), SearchRanking.launchBoost(10))
+        XCTAssertLessThan(SearchRanking.launchBoost(60), SearchRanking.launchBoost(120), "frequency keeps ordering at Alfred's counts")
+    }
+
+    func testFrequencyNudgesOnlyBetweenAdjacentTiers() throws {
+        let wordStart = try XCTUnwrap(score("code", "Studio Code"))
+        let prefixOfLongName = try XCTUnwrap(score("code", "Code Signing Certificate Helper"))
+        XCTAssertGreaterThan(wordStart + SearchRanking.launchBoost(120), prefixOfLongName,
+                             "a much-launched app passes a weaker match in the next tier up")
+        XCTAssertLessThan(wordStart + SearchRanking.launchBoost(1_000_000), try XCTUnwrap(score("code", "Code")),
+                          "never one two tiers up")
+    }
+
     func testAppMatchesItsFileNameToo() {
         // The display name can differ from the bundle's file name.
         let apps = [AppEntry(path: "/Applications/Visual Studio Code.app", name: "Code", fileName: "Visual Studio Code")]
