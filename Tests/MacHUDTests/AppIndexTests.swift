@@ -121,6 +121,7 @@ final class AppIndexTests: XCTestCase {
             "features.filecache./Users/u/Documents/notes.txt",
             "features.websearch.google",
         ])
+        XCTAssertFalse(AlfredHistory.isWALMode(url), "a rollback-journal database is read with its locks")
         let before = try Data(contentsOf: url)
         XCTAssertEqual(AlfredHistory.launchCounts(at: url),
                        ["/System/Applications/Fake Messages.app": 2, "/Applications/Fake Claude.app": 1])
@@ -150,6 +151,24 @@ final class AppIndexTests: XCTestCase {
         handle.write(Data(repeating: 0xFF, count: 4096))
         try handle.close()
         XCTAssertNil(AlfredHistory.launchCounts(at: url), "a read that stops early is not a count of zero")
+    }
+
+    func testReadsAWALDatabaseClosedCleanly() throws {
+        // Alfred quit: the journal was checkpointed and its -wal and -shm removed, but the
+        // database is still in WAL mode.
+        let url = dir.appendingPathComponent("knowledge.alfdb")
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &db), SQLITE_OK)
+        for sql in ["PRAGMA journal_mode=WAL;", "CREATE TABLE knowledge(item, keyword, ts decimal, hidden integer);",
+                    "INSERT INTO knowledge VALUES ('features.filecache./Applications/Fake Notes.app', NULL, 1, 0);"] {
+            XCTAssertEqual(sqlite3_exec(db, sql, nil, nil, nil), SQLITE_OK, sql)
+        }
+        XCTAssertEqual(sqlite3_close(db), SQLITE_OK)
+        for suffix in ["-wal", "-shm"] { try? FileManager.default.removeItem(atPath: url.path + suffix) }
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path), ["knowledge.alfdb"])
+        XCTAssertTrue(AlfredHistory.isWALMode(url))
+        XCTAssertEqual(AlfredHistory.launchCounts(at: url), ["/Applications/Fake Notes.app": 1])
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path), ["knowledge.alfdb"], "nothing created beside it")
     }
 
     func testReadsWhatAlfredHasNotCheckpointedYet() throws {

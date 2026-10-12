@@ -93,11 +93,19 @@ enum AlfredHistory {
         return rc == SQLITE_DONE ? out : nil
     }
 
-    /// An in-memory copy of the database at `url`, read through a read-only connection.
+    /// An in-memory copy of the database at `url`, read through a read-only connection. A
+    /// WAL-mode database closed cleanly (no `-wal` or `-shm` left) cannot be opened read-only
+    /// the usual way, which would mean creating its `-shm`, so it is opened `immutable`: with
+    /// no journal there is nothing for a writer to be halfway through. A WAL database with its
+    /// `-wal`, and a rollback-journal one (which locks for its readers), open read-only.
     private static func snapshot(of url: URL) -> OpaquePointer? {
         var source: OpaquePointer?
         defer { sqlite3_close(source) }
-        guard sqlite3_open_v2(url.path, &source, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return nil }
+        let closedWAL = isWALMode(url) && !FileManager.default.fileExists(atPath: url.path + "-wal")
+        let opened = closedWAL
+            ? sqlite3_open_v2(immutableURI(url), &source, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nil)
+            : sqlite3_open_v2(url.path, &source, SQLITE_OPEN_READONLY, nil)
+        guard opened == SQLITE_OK else { return nil }
         sqlite3_busy_timeout(source, 500)
         var copy: OpaquePointer?
         guard sqlite3_open(":memory:", &copy) == SQLITE_OK else { sqlite3_close(copy); return nil }
@@ -106,5 +114,23 @@ enum AlfredHistory {
         sqlite3_backup_finish(backup)
         guard rc == SQLITE_DONE else { sqlite3_close(copy); return nil }
         return copy
+    }
+
+    /// `file:<path>?mode=ro&immutable=1`, the path percent-encoded as a URI path.
+    static func immutableURI(_ url: URL) -> String {
+        var components = URLComponents()
+        components.scheme = "file"
+        components.path = url.path
+        components.queryItems = [URLQueryItem(name: "mode", value: "ro"), URLQueryItem(name: "immutable", value: "1")]
+        return components.string ?? "file:\(url.path)?mode=ro&immutable=1"
+    }
+
+    /// Whether the database file's header marks it as in WAL mode (its read and write format
+    /// versions, bytes 18 and 19, are 2).
+    static func isWALMode(_ url: URL) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? handle.close() }
+        guard let header = try? handle.read(upToCount: 20), header.count == 20 else { return false }
+        return header[18] == 2 && header[19] == 2
     }
 }
