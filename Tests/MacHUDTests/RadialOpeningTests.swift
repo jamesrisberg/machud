@@ -2,9 +2,9 @@ import AppKit
 import XCTest
 @testable import MacHUDCore
 
-/// What the wheel does as it opens, before the pointer moves: nothing is lit and releasing
-/// cancels, wherever the pointer is; where the wheel could not open around the pointer, the
-/// pointer is moved to the wheel's centre, so a gesture means the same everywhere. The wheel is
+/// What the wheel does as it opens, before the pointer moves: it opens in the middle of the
+/// screen the pointer is on and moves the pointer to its centre, so a gesture means the same
+/// direction from the centre every time; nothing is lit and releasing cancels. The wheel is
 /// prepared without a window or any event monitor, and the pointer's move is only recorded.
 @MainActor
 final class RadialOpeningTests: XCTestCase {
@@ -36,19 +36,23 @@ final class RadialOpeningTests: XCTestCase {
         return points
     }
 
-    /// Wherever the pointer is when the wheel opens, nothing is lit and releasing cancels, and
-    /// a pointer event that did not move changes nothing either. Where the centre is not at the
-    /// pointer, the pointer was moved to the centre, once; where it is, the pointer was left alone.
-    func testAtOpenNothingIsLitAndReleasingCancelsWhereverThePointerIs() {
+    /// Wherever the pointer is when the wheel opens, the wheel opens in the middle of that screen,
+    /// at the same place however many loadouts there are, and the pointer is moved to its
+    /// centre, once (left alone only where it already was there). Nothing is lit and releasing
+    /// cancels, and a pointer event that did not move changes nothing either.
+    func testItOpensInTheMiddleOfTheScreenAndMovesThePointerThere() {
         for display in Self.displays {
+            let middle = RadialMenu.place(tree: RadialLayoutTests.tree(0, RadialLayoutTests.long), visibleFrame: display.visibleFrame).center
+            XCTAssertTrue(display.visibleFrame.contains(middle))
             for count in [3, 10, 14] {
                 let tree = RadialLayoutTests.tree(count, RadialLayoutTests.long)
                 var warps: [CGPoint] = []
                 let menu = menu(warps: { warps.append($0) })
-                for pointer in Self.grid(display.frame) {
+                for pointer in Self.grid(display.frame) + [middle] {
                     warps = []
                     menu.prepare(tree: tree, at: pointer, on: display, movesPointer: true)
                     let what = "\(count) loadouts at \(pointer) on \(display.frame)"
+                    XCTAssertEqual(menu.center, middle, "\(what): the wheel opens in the middle of the screen")
                     XCTAssertEqual(menu.selection, [], what)
                     XCTAssertEqual(menu.releaseOutcome, .cancelled, what)
                     menu.pointerMoved(to: pointer, delta: .zero)
@@ -168,14 +172,17 @@ final class RadialOpeningTests: XCTestCase {
         XCTAssertEqual(ScreenCoords.axPoint(fromCocoa: CGPoint(x: 1500, y: -60), primaryHeight: 640), CGPoint(x: 1500, y: 700))
     }
 
-    /// A wheel opened by a script at a given point does not move the user's pointer; nothing is
-    /// lit there either until the pointer moves.
-    func testAWheelOpenedElsewhereLeavesThePointerAlone() {
+    /// A wheel opened by a script opens in the middle of the screen too, but does not move the
+    /// user's pointer; nothing is lit there until the pointer moves.
+    func testAWheelOpenedByAScriptLeavesThePointerAlone() {
         var warps: [CGPoint] = []
         let menu = menu(warps: { warps.append($0) })
-        menu.prepare(tree: RadialLayoutTests.tree(8, RadialLayoutTests.short), at: CGPoint(x: 5, y: 5), on: Self.displays[0],
+        let display = Self.displays[0]
+        menu.prepare(tree: RadialLayoutTests.tree(8, RadialLayoutTests.short), at: CGPoint(x: 5, y: 5), on: display,
                      movesPointer: false)
         XCTAssertEqual(warps, [])
+        XCTAssertEqual(menu.center, RadialMenu.place(tree: RadialLayoutTests.tree(8, RadialLayoutTests.short),
+                                                     visibleFrame: display.visibleFrame).center)
         XCTAssertEqual(menu.selection, [])
     }
 

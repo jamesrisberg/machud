@@ -51,16 +51,15 @@ final class RadialWheelSnapshotTests: XCTestCase {
         var desktop: Desktop
         /// Reduce transparency on: the soft backdrop shows the system's opaque material.
         var reduced = false
-        /// A whole screen of this visible size (a 24 pt menu bar above it), the wheel opened at `pointer`.
+        /// A whole screen of this visible size (a 24 pt menu bar above it), the wheel in the middle of it.
         var screen: CGSize?
-        var pointer: CGPoint = .zero
     }
 
     // MARK: The set
 
     /// What is rendered without `MACHUD_WHEEL_SNAPSHOT_DIR`.
     private static let checked: Set<String> = ["stage-3-actions-03-bright", "system-material-reduce-transparency-06-bright",
-                                               "screen-1024x640-10-corner-open-bright"]
+                                               "screen-1024x640-03-open-bright"]
 
     private func shots() -> [Shot] {
         var out: [Shot] = []
@@ -114,16 +113,17 @@ final class RadialWheelSnapshotTests: XCTestCase {
         out.append(Shot(name: "system-material-reduce-transparency-06-bright", tree: Self.tree(Self.short, loadouts: 6),
                         selection: ["loadouts", "Mail"], desktop: .bright, reduced: true))
 
-        // A 13-inch display at Larger Text (1024 by 640, less the menu bar), ten loadouts, the
-        // wheel opened near the bottom right corner (as it shows, the pointer moved to its
-        // centre; and with an action lit) and in the middle.
-        let screen = CGSize(width: 1024, height: 616)
-        out.append(Shot(name: "screen-1024x640-10-corner-open-bright", tree: ten, selection: [], desktop: .bright, screen: screen,
-                        pointer: CGPoint(x: 960, y: 40)))
-        out.append(Shot(name: "screen-1024x640-10-corner-hover-bright", tree: ten, selection: ["loadouts", "Mail", "apply"],
-                        desktop: .bright, screen: screen, pointer: CGPoint(x: 960, y: 40)))
-        out.append(Shot(name: "screen-1024x640-10-middle-colourful", tree: ten, selection: ["loadouts"], desktop: .colourful,
-                        screen: screen, pointer: CGPoint(x: 512, y: 308)))
+        // Whole screens, the wheel in the middle (the pointer moved to its centre as it shows;
+        // and on an action): a 13-inch display at Larger Text (1024 by 640, less the menu bar)
+        // and a 1440 by 900 one, with three and fourteen long-named loadouts.
+        for (label, screen) in [("1024x640", CGSize(width: 1024, height: 616)), ("1440x900", CGSize(width: 1440, height: 876))] {
+            let three = Self.tree(Self.long, loadouts: 3), fourteen = Self.tree(Self.long, loadouts: 14)
+            out.append(Shot(name: "screen-\(label)-03-open-bright", tree: three, selection: [], desktop: .bright, screen: screen))
+            out.append(Shot(name: "screen-\(label)-03-apply-bright", tree: three, selection: ["loadouts", "Messaging", "apply"],
+                            desktop: .bright, screen: screen))
+            out.append(Shot(name: "screen-\(label)-14-loadouts-colourful", tree: fourteen, selection: ["loadouts"],
+                            desktop: .colourful, screen: screen))
+        }
         return out
     }
 
@@ -226,7 +226,7 @@ final class RadialWheelSnapshotTests: XCTestCase {
         let size: CGSize
         if let screen = shot.screen {
             // A whole screen with its menu bar, the wheel where it would open.
-            let placed = RadialMenu.place(tree: shot.tree, at: shot.pointer, visibleFrame: CGRect(origin: .zero, size: screen))
+            let placed = RadialMenu.place(tree: shot.tree, visibleFrame: CGRect(origin: .zero, size: screen))
             layout = placed.layout
             centre = placed.center
             size = CGSize(width: screen.width, height: screen.height + 24)
@@ -279,8 +279,8 @@ final class RadialWheelSnapshotTests: XCTestCase {
         NSAppearance(named: .darkAqua)?.performAsCurrentDrawingAppearance { view.draw(view.bounds) }
         context.restoreGState()
         NSGraphicsContext.restoreGraphicsState()
-        // On a whole screen, the pointer: at the wheel's centre as it shows (moved there where
-        // the wheel could not open around it), or on the word it lights.
+        // On a whole screen, the pointer: at the wheel's centre as it shows (moved there as it
+        // opens), or on the word it lights.
         if shot.screen != nil {
             var pointer = centre
             if let word = layout.word(shot.selection) {

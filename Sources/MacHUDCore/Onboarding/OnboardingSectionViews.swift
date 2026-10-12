@@ -429,7 +429,7 @@ struct RadialStep: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             StepTitle(title: "The radial menu",
-                      subtitle: "Hold \(model.hotkeys.radialWheel) anywhere and a small wheel opens under the pointer. Move up onto Apply Loadout, on to a loadout, on to Apply, and let go: your windows jump into place.")
+                      subtitle: "Hold \(model.hotkeys.radialWheel) anywhere and a small wheel opens in the middle of the screen, the pointer at its centre. Move up onto Apply Loadout, on to a loadout, on to Apply, and let go: your windows jump into place.")
             HStack(alignment: .top, spacing: 18) {
                 RadialDiagram(target: model.practiceTarget ?? "Your loadout", hotkey: model.hotkeys.radialWheel,
                               widgets: model.wheelOffersWidgets)

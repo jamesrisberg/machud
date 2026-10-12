@@ -229,8 +229,9 @@ final class RadialLayoutTests: XCTestCase {
         }
     }
 
-    /// Short names and every action read whole at full size; a long name wraps to two lines;
-    /// every line of every word lies inside its frame.
+    /// Short names and every action read whole at full size, on one line; a long name shrinks
+    /// and then ends in an ellipsis within its place; every line of every word lies inside its
+    /// frame.
     func testWordsAreWholeWhereTheyFitAndInsideTheirFrames() {
         everyLayout { layout, tree, what in
             for word in layout.words {
@@ -252,7 +253,9 @@ final class RadialLayoutTests: XCTestCase {
             XCTAssertEqual(word?.fit.truncated, false)
         }
         let long = RadialLayout(tree: Self.tree(1, ["Morning research and writing"]))
-        XCTAssertEqual(long.word(["loadouts", "Morning research and writing"])?.fit.lines, ["Morning research", "and writing"])
+        let word = long.word(["loadouts", "Morning research and writing"])
+        XCTAssertEqual(word?.fit.lines, ["Morning research…"])
+        XCTAssertEqual(word?.fit.truncated, true)
     }
 
     /// The top petals show their symbol; loadouts their apps' icons on wheels of up to eight
@@ -268,7 +271,7 @@ final class RadialLayoutTests: XCTestCase {
 
     /// Adding a loadout moves none of the others: each keeps its direction, its row and its
     /// distance from the centre, and so do its actions, whatever the names, from one loadout to
-    /// twenty, with or without Widgets. A long name fits its place (wrapping, then shrinking,
+    /// twenty, with or without Widgets. A long name fits its place (on one line, shrinking,
     /// then ending in an ellipsis) rather than pushing the row out.
     func testAddingALoadoutMovesNoneOfTheOthers() {
         for (label, names) in [("short", Self.short), ("long", Self.long)] {
@@ -302,23 +305,56 @@ final class RadialLayoutTests: XCTestCase {
         XCTAssertLessThanOrEqual(word?.frame.width ?? .infinity, RadialLayout.loadoutWidth + 0.01)
     }
 
+    /// On a laptop's screen too, adding a loadout moves none of the others: the wheel's size on a
+    /// screen is chosen for the screen alone (fitting `RadialLayout.fittedRows` full rows, Widgets
+    /// and All screens included), never for how many loadouts there are, so up to that many rows
+    /// every loadout keeps its direction, row and distance, and the wheel opens at the same place.
+    func testAddingALoadoutMovesNoneOfTheOthersOnALaptopScreen() {
+        let most = RadialMenu.loadoutPlaces(1000).filter { $0.row < RadialLayout.fittedRows }.count
+        XCTAssertGreaterThanOrEqual(most, 14, "room for at least three rows")
+        for screen in [CGRect(x: 0, y: 0, width: 1424, height: 851), CGRect(x: 0, y: 70, width: 1024, height: 546),
+                       CGRect(x: 0, y: 0, width: 1024, height: 640)] {
+            for (label, names) in [("short", Self.short), ("long", Self.long)] {
+                var before = RadialMenu.place(tree: Self.tree(1, names), visibleFrame: screen)
+                var beforeTree = Self.tree(1, names)
+                for count in 2...most {
+                    let tree = Self.tree(count, names, allScreens: count % 2 == 0, widgets: count % 3 == 0 ? nil : .init())
+                    let after = RadialMenu.place(tree: tree, visibleFrame: screen)
+                    let what = "\(screen.size), \(label) names, \(count - 1) → \(count) loadouts"
+                    XCTAssertEqual(after.layout.scale, before.layout.scale, accuracy: 1e-9, "\(what): the size")
+                    XCTAssertEqual(after.center, before.center, "\(what): where it opens")
+                    for (old, new) in zip(beforeTree[0].children, tree[0].children) {
+                        XCTAssertEqual(old.angle, new.angle, accuracy: 1e-12, "\(what): \(old.id)'s direction")
+                        XCTAssertEqual(old.row, new.row, "\(what): \(old.id)'s row")
+                        let a = before.layout.word(["loadouts", old.id]).map { RadialGeometry.radius(of: $0.anchor) } ?? -1
+                        let b = after.layout.word(["loadouts", old.id]).map { RadialGeometry.radius(of: $0.anchor) } ?? -2
+                        XCTAssertEqual(a, b, accuracy: 0.001, "\(what): \(old.id)'s distance")
+                    }
+                    (before, beforeTree) = (after, tree)
+                }
+            }
+        }
+    }
+
     /// The loadouts' arc, padding included, keeps clear of Capture's and Widgets' words: no point
     /// of either falls inside it.
     func testTheLoadoutsArcKeepsClearOfCaptureAndWidgets() {
         for count in 1...20 {
             for names in [Self.short, Self.long] {
-            let layout = RadialLayout(tree: Self.tree(count, names))
-            let what = "\(count) loadouts named like \(names[0])"
-            guard let petal = layout.petal(["loadouts"]), petal.hasChildren else { return XCTFail(what) }
-            for id in ["capture", "widgets"] {
-                guard let word = layout.word([id]) else { continue }
-                for frame in [word.frame, word.grownFrame] {
-                    for p in Self.over(frame) where petal.covers(RadialGeometry.angle(of: p)) {
-                        XCTFail("\(what): \(id)'s word at \(p) is inside the loadouts' arc")
-                        break
+                for widgets in [true, false] {
+                    let layout = RadialLayout(tree: Self.tree(count, names, widgets: widgets ? .init() : nil))
+                    let what = "\(count) loadouts named like \(names[0])\(widgets ? "" : ", no widgets")"
+                    guard let petal = layout.petal(["loadouts"]), petal.hasChildren else { return XCTFail(what) }
+                    for id in ["capture", "widgets"] {
+                        guard let word = layout.word([id]) else { continue }
+                        for frame in [word.frame, word.grownFrame] {
+                            for p in Self.over(frame) where petal.covers(RadialGeometry.angle(of: p)) {
+                                XCTFail("\(what): \(id)'s word at \(p) is inside the loadouts' arc")
+                                break
+                            }
+                        }
                     }
                 }
-            }
             }
         }
     }
@@ -586,7 +622,7 @@ final class RadialLayoutTests: XCTestCase {
     func testEveryBranchsFieldFitsTheWholeWheelsRectangle() {
         for (layout, what) in Self.fieldCases {
             let (whole, open) = Self.fields(layout, what, reduced: false)
-            XCTAssertTrue(whole.support.contains(layout.bounds), what)
+            XCTAssertTrue(whole.support.contains(RadialField.places(layout, open: nil).reduce(CGRect.null) { $0.union($1) }), what)
             for (branch, field) in open {
                 XCTAssertEqual(field.support, whole.support, "\(what), open \(branch)")
                 XCTAssertEqual(field.blurImage.width, whole.blurImage.width, "\(what), open \(branch)")
@@ -708,28 +744,24 @@ final class RadialLayoutTests: XCTestCase {
 
     /// The wheel never outgrows the screen it opens on: on a 1024 by 640 display (a 13-inch at
     /// Larger Text, less the menu bar) or with a Dock at the bottom, with many loadouts and long
-    /// names, and wherever the pointer is, every word that can show and the hint are on screen.
+    /// names, every word that can show and the hint are on screen, the wheel in the middle of it.
+    /// Its size is the screen's: full size where the fitted rows fit at full size.
     func testTheWheelFitsTheScreenItOpensOn() {
         let screens = [CGRect(x: 0, y: 0, width: 1024, height: 616), CGRect(x: 0, y: 70, width: 1024, height: 546),
-                       CGRect(x: 1024, y: -200, width: 1440, height: 875)]
+                       CGRect(x: 1024, y: -200, width: 1440, height: 875), CGRect(x: 0, y: 0, width: 1424, height: 851)]
         for visible in screens {
-            for count in [3, 10, 22] {
-                let tree = Self.tree(count, Self.long, allScreens: true)
-                // Where the pointer is moves the wheel, not its size: laid out once, placed for each.
-                let layout = RadialMenu.place(tree: tree, at: .zero, visibleFrame: visible).layout
-                let room = visible.insetBy(dx: RadialMenu.screenMargin, dy: RadialMenu.screenMargin)
-                XCTAssertLessThanOrEqual(layout.scale, 1)
-                for pointer in [CGPoint(x: visible.minX, y: visible.minY), CGPoint(x: visible.maxX, y: visible.maxY),
-                                CGPoint(x: visible.midX, y: visible.minY + 3), CGPoint(x: visible.midX, y: visible.midY)] {
-                    let center = RadialMenu.centre(of: layout, at: pointer, room: room)
-                    let words = layout.bounds.offsetBy(dx: center.x, dy: center.y)
-                    XCTAssertTrue(visible.insetBy(dx: 1, dy: 1).contains(words), "\(count) loadouts at \(pointer) in \(visible): \(words)")
-                }
+            let most = RadialMenu.loadoutPlaces(1000).filter { $0.row < RadialLayout.fittedRows }.count
+            for count in [0, 3, 10, most, most + 5] {
+                let placed = RadialMenu.place(tree: Self.tree(count, Self.long, allScreens: true), visibleFrame: visible)
+                XCTAssertLessThanOrEqual(placed.layout.scale, 1)
+                let words = placed.layout.bounds.offsetBy(dx: placed.center.x, dy: placed.center.y)
+                XCTAssertTrue(visible.insetBy(dx: 1, dy: 1).contains(words), "\(count) loadouts in \(visible): \(words)")
+                let middle = CGPoint(x: visible.midX, y: visible.midY)
+                XCTAssertLessThan(hypot(placed.center.x - middle.x, placed.center.y - middle.y), visible.height / 3,
+                                  "\(count) loadouts: near the middle of the screen")
             }
         }
-        let roomy = RadialMenu.place(tree: Self.tree(8, Self.long), at: CGPoint(x: 900, y: 500),
-                                     visibleFrame: CGRect(x: 0, y: 0, width: 1800, height: 1100))
+        let roomy = RadialMenu.place(tree: Self.tree(8, Self.long), visibleFrame: CGRect(x: 0, y: 0, width: 1800, height: 1100))
         XCTAssertEqual(roomy.layout.scale, 1, "full size where it fits")
-        XCTAssertEqual(roomy.center, CGPoint(x: 900, y: 500), "centred on the pointer where it fits")
     }
 }

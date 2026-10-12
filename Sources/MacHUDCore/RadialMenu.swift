@@ -405,8 +405,9 @@ final class RadialMenu {
     /// The fields of the last layout, built as its branches open: every one covers `whole`'s
     /// rectangle.
     private var fields: (layout: RadialLayout, reduced: Bool, whole: RadialField, open: [[String]: RadialField])?
-    /// The last layout made: a wheel with the same words in the same room opens with it.
-    private var laidOut: (key: LayoutKey, layout: RadialLayout)?
+    /// The last layout made, and the extent it is placed by: a wheel with the same words in the
+    /// same room opens with them.
+    private var laidOut: (key: LayoutKey, layout: RadialLayout, extent: CGRect)?
 
     /// What a layout is made from: each node's path, word, icon count and direction, and the room.
     struct LayoutKey: Equatable {
@@ -470,9 +471,9 @@ final class RadialMenu {
         let screen = screens[index]
         let display = Display(frame: screen.frame, visibleFrame: screen.visibleFrame,
                               primaryHeight: NSScreen.screens.first?.frame.maxY ?? screen.frame.maxY)
-        // Opened at the pointer (the hotkey), the wheel moves the pointer to its centre when
-        // it cannot open around it; opened by a script at a point, it leaves the pointer alone.
-        prepare(tree: tree, at: origin, on: display, movesPointer: point == nil)
+        // Opened by the hotkey, the wheel moves the pointer to its centre; opened by a script, on
+        // the screen holding the point it gave, it leaves the pointer alone.
+        prepare(tree: tree, at: NSEvent.mouseLocation, on: display, movesPointer: point == nil)
 
         let w = window ?? makeWindow()
         if w.frame != screenFrame { w.setFrame(screenFrame, display: false) }
@@ -482,19 +483,18 @@ final class RadialMenu {
         startAnimation()
     }
 
-    /// Sets the wheel up to open at `origin` on `display`, with nothing selected and the pointer
-    /// taken to be at the centre until it moves. Where the centre had to move away from
-    /// `origin` to keep every word on screen and `movesPointer`, the pointer is moved to the
-    /// centre, so a gesture means the same direction and distance from the centre wherever
-    /// the wheel opens; it is not moved back. No window is shown and no event is watched.
-    func prepare(tree: [RadialNode], at origin: CGPoint, on display: Display, movesPointer: Bool) {
+    /// Sets the wheel up to open on `display`, in the middle of it, with nothing selected and
+    /// the pointer taken to be at the centre until it moves. When `movesPointer`, the pointer (at
+    /// `pointer`) is moved to the wheel's centre, so a gesture means the same direction from the
+    /// centre every time; it is not moved back. No window is shown and no event is watched.
+    func prepare(tree: [RadialNode], at pointer: CGPoint, on display: Display, movesPointer: Bool) {
         self.tree = tree
         let room = display.visibleFrame.insetBy(dx: Self.screenMargin, dy: Self.screenMargin)
         let key = LayoutKey(tree, room: room.size)
-        let layout = laidOut?.key == key ? laidOut!.layout : RadialLayout.fitting(tree, in: room.size)
-        laidOut = (key, layout)
-        self.layout = layout
-        center = Self.centre(of: layout, at: origin, room: room)
+        let fitted = laidOut?.key == key ? (laidOut!.layout, laidOut!.extent) : RadialLayout.fitting(tree, in: room.size)
+        laidOut = (key, fitted.0, fitted.1)
+        self.layout = fitted.0
+        center = Self.centre(of: fitted.1, in: room)
         screenFrame = display.frame
         pointerOffset = .zero
         pointerHasMoved = false
@@ -505,7 +505,7 @@ final class RadialMenu {
         keyboardPath = nil
         selection = []
         applyLayout()
-        if movesPointer, hypot(center.x - origin.x, center.y - origin.y) > 0.5 {
+        if movesPointer, hypot(center.x - pointer.x, center.y - pointer.y) > 0.5 {
             warpPointer(ScreenCoords.axPoint(fromCocoa: center, primaryHeight: display.primaryHeight))
         }
     }
@@ -558,23 +558,20 @@ final class RadialMenu {
     /// Room kept between the wheel's words and the edge of the screen's visible frame.
     static let screenMargin: CGFloat = 8
 
-    /// The wheel's layout and centre (screen coordinates) for a wheel opened at `pointer` on a
-    /// screen whose visible frame (less the menu bar and the Dock) is `visibleFrame`: full size
-    /// where it fits, smaller where it would not, and moved in from the edges so every word that
-    /// can show and the hint are on screen, whichever branches open. The field may fade out past
-    /// the edge.
-    static func place(tree: [RadialNode], at pointer: CGPoint, visibleFrame: CGRect) -> (layout: RadialLayout, center: CGPoint) {
+    /// The wheel's layout and centre (screen coordinates) on a screen whose visible frame (less
+    /// the menu bar and the Dock) is `visibleFrame`: at the screen's size (`RadialLayout.fitting`),
+    /// in the middle of it.
+    static func place(tree: [RadialNode], visibleFrame: CGRect) -> (layout: RadialLayout, center: CGPoint) {
         let room = visibleFrame.insetBy(dx: screenMargin, dy: screenMargin)
-        let layout = RadialLayout.fitting(tree, in: room.size)
-        return (layout, centre(of: layout, at: pointer, room: room))
+        let fitted = RadialLayout.fitting(tree, in: room.size)
+        return (fitted.layout, centre(of: fitted.extent, in: room))
     }
 
-    /// Where `layout`'s centre goes for a wheel opened at `pointer`: there, or moved in from
-    /// the edges of `room` so every word and the hint are inside it.
-    static func centre(of layout: RadialLayout, at pointer: CGPoint, room: CGRect) -> CGPoint {
-        let b = layout.bounds
-        return CGPoint(x: min(max(pointer.x, room.minX - b.minX), room.maxX - b.maxX),
-                       y: min(max(pointer.y, room.minY - b.minY), room.maxY - b.maxY))
+    /// Where the wheel's centre goes so that `extent` (the wheel's, about its centre) sits in the
+    /// middle of `room`. The extent is the same for every wheel of up to `RadialLayout.fittedRows`
+    /// rows, so the wheel opens at the same place however many loadouts there are.
+    static func centre(of extent: CGRect, in room: CGRect) -> CGPoint {
+        CGPoint(x: (room.midX - extent.midX).rounded(), y: (room.midY - extent.midY).rounded())
     }
 
     /// The wheel's views on the canvas of every word's field, which follows Reduce transparency,

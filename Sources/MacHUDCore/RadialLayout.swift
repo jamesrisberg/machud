@@ -17,7 +17,8 @@ import AppKit
 ///   change as loadouts are added, whatever the names.
 ///   Under the pointer a petal grows from its anchor (away from the centre), as far as
 ///   `RadialWheelView.grow` without touching a word that shows with it.
-/// - A name is fitted to its width (wrap to two lines, then shrink, then cut after a whole word);
+/// - A name is fitted to its width (wrap to two lines, then shrink, then cut after a whole word;
+///   a loadout's name keeps to one line);
 ///   a top petal or a loadout shows up to `maxIcons` icons in a row under its name.
 /// - Digits 1 to 4, small, just inside the dead zone's edge by each top petal; "Esc" / "Cancel"
 ///   in the centre.
@@ -25,7 +26,7 @@ import AppKit
 ///   depends on which branch is open (`hintZone(open:)`).
 ///
 /// `scale` draws the whole wheel smaller (radii, words and gaps alike), for a screen it would
-/// not otherwise fit (`fitting(_:in:)`).
+/// not otherwise fit; the scale is chosen for the screen alone (`fitting(_:in:)`).
 struct RadialLayout: Equatable {
     struct Word: Equatable {
         enum Role: Hashable {
@@ -125,7 +126,8 @@ struct RadialLayout: Equatable {
     /// Where the hint's lines go for each open branch: centred under the words showing, top
     /// line at its top.
     let hintZones: [[String]: CGRect]
-    /// Every word and every hint zone: what the wheel needs on screen.
+    /// Every word and every hint zone, and every place a loadout can take on the rows there
+    /// are with what it unfolds: what the wheel needs on screen.
     let bounds: CGRect
     private let index: [Word.Role: Int]
 
@@ -265,11 +267,14 @@ struct RadialLayout: Equatable {
 
         var words: [Word] = []
         var petals: [[String]: Petal] = [:]
-        // A loadout's place: the widest name it takes, on two lines at full size, and its icon row,
+        // Where the loadouts' places and what they unfold can reach, filled or not.
+        var reserved: [CGRect] = []
+        // A loadout's place: the widest name it takes, on one line at full size, and its icon row,
         // kept whether the loadout has icons or not.
+        var loadoutStyle = nameStyle
+        loadoutStyle.maxLines = 1
         let slotSize = CGSize(width: Self.loadoutWidth * s,
-                              height: CGFloat(nameStyle.maxLines) * PreparedText.lineHeight(nameStyle.font(nameStyle.preferred))
-                                + (Self.iconGap + Self.iconSize) * s)
+                              height: PreparedText.lineHeight(loadoutStyle.font(loadoutStyle.preferred)) + (Self.iconGap + Self.iconSize) * s)
 
         // The centre and the top petals' digits.
         let centre = Self.centre(scale: s)
@@ -282,7 +287,7 @@ struct RadialLayout: Equatable {
         func style(_ node: RadialNode) -> (TextFit.Style, CGFloat, Int) {
             switch node.kind {
             case .action: return (labelStyle, Self.actionWidth * s, 0)
-            case .loadout: return (nameStyle, Self.loadoutWidth * s, min(node.icons.count, Self.maxIcons))
+            case .loadout: return (loadoutStyle, Self.loadoutWidth * s, min(node.icons.count, Self.maxIcons))
             case .loadouts, .capture, .park, .widgets: return (nameStyle, Self.topWidth * s, min(node.icons.count, Self.maxIcons))
             }
         }
@@ -345,14 +350,14 @@ struct RadialLayout: Equatable {
         }
 
         /// The loadouts, row by row (`RadialMenu.loadoutPlaces`). Every place of a row holds a
-        /// slot of one size (`slotSize`: the widest name a place takes, on two lines, with its
+        /// slot of one size (`slotSize`: the widest name a place takes, on one line, with its
         /// icon row), whether a loadout fills it or not, and the rows, each loadout's actions and
         /// the room between rows are worked out from those slots, beside Capture, Park and
         /// Widgets (Widgets' word stood in for while it is not there). So a row's distance
         /// depends on its place among the rows alone, never on the names or on how many loadouts
         /// there are, and adding a loadout moves none of the others. Each row clears the rows
         /// inside it and every action their places unfold, so an inner loadout's actions sit
-        /// between its row and the next. A loadout's word fits inside its slot (wrapping, then
+        /// between its row and the next. A loadout's word fits inside its slot (on one line,
         /// shrinking, then ending in an ellipsis) and grows as far as its slot does.
         func openLoadouts(_ node: RadialNode, path: [String], word: Word, context: [CGRect]) {
             var petal = Petal(angle: node.angle, children: node.children.map(\.id))
@@ -388,6 +393,7 @@ struct RadialLayout: Equatable {
                 inside += row.map(\.grownFrame)
                 from = (row.map { RadialGeometry.radius(of: $0.anchor) }.max() ?? from) + gap
             }
+            reserved += inside
             // The loadouts in their places, unfolding their actions as their slots did.
             var filled = [Int](repeating: 0, count: rowCount)
             for child in node.children {
@@ -442,7 +448,7 @@ struct RadialLayout: Equatable {
             zones[branch] = CGRect(x: -hintWidth / 2, y: lowest - Self.hintGap * s - hintHeight, width: hintWidth, height: hintHeight)
         }
         hintZones = zones
-        bounds = words.reduce(zones.values.reduce(CGRect.null) { $0.union($1) }) { $0.union($1.grownFrame) }
+        bounds = (words.map(\.grownFrame) + reserved).reduce(zones.values.reduce(CGRect.null) { $0.union($1) }) { $0.union($1) }
     }
 
     private static func showing(top: [String], petals: [[String]: Petal], open: [String]) -> [[String]] {
@@ -457,7 +463,25 @@ struct RadialLayout: Equatable {
     }
 
     /// The layout of `tree` at full size, or smaller where that would not fit in `room`.
-    static func fitting(_ tree: [RadialNode], in room: CGSize) -> RadialLayout {
+    /// How many rows of loadouts the wheel's size on a screen is chosen for: up to this many,
+    /// adding a loadout never changes the size, so none of the others moves on any screen.
+    static let fittedRows = 4
+
+    /// The layout of `tree` for a screen with `room`, at the screen's size (`screenFit`), and the
+    /// extent the wheel is placed by: the same for every tree of up to `fittedRows` rows.
+    static func fitting(_ tree: [RadialNode], in room: CGSize) -> (layout: RadialLayout, extent: CGRect) {
+        let rows = tree.first { $0.kind == .loadouts }.map { Set($0.children.map(\.row)).count } ?? 0
+        let fit = screenFit(in: room, rows: max(rows, fittedRows))
+        return (RadialLayout(tree: tree, scale: fit.scale), fit.extent)
+    }
+
+    /// The wheel's size on a screen with `room`: full size, or smaller where a wheel with `rows`
+    /// full rows of loadouts, Widgets and All screens would not fit; and that wheel's extent at
+    /// that size. It depends on the screen and the rows alone, never on the names.
+    static func screenFit(in room: CGSize, rows: Int) -> (scale: CGFloat, extent: CGRect) {
+        let count = RadialMenu.loadoutPlaces(rows * 5).filter { $0.row < rows }.count
+        let tree = RadialMenu.tree(loadouts: (0..<count).map { .init(name: "\($0)") }, offersAllScreens: true,
+                                   park: .init(), widgets: .init())
         var layout = RadialLayout(tree: tree)
         var scale: CGFloat = 1
         for _ in 0..<12 {
@@ -466,7 +490,7 @@ struct RadialLayout: Equatable {
             scale = min(scale * 0.97, scale * min(room.width / layout.bounds.width, room.height / layout.bounds.height))
             layout = RadialLayout(tree: tree, scale: scale)
         }
-        return layout
+        return (layout.scale, layout.bounds)
     }
 
     // MARK: Words

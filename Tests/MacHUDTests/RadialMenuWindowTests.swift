@@ -32,7 +32,8 @@ final class RadialMenuWindowTests: XCTestCase {
             for reduced in [false, true] {
                 let field = RadialField(layout: layout, reduced: reduced)
                 let canvas = field.canvas
-                XCTAssertTrue(field.support.contains(layout.bounds), "\(count) loadouts")
+                let shown = RadialField.places(layout, open: nil).reduce(CGRect.null) { $0.union($1) }
+                XCTAssertTrue(field.support.contains(shown), "\(count) loadouts")
                 XCTAssertEqual(canvas.size, field.support.size)
                 XCTAssertEqual(canvas.center, CGPoint(x: -field.support.minX, y: -field.support.minY))
             }

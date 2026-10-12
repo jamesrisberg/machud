@@ -20,7 +20,8 @@ apps that make up the rest of the HUD:
   the HUD itself: the tool dock and every sibling's panels. Loadouts that span several
   desktops or displays are [experimental](#multi-desktop-loadouts-experimental) and off by
   default.
-- **Radial wheel**: hold **⌃⌥Space** and a small wheel opens; move onto Apply Loadout, on to
+- **Radial wheel**: hold **⌃⌥Space** and a small wheel opens in the middle of the screen, the
+  pointer at its centre; move onto Apply Loadout, on to
   a loadout, on to Preview, Apply or Clear + Apply, and let go. Only the path you take unfolds.
 - **Tool dock**: a Dock-like strip of the sibling apps (**⌃⌥D**).
 - **Widgets**: glass tiles on the desktop that any sibling can serve (widgetHUD's clock, weather
@@ -76,7 +77,7 @@ permissions request=1` shows every missing prompt (Accessibility and Automation)
 | --- | --- |
 | Shift while dragging a window | Snap it into the region under the cursor |
 | Tab / Esc mid-drag | Next layout / cancel the snap |
-| ⌃⌥Space (hold) | Radial wheel: four petals, Apply Loadout (up), Capture (right: this screen, or draw a new layout), Park (down: park the front window / restore parked) and, when an app serves widgets, Widgets (left: reveal / edit). Moving onto a petal unfolds what lies beyond it: Apply Loadout your loadouts, a loadout its Preview / Apply (straight on) / Clear + Apply. Your loadouts fan out above Apply Loadout, between Widgets and Capture, five to a row (more go on rows further out), so Capture, Park and Widgets stay in reach. Let go on an action to do it; anywhere else, or Esc, cancels; back in the centre starts over. Digits pick among the petals showing, **P** previews the highlighted loadout. A quick tap (under 200 ms, a setting) does not open it. The hotkey is a setting |
+| ⌃⌥Space (hold) | Radial wheel, in the middle of the screen with the pointer moved to its centre: four petals, Apply Loadout (up), Capture (right: this screen, or draw a new layout), Park (down: park the front window / restore parked) and, when an app serves widgets, Widgets (left: reveal / edit). Moving onto a petal unfolds what lies beyond it: Apply Loadout your loadouts, a loadout its Preview / Apply (straight on) / Clear + Apply. Your loadouts fan out above Apply Loadout, between Widgets and Capture, five to a row (more go on rows further out), so Capture, Park and Widgets stay in reach. Let go on an action to do it; anywhere else, or Esc, cancels; back in the centre starts over. Digits pick among the petals showing, **P** previews the highlighted loadout. A quick tap (under 200 ms, a setting) does not open it. The hotkey is a setting |
 | ⌃⌥D | Show / hide the tool dock |
 | ⌃⌥W | Raise the desktop widgets above your windows; again or Esc lowers them |
 | ⌃⌥B | Collapse / expand the menu bar (when menu bar management is on) |

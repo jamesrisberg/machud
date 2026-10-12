@@ -70,8 +70,9 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   so the desktop behind their dimmed screen stays sharp.
 - The setup guide's cards use the classic frosted material, since the guide already blurs the
   desktop behind them.
-- The loadout wheel opens small and shows only the path you take. Holding ⌃⌥Space opens four
-  petals around the pointer: Apply Loadout (up), Capture (right), Park (down) and, while an app
+- The loadout wheel opens small and shows only the path you take. Holding ⌃⌥Space opens it in
+  the middle of the screen the pointer is on, with the pointer moved to its centre, so the same
+  move from the centre means the same thing every time. Four petals sit around it: Apply Loadout (up), Capture (right), Park (down) and, while an app
   serves widgets, Widgets (left). Moving onto Apply Loadout unfolds your loadouts beyond it;
   moving onto a loadout unfolds Preview, Apply (straight on) and Clear + Apply; Capture unfolds
   This screen and Draw layout (All screens between them while multi-desktop loadouts are on),
@@ -85,9 +86,10 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   loadouts out, moving toward Capture, Park or Widgets opens it, and going back to the centre
   starts over at once. Each loadout has a place of its own, the same size whatever its name, so
   the same move reaches the same loadout every time: adding a loadout moves none of the others,
-  not in direction, not to another row and not nearer or further out. Up to five loadouts the
-  wheel is no bigger however many you have; each row further out adds to its size. Only the path
-  you are on is drawn.
+  not in direction, not to another row and not nearer or further out. The wheel's size is chosen
+  for each screen (smaller on a laptop's), never for how many loadouts you have, so on every
+  screen the loadouts stay put as you add them, up to 18; a 19th starts a fifth row and the
+  wheel is drawn a little smaller. Only the path you are on is drawn.
 - A quick tap of ⌃⌥Space no longer flashes the wheel: let go within 200 ms and the wheel does not
   show. Held longer, it fades in. The time is a setting (**Radial menu tap**, or
   `machud settings set hotkeys.tapMilliseconds=250`), and your hotkey is kept as it was.
@@ -96,19 +98,18 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   it sits beside Apply, or press 3 once a loadout is open.
 - The wheel's words are upright on one soft, dark blur that fades out at its edge rather than
   ending in a line, and the blur grows with the petals that unfold. The wheel is dark in light
-  mode too, so its white words stay readable. A long loadout name wraps to a second line and then
-  shrinks to fit its place (a very long one ends in an ellipsis after a whole word), with its apps'
-  icons however many loadouts you have. On a screen too small for it the whole wheel is drawn
-  smaller.
+  mode too, so its white words stay readable. A loadout's name sits on one line in its place,
+  shrinking to fit; a long one ends in an ellipsis after a whole word, and the line under the
+  wheel says it in full. Its apps' icons show however many loadouts you have.
 - Over the wheel, the petal under the pointer grows and glows, the others beside it fade back,
   and letting go does what that action said, even if the widgets changed while the wheel was
   open. The line under the wheel says what letting go does ("Apply Code", "Park Safari · Docs",
   "Focus a window to park", "Finish editing widgets"), or where to go on from a petal with more
   beyond it ("Move out to a loadout"); a very long window title ends in an ellipsis. The Park
   hint names the window letting go would park, even after a click under the wheel changed the focus.
-- Where the wheel cannot open around the pointer (near a screen's edge) the pointer moves to the
-  wheel's centre, and nothing lights until you move it, so pressing and letting go without
-  moving cancels. With Reduce transparency on, the wheel's blur gives way to a plain dark disc.
+- Nothing lights until you move the pointer from the wheel's centre, so pressing and letting go
+  without moving cancels. With Reduce transparency on, the wheel's blur gives way to a plain dark
+  disc.
 - The setup guide's radial menu step teaches the new path: hold, onto Apply Loadout, on to your
   loadout, on to Apply, let go.
 - For scripts, `machud menu` and `machud radial` describe the wheel as a tree: `tree[]` of
