@@ -134,4 +134,37 @@ final class AppIndexTests: XCTestCase {
         try? Data("not sqlite".utf8).write(to: dir.appendingPathComponent("knowledge.alfdb"))
         XCTAssertNil(AlfredHistory.launchCounts(at: dir.appendingPathComponent("knowledge.alfdb")))
     }
+
+    /// Rows enough to fill several pages, so a damaged last page is met while stepping.
+    private func bigAlfredDB() throws -> URL {
+        try makeAlfredDB((0..<2000).map { "features.filecache./Applications/App \($0) \(String(repeating: "x", count: 80)).app" })
+    }
+
+    func testADatabaseThatFailsPartWayIsNoHistory() throws {
+        let url = try bigAlfredDB()
+        XCTAssertEqual(AlfredHistory.launchCounts(at: url)?.count, 2000)
+        // Damage the last page: the header and schema still read, the rows do not.
+        let handle = try FileHandle(forUpdating: url)
+        let size = try handle.seekToEnd()
+        try handle.seek(toOffset: size - 4096)
+        handle.write(Data(repeating: 0xFF, count: 4096))
+        try handle.close()
+        XCTAssertNil(AlfredHistory.launchCounts(at: url), "a read that stops early is not a count of zero")
+    }
+
+    func testReadsWhatAlfredHasNotCheckpointedYet() throws {
+        // Alfred still has the database open in WAL mode with rows only in the journal.
+        let url = dir.appendingPathComponent("knowledge.alfdb")
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &db), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        for sql in ["PRAGMA journal_mode=WAL;", "PRAGMA wal_autocheckpoint=0;",
+                    "CREATE TABLE knowledge(item, keyword, ts decimal, hidden integer);",
+                    "INSERT INTO knowledge VALUES ('features.filecache./Applications/Fake Notes.app', NULL, 1, 0);",
+                    "INSERT INTO knowledge VALUES ('features.filecache./Applications/Fake Notes.app', NULL, 2, 0);"] {
+            XCTAssertEqual(sqlite3_exec(db, sql, nil, nil, nil), SQLITE_OK, sql)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path + "-wal"))
+        XCTAssertEqual(AlfredHistory.launchCounts(at: url), ["/Applications/Fake Notes.app": 2])
+    }
 }

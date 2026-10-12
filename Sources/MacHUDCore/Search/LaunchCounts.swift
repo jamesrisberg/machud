@@ -65,41 +65,46 @@ enum AlfredHistory {
 
     private static let itemPrefix = "features.filecache."
 
-    /// Launches per app path (`AppIndex.normalize`d); nil when there is no readable database.
-    /// The database is copied to a temporary folder and the copy is read, so neither Alfred's
-    /// file nor its journal is opened, locked or written, even by SQLite's read-only mode,
-    /// which writes a `-shm` file for a database in WAL mode.
+    /// Launches per app path (`AppIndex.normalize`d); nil when there is no database or it cannot
+    /// be read to the end. Alfred's file is opened read-only and never written: SQLite's backup
+    /// copies it, with whatever its journal holds, into memory as one consistent snapshot (a
+    /// read transaction, so a write Alfred makes meanwhile cannot tear it), and the copy is read.
     static func launchCounts(at url: URL = defaultURL) -> [String: Int]? {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: url.path) else { return nil }
-        let dir = fm.temporaryDirectory.appendingPathComponent("machud-alfred-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: dir) }
-        let copy = dir.appendingPathComponent(url.lastPathComponent)
-        do {
-            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
-            try fm.copyItem(at: url, to: copy)
-            let wal = URL(fileURLWithPath: url.path + "-wal")
-            if fm.fileExists(atPath: wal.path) { try fm.copyItem(at: wal, to: URL(fileURLWithPath: copy.path + "-wal")) }
-        } catch {
-            return nil
-        }
-        // Read-write on the copy (ours), so SQLite can replay a copied journal into it.
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(copy.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else { sqlite3_close(db); return nil }
+        guard FileManager.default.fileExists(atPath: url.path), let db = snapshot(of: url) else { return nil }
         defer { sqlite3_close(db) }
         var stmt: OpaquePointer?
         let sql = "SELECT item, COUNT(*) FROM knowledge WHERE item LIKE 'features.filecache.%' GROUP BY item"
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
         var out: [String: Int] = [:]
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            guard let text = sqlite3_column_text(stmt, 0) else { continue }
-            let item = String(cString: text)
-            guard item.hasPrefix(itemPrefix) else { continue }
-            let path = AppIndex.normalize(String(item.dropFirst(itemPrefix.count)))
-            guard path.lowercased().hasSuffix(".app") else { continue }
-            out[path, default: 0] += Int(sqlite3_column_int64(stmt, 1))
+        var rc = sqlite3_step(stmt)
+        while rc == SQLITE_ROW {
+            if let text = sqlite3_column_text(stmt, 0) {
+                let item = String(cString: text)
+                let path = AppIndex.normalize(String(item.dropFirst(itemPrefix.count)))
+                if item.hasPrefix(itemPrefix), path.lowercased().hasSuffix(".app") {
+                    out[path, default: 0] += Int(sqlite3_column_int64(stmt, 1))
+                }
+            }
+            rc = sqlite3_step(stmt)
         }
-        return out
+        // Anything but the end of the rows (a damaged page, a busy file) is no history at all,
+        // so the seed is tried again next launch rather than made from part of it.
+        return rc == SQLITE_DONE ? out : nil
+    }
+
+    /// An in-memory copy of the database at `url`, read through a read-only connection.
+    private static func snapshot(of url: URL) -> OpaquePointer? {
+        var source: OpaquePointer?
+        defer { sqlite3_close(source) }
+        guard sqlite3_open_v2(url.path, &source, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return nil }
+        sqlite3_busy_timeout(source, 500)
+        var copy: OpaquePointer?
+        guard sqlite3_open(":memory:", &copy) == SQLITE_OK else { sqlite3_close(copy); return nil }
+        guard let backup = sqlite3_backup_init(copy, "main", source, "main") else { sqlite3_close(copy); return nil }
+        let rc = sqlite3_backup_step(backup, -1)
+        sqlite3_backup_finish(backup)
+        guard rc == SQLITE_DONE else { sqlite3_close(copy); return nil }
+        return copy
     }
 }
