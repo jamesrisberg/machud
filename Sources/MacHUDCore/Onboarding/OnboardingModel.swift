@@ -71,8 +71,9 @@ final class OnboardingModel: ObservableObject {
     let voiceSettings: VoiceSettingsModel
     let apps: AppsTabModel
     var hotkeys = OnboardingHotkeys()
-    /// Whether the wheel has a Widgets petal now (an app serves widgets), for its picture.
-    var wheelOffersWidgets: () -> Bool = { false }
+    /// Whether the wheel has a Widgets petal now (an app serves widgets), for its picture: the
+    /// app sets it as apps start or stop serving widgets.
+    @Published var wheelOffersWidgets = false
     /// The tool dock, set once the app has made it.
     var toolDock: OnboardingToolDock? { didSet { refreshToolDock() } }
     /// Capture and apply, set once the app has the loadout engine.

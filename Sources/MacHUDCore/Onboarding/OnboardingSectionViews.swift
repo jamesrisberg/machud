@@ -432,7 +432,7 @@ struct RadialStep: View {
                       subtitle: "Hold \(model.hotkeys.radialWheel) anywhere and a small wheel opens under the pointer. Move up onto Apply Loadout, on to a loadout, on to Apply, and let go: your windows jump into place.")
             HStack(alignment: .top, spacing: 18) {
                 RadialDiagram(target: model.practiceTarget ?? "Your loadout", hotkey: model.hotkeys.radialWheel,
-                              widgets: model.wheelOffersWidgets())
+                              widgets: model.wheelOffersWidgets)
                     .frame(width: 300, height: 300)
                 VStack(alignment: .leading, spacing: 12) {
                     if let target = model.practiceTarget {
@@ -476,7 +476,7 @@ struct RadialStep: View {
                 action("Preview", "Draws where each window would go first.")
                 action("Apply", "Straight on: apply the loadout.")
                 action("Clear + Apply", "Clear this screen, then apply.")
-                Text("Letting go anywhere but on an action, or in the centre, cancels. A quick tap of the key does not open the wheel. \(model.wheelOffersWidgets() ? "Capture, Park and Widgets" : "Capture and Park") are on the wheel too.")
+                Text("Letting go anywhere but on an action, or in the centre, cancels. A quick tap of the key does not open the wheel. \(model.wheelOffersWidgets ? "Capture, Park and Widgets" : "Capture and Park") are on the wheel too.")
                     .font(.system(size: 11)).foregroundStyle(OnboardingStyle.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }

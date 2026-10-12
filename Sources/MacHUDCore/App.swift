@@ -398,7 +398,7 @@ extension AppDelegate {
     /// Tool dock section drives.
     fileprivate func installOnboarding() {
         let model = OnboardingModel(voice: voice, apps: catalog.tab, permissions: LiveOnboardingPermissions())
-        model.wheelOffersWidgets = { LoadoutMenu.shared?.widgetsState?() != nil }
+        model.wheelOffersWidgets = !(widgets?.servingApps.isEmpty ?? true)
         model.hotkeys = OnboardingHotkeys(radialWheel: store.hotkeys.loadoutMenu?.display ?? "the wheel hotkey",
                                           toolDock: store.hotkeys.dock?.display ?? "the dock hotkey")
         model.toolDock = LiveOnboardingToolDock(dock: toolDock)
@@ -522,10 +522,12 @@ extension AppDelegate {
         engine.hudEngine?.widgets = layer
     }
 
-    /// ⌃⌥W (`hotkeys.widgets`) only while some app serves widgets, so the chord stays free otherwise.
+    /// ⌃⌥W (`hotkeys.widgets`) only while some app serves widgets, so the chord stays free otherwise;
+    /// the setup guide's picture of the wheel shows Widgets on the same condition.
     fileprivate func registerWidgetsHotkey() {
         guard let widgets, let widgetUI else { return }
         widgetUI.registerHotkey(widgets.servingApps.isEmpty ? nil : store.hotkeys.widgetsReveal)
+        onboarding?.model.wheelOffersWidgets = !widgets.servingApps.isEmpty
     }
 
     /// The set of attached displays changed: pin by-name references to the displays now
