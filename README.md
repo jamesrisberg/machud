@@ -23,6 +23,9 @@ apps that make up the rest of the HUD:
 - **Radial wheel**: hold **⌃⌥Space**, drag toward a loadout, release. Three rings: preview,
   apply, clear this screen and apply.
 - **Tool dock**: a Dock-like strip of the sibling apps (**⌃⌥D**).
+- **Search bar**: an Alfred-style bar that launches apps (the ones you launch most rise to the
+  top), opens files Spotlight finds, applies or previews loadouts by name and inserts Stash's
+  snippets, all from the keyboard. `machud search show` opens it ([docs/API.md#search-bar](docs/API.md#search-bar)).
 - **Widgets**: glass tiles on the desktop that any sibling can serve (widgetHUD's clock, weather
   sessions), placed on a grid, under your windows until **⌃⌥W** raises them.
 - **Parking**: tuck windows off an edge behind a hover orb.

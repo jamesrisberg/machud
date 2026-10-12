@@ -44,6 +44,15 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - The voice orb notes in the system log each time it shows or hides and why (for a full-screen
   app, which app and window), each repair, and each change of the screen it sits on
   (`log show --predicate 'subsystem == "com.jrisberg.machud.voice" AND category == "orb"'`).
+- A **search bar** for launching apps, opening files, applying loadouts and inserting snippets
+  without leaving the keyboard. Type part of a name: apps (from your Applications folders and the
+  apps Spotlight finds in your home folder), loadouts and Stash's snippets are ranked together,
+  with files Spotlight finds below. The apps you launch from it most rise to the top, and the
+  first time it runs it borrows your app launch counts from Alfred, only reading them. Return runs
+  the selected row, ⌘1–⌘9 run the first nine; on a loadout ⌥Return previews it and ⇧Return clears
+  the screen first; on a file or app ⌘Return reveals it in Finder. A snippet is pasted into the
+  app you were in. Esc or clicking away closes the bar. Open it with `machud search show`; scripts
+  can ask for results with `machud search query text=<words>`.
 
 ### Changed
 - A loadout is the screen you are looking at. **Capture This Screen as Loadout…** (the Loadouts
