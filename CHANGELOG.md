@@ -83,10 +83,11 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   out, in the same top part of the wheel, with room between the rows for the actions of the
   loadouts inside. So the loadouts never sit in Capture's, Park's or Widgets' way: with your
   loadouts out, moving toward Capture, Park or Widgets opens it, and going back to the centre
-  starts over at once. Each petal is always in the same place, so the same move reaches the same
-  loadout every time, and adding a loadout moves none of the others. Up to five loadouts the wheel
-  is no bigger however many you have; each row further out adds to its size. Only the path you
-  are on is drawn.
+  starts over at once. Each loadout has a place of its own, the same size whatever its name, so
+  the same move reaches the same loadout every time: adding a loadout moves none of the others,
+  not in direction, not to another row and not nearer or further out. Up to five loadouts the
+  wheel is no bigger however many you have; each row further out adds to its size. Only the path
+  you are on is drawn.
 - A quick tap of ⌃⌥Space no longer flashes the wheel: let go within 200 ms and the wheel does not
   show. Held longer, it fades in. The time is a setting (**Radial menu tap**, or
   `machud settings set hotkeys.tapMilliseconds=250`), and your hotkey is kept as it was.
@@ -96,8 +97,9 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - The wheel's words are upright on one soft, dark blur that fades out at its edge rather than
   ending in a line, and the blur grows with the petals that unfold. The wheel is dark in light
   mode too, so its white words stay readable. A long loadout name wraps to a second line and then
-  shrinks to fit (a very long one ends in an ellipsis after a whole word), with its apps' icons on
-  wheels of up to eight loadouts. On a screen too small for it the whole wheel is drawn smaller.
+  shrinks to fit its place (a very long one ends in an ellipsis after a whole word), with its apps'
+  icons however many loadouts you have. On a screen too small for it the whole wheel is drawn
+  smaller.
 - Over the wheel, the petal under the pointer grows and glows, the others beside it fade back,
   and letting go does what that action said, even if the widgets changed while the wheel was
   open. The line under the wheel says what letting go does ("Apply Code", "Park Safari · Docs",

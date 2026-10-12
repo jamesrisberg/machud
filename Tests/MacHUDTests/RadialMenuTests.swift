@@ -258,7 +258,7 @@ final class RadialTreeTests: XCTestCase {
     }
 
     /// `icons` counts the icons the wheel draws by a petal: the top petals' symbols, and a
-    /// loadout's apps on a wheel of up to eight loadouts, none on a bigger one.
+    /// loadout's apps however many loadouts there are.
     func testTheMenuJSONCountsTheIconsDrawn() {
         let image = NSImage(systemSymbolName: "app", accessibilityDescription: nil) ?? NSImage()
         func icons(_ count: Int) -> [Int] {
@@ -269,7 +269,7 @@ final class RadialTreeTests: XCTestCase {
             return loadouts?.map { $0["icons"] as? Int ?? 0 } ?? []
         }
         XCTAssertEqual(icons(8), Array(repeating: RadialLayout.maxIcons, count: 8))
-        XCTAssertEqual(icons(9), Array(repeating: 0, count: 9))
+        XCTAssertEqual(icons(14), Array(repeating: RadialLayout.maxIcons, count: 14), "every place keeps room for its icons")
     }
 }
 

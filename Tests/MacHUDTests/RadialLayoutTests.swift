@@ -257,38 +257,98 @@ final class RadialLayoutTests: XCTestCase {
 
     /// The top petals show their symbol; loadouts their apps' icons on wheels of up to eight
     /// loadouts, none beyond.
-    func testIconsShowUpToEightLoadouts() {
+    func testIconsShowHoweverManyLoadouts() {
         for count in [3, 8, 9, 14] {
             let layout = RadialLayout(tree: Self.tree(count, Self.short, icons: 7))
             let icons = layout.showing(open: ["loadouts"]).filter { $0.count == 2 }.map { layout.icons(of: $0) }
-            XCTAssertEqual(icons.max(), count <= RadialLayout.iconLimit ? RadialLayout.maxIcons : 0, "\(count) loadouts")
+            XCTAssertEqual(Set(icons), [RadialLayout.maxIcons], "\(count) loadouts")
             XCTAssertEqual(layout.icons(of: ["capture"]), 1)
+        }
+    }
+
+    /// Adding a loadout moves none of the others: each keeps its direction, its row and its
+    /// distance from the centre, and so do its actions, whatever the names, from one loadout to
+    /// twenty, with or without Widgets. A long name fits its place (wrapping, then shrinking,
+    /// then ending in an ellipsis) rather than pushing the row out.
+    func testAddingALoadoutMovesNoneOfTheOthers() {
+        for (label, names) in [("short", Self.short), ("long", Self.long)] {
+            for widgets in [true, false] {
+                func layout(_ count: Int) -> (RadialLayout, [RadialNode]) {
+                    let tree = Self.tree(count, names, widgets: widgets ? .init() : nil)
+                    return (RadialLayout(tree: tree), tree)
+                }
+                var (before, beforeTree) = layout(1)
+                for count in 2...20 {
+                    let (after, afterTree) = layout(count)
+                    let what = "\(label) names, \(widgets ? "" : "no widgets, ")\(count - 1) → \(count) loadouts"
+                    for (old, new) in zip(beforeTree[0].children, afterTree[0].children) {
+                        XCTAssertEqual(old.id, new.id, what)
+                        XCTAssertEqual(old.angle, new.angle, accuracy: 1e-12, "\(what): \(old.id)'s direction")
+                        XCTAssertEqual(old.row, new.row, "\(what): \(old.id)'s row")
+                        for path in [["loadouts", old.id]] + old.children.map({ ["loadouts", old.id, $0.id] }) {
+                            let a = before.word(path).map { RadialGeometry.radius(of: $0.anchor) } ?? -1
+                            let b = after.word(path).map { RadialGeometry.radius(of: $0.anchor) } ?? -2
+                            XCTAssertEqual(a, b, accuracy: 0.001, "\(what): \(path.joined(separator: "/"))'s distance")
+                        }
+                    }
+                    (before, beforeTree) = (after, afterTree)
+                }
+            }
+        }
+        // A name wider than its place ends in an ellipsis.
+        let long = RadialLayout(tree: Self.tree(1, ["Supercalifragilisticexpialidocious research and development notes"]))
+        let word = long.word(["loadouts", "Supercalifragilisticexpialidocious research and development notes"])
+        XCTAssertEqual(word?.fit.truncated, true)
+        XCTAssertLessThanOrEqual(word?.frame.width ?? .infinity, RadialLayout.loadoutWidth + 0.01)
+    }
+
+    /// The loadouts' arc, padding included, keeps clear of Capture's and Widgets' words: no point
+    /// of either falls inside it.
+    func testTheLoadoutsArcKeepsClearOfCaptureAndWidgets() {
+        for count in 1...20 {
+            for names in [Self.short, Self.long] {
+            let layout = RadialLayout(tree: Self.tree(count, names))
+            let what = "\(count) loadouts named like \(names[0])"
+            guard let petal = layout.petal(["loadouts"]), petal.hasChildren else { return XCTFail(what) }
+            for id in ["capture", "widgets"] {
+                guard let word = layout.word([id]) else { continue }
+                for frame in [word.frame, word.grownFrame] {
+                    for p in Self.over(frame) where petal.covers(RadialGeometry.angle(of: p)) {
+                        XCTFail("\(what): \(id)'s word at \(p) is inside the loadouts' arc")
+                        break
+                    }
+                }
+            }
+            }
         }
     }
 
     // MARK: Compact
 
     /// The wheel opens small, however many loadouts there are, and a path shows only its own
-    /// petals. Up to five loadouts sit on one row; each row further out adds its depth and the
-    /// room its loadouts' actions need, and the rows inside keep their places.
+    /// petals. The rows sit at the same distances whatever the names and however many loadouts
+    /// fill them; up to five loadouts there is one row, and each row further out adds its depth
+    /// and the room its places' actions need.
     func testTheWheelStaysCompactHoweverManyLoadouts() {
         func reach(_ layout: RadialLayout, open: [String]) -> CGFloat {
             layout.showing(open: open).compactMap { layout.word($0)?.grownFrame }.map(Self.farthest).max() ?? 0
         }
         let few = RadialLayout(tree: Self.tree(3, Self.short))
-        let ring = { (layout: RadialLayout) in layout.petal(["loadouts"])?.rowStarts.first ?? 0 }
+        let all = RadialLayout(tree: Self.tree(14, Self.long)).petal(["loadouts"])?.rowStarts ?? []
         for count in [1, 3, 5, 6, 10, 14] {
             for (names, long) in [(Self.short, false), (Self.long, true)] {
                 let layout = RadialLayout(tree: Self.tree(count, names))
                 let what = "\(count) \(long ? "long" : "short") loadouts"
                 XCTAssertEqual(reach(layout, open: []), reach(few, open: []), accuracy: 0.01, "\(what): the top petals do not move")
                 XCTAssertLessThanOrEqual(reach(layout, open: []), 150, "\(what): the wheel as it opens")
-                XCTAssertEqual(layout.petal(["loadouts"])?.rows.count, Set(RadialMenu.loadoutPlaces(count).map(\.row)).count, "\(what): rows")
-                if !long, count >= 3 { XCTAssertEqual(ring(layout), ring(few), accuracy: 0.01, "\(what): the first row stays put") }
-                let rows = CGFloat(layout.petal(["loadouts"])?.rows.count ?? 1)
-                let most: CGFloat = (long ? 400 : 330) + (rows - 1) * (long ? 130 : 100)
+                let petal = layout.petal(["loadouts"])
+                XCTAssertEqual(petal?.rows.count, Set(RadialMenu.loadoutPlaces(count).map(\.row)).count, "\(what): rows")
+                for (start, fixed) in zip(petal?.rowStarts ?? [], all) {
+                    XCTAssertEqual(start, fixed, accuracy: 0.001, "\(what): each row starts where it always does")
+                }
+                let rows = CGFloat(petal?.rows.count ?? 1)
                 for branch in layout.branches {
-                    XCTAssertLessThanOrEqual(reach(layout, open: branch), most, "\(what), \(branch)")
+                    XCTAssertLessThanOrEqual(reach(layout, open: branch), 400 + (rows - 1) * 210, "\(what), \(branch)")
                 }
             }
         }
