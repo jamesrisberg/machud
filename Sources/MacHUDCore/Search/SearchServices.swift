@@ -25,12 +25,13 @@ final class SearchServices {
         let index = AppIndex()
         let supervisor = externals.supervisor
         let recorded = { [weak supervisor] in supervisor?.record(Self.stashID)?.app.socketPath }
-        let snippets: StashSnippets? = Env.isIsolated(in: environment) && Env.value("STASH_SOCKET", in: environment) == nil
-            ? nil : StashSnippets(path: { Self.stashSocket(environment: environment, recorded: recorded) })
-        let engine = SearchEngine(apps: index, counts: { counts.counts }, loadouts: { [weak store] in
+        let asksStash = !Env.isIsolated(in: environment) || Env.value("STASH_SOCKET", in: environment) != nil
+        let stash = { StashSnippets(path: { Self.stashSocket(environment: environment, recorded: recorded) }) }
+        let engines = Self.engines(apps: index, counts: { counts.counts }, loadouts: { [weak store] in
             store.map { ExperimentalLoadouts.offered(in: $0.config).map(\.name) } ?? []
-        }, snippets: snippets, files: SpotlightFileSearch())
-        performer.snippets = snippets
+        }, snippets: { asksStash ? stash() : nil }, files: SpotlightFileSearch())
+        let engine = engines.bar
+        performer.snippets = engine.snippets
         performer.loadout = { [weak store, weak menu] name, run in
             guard let loadout = store?.loadout(named: name) else { return }
             switch run {
@@ -43,7 +44,7 @@ final class SearchServices {
         model.perform = { [performer] in performer.perform($0) }
         model.recordLaunch = { counts.record($0) }
         bar = SearchBar(model: model)
-        control = SearchControl(engine: engine, bar: bar)
+        control = SearchControl(engine: engines.verb, bar: bar)
         self.counts = counts
         self.index = index
         alfred = Self.alfredDatabase(environment: environment)
@@ -53,6 +54,15 @@ final class SearchServices {
 
     func registerControl(_ server: HUDSocketServer) {
         control.registerControl(server)
+    }
+
+    /// The bar's engine and the `search` verb's: the same sources, but each with a Stash client
+    /// of its own, so a query from one never replaces the other's request queued behind a
+    /// slow Stash.
+    static func engines(apps: AppSource, counts: @escaping () -> [String: Int], loadouts: @escaping () -> [String],
+                        snippets: () -> SnippetSource?, files: FileSearching?) -> (bar: SearchEngine, verb: SearchEngine) {
+        (SearchEngine(apps: apps, counts: counts, loadouts: loadouts, snippets: snippets(), files: files),
+         SearchEngine(apps: apps, counts: counts, loadouts: loadouts, snippets: snippets(), files: files))
     }
 
     /// The socket the bar asks for snippets: `MACHUD_STASH_SOCKET`, else the running Stash's as

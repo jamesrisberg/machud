@@ -310,8 +310,9 @@ Rows, each with an icon, a title, a subtitle and its kind:
   listing that takes over 10 s is stopped, and the apps found before stay.
 - **Loadouts** by name: the ones the wheel offers.
 - **Snippets** from Stash: `snippets list query= limit=8` on the socket MacHUD's supervisor
-  recorded for Stash (`xyz.machud.stash`), asked only of a running Stash, one request at a time
-  (a query typed while one waits replaces the one queued behind it). No Stash, or one without
+  recorded for Stash (`xyz.machud.stash`), asked only of a running Stash. The bar and
+  `search query` each keep one request out at a time (a query typed while one waits replaces
+  the one queued behind it, never the other's). No Stash, or one without
   the verb, means no snippet rows and no error. An isolated instance asks no Stash unless
   `MACHUD_STASH_SOCKET` names a socket.
 - **Files**: Spotlight by name in your home folder (not ~/Library, hidden folders or

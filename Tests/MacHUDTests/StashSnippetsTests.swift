@@ -125,6 +125,25 @@ final class StashSnippetsTests: XCTestCase {
         XCTAssertTrue(connector.requests.isEmpty)
     }
 
+    func testTheBarAndTheVerbEachHaveTheirOwnStashRequest() {
+        var connectors: [HoldingConnector] = []
+        let engines = SearchServices.engines(apps: FakeAppSource([]), counts: { [:] }, loadouts: { [] }, snippets: {
+            let connector = HoldingConnector()
+            connectors.append(connector)
+            return StashSnippets(path: { "/nowhere.sock" }, lister: connector)
+        }, files: nil)
+        var barHits: [SnippetHit]?
+        engines.bar.listSnippets("a") { barHits = $0 }
+        var verbResults: [SearchResult]?
+        engines.verb.collect("b", files: false, timeout: 5) { verbResults = $0 }
+        XCTAssertEqual(connectors.map(\.requests.count), [1, 1], "each asked Stash")
+        XCTAssertNil(barHits, "the verb's query did not replace the bar's")
+        connectors[1].requests[0].done(.success(["ok": true, "snippets": [["id": "1", "name": "b"]]]))
+        XCTAssertEqual(verbResults?.map(\.id), ["1"])
+        connectors[0].requests[0].done(.success(["ok": true, "snippets": [["id": "2", "name": "a"]]]))
+        XCTAssertEqual(barHits?.map(\.id), ["2"])
+    }
+
     // MARK: Which Stash
 
     func testWhichStashTheBarAsks() {
