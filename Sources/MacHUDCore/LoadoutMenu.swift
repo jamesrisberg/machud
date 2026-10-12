@@ -1,6 +1,6 @@
 import AppKit
 
-/// Wires loadouts into the UI: the hold-to-show radial wheel, the status-bar
+/// Wires loadouts into the UI: the wheel's hotkey (a tap or a hold), the status-bar
 /// section, per-loadout hotkeys and the `radial` / `menu` / `preview` control commands.
 /// Every list offers `ExperimentalLoadouts.offered` and a capture takes the display under the
 /// pointer, unless multi-desktop loadouts (experimental) are on; each reads the config when
@@ -18,6 +18,12 @@ final class LoadoutMenu {
     var library: LoadoutLibrary?
     private let engine: LoadoutEngine
     private let radial = RadialMenu()
+    /// The wheel's hotkey, told apart: a hold shows the wheel and its release commits it, a tap
+    /// calls `onTap`.
+    let summon: TapOrHold
+    /// A tap of the wheel's hotkey (`hotkeys.loadoutMenu`): released within
+    /// `hotkeys.tapMilliseconds`, before the wheel shows. Does nothing until the app sets it.
+    var onTap: () -> Void = {}
     private var hotkeyIDs: [UInt32] = []
     private var registered: (menu: HotKey?, loadouts: [String: HotKey])?
     private var registrationDeferred = false
@@ -53,9 +59,10 @@ final class LoadoutMenu {
         return menu
     }
 
-    init(store: LayoutStore, engine: LoadoutEngine) {
+    init(store: LayoutStore, engine: LoadoutEngine, clock: TapOrHold.Clock = .system) {
         self.store = store
         self.engine = engine
+        summon = TapOrHold(clock: clock, threshold: { [weak store] in store?.hotkeys.tapThreshold ?? Hotkeys.defaultTapThreshold })
         parkTargets = { [weak engine] in
             guard let engine else { return .init() }
             return .init(focused: engine.focusedWindowLabel(), parked: engine.parking.parked.map(\.record.label))
@@ -67,6 +74,10 @@ final class LoadoutMenu {
             self.registrationDeferred = false
             self.registerHotkeys()
         }
+        summon.isShowing = { [weak self] in self?.radial.isVisible ?? false }
+        summon.onHold = { [weak self] in self?.showRadial() }
+        summon.onRelease = { [weak self] in self?.radial.commit() }
+        summon.onTap = { [weak self] in self?.onTap() }
     }
 
     // MARK: The tree
@@ -441,9 +452,9 @@ final class LoadoutMenu {
 
     // MARK: Hotkeys
 
-    /// Carbon delivers the release event only to a still-registered hotkey, so
-    /// re-register only when the keys actually changed, and never while the wheel
-    /// is being held open.
+    /// The wheel's hotkey goes through `summon`, which tells a tap from a hold. Carbon delivers
+    /// the release event only to a still-registered hotkey, so re-register only when the keys
+    /// actually changed, and never while the wheel is being held open.
     func registerHotkeys() {
         let menuKey = Env.noHotkeys ? nil : store.hotkeys.loadoutMenu
         let perLoadout = Env.noHotkeys ? [:] : Self.loadoutHotkeys(in: store.config)
@@ -457,9 +468,9 @@ final class LoadoutMenu {
         registered = (menuKey, perLoadout)
         if let hk = menuKey,
            let id = HotKeyCenter.shared.register(hk, onPress: { [weak self] in
-               MainActor.assumeIsolated { self?.showRadial() }
+               MainActor.assumeIsolated { self?.summon.press() }
            }, onRelease: { [weak self] in
-               MainActor.assumeIsolated { self?.radial.commit() }
+               MainActor.assumeIsolated { self?.summon.release() }
            }) {
             hotkeyIDs.append(id)
         }
@@ -810,3 +821,81 @@ final class FieldSync: NSObject, NSTextFieldDelegate {
     @objc func toggled(_ sender: NSButton) { to.isEnabled = sender.state == .on }
 }
 
+/// Tells a tap of a hotkey from a hold, by time: released within `threshold` it is a tap
+/// (`onTap`), and nothing else happens; still held at `threshold`, it is a hold (`onHold`), and
+/// its release is `onRelease`. A press while `isShowing` (the wheel opened by a script) is a
+/// hold already, so its release commits. Repeated presses while the key is down are ignored.
+/// The clock is injected, so tests step time by hand.
+@MainActor
+final class TapOrHold {
+    /// The time now and a way to run something later that can be called off.
+    struct Clock {
+        /// Seconds, from any fixed start.
+        var now: () -> TimeInterval
+        /// Runs the block on the main thread after a delay; the returned closure calls it off.
+        var after: (_ delay: TimeInterval, _ run: @escaping @MainActor () -> Void) -> () -> Void
+
+        static let system = Clock(now: { ProcessInfo.processInfo.systemUptime }, after: { delay, run in
+            let item = DispatchWorkItem { MainActor.assumeIsolated { run() } }
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+            return { item.cancel() }
+        })
+    }
+
+    enum Phase: Equatable {
+        case idle
+        /// Down since this time, not yet a hold.
+        case pressed(at: TimeInterval)
+        case held
+    }
+
+    var onTap: () -> Void = {}
+    var onHold: () -> Void = {}
+    var onRelease: () -> Void = {}
+    /// Whether what a hold shows is already showing.
+    var isShowing: () -> Bool = { false }
+    /// Read at each press, so a changed setting takes effect at once.
+    let threshold: () -> TimeInterval
+    private let clock: Clock
+    private(set) var phase: Phase = .idle
+    private var callOff: (() -> Void)?
+
+    init(clock: Clock = .system, threshold: @escaping () -> TimeInterval) {
+        self.clock = clock
+        self.threshold = threshold
+    }
+
+    func press() {
+        guard phase == .idle else { return }
+        if isShowing() {
+            phase = .held
+            return
+        }
+        phase = .pressed(at: clock.now())
+        callOff = clock.after(threshold()) { [weak self] in
+            guard let self, case .pressed = self.phase else { return }
+            self.callOff = nil
+            self.phase = .held
+            self.onHold()
+        }
+    }
+
+    func release() {
+        switch phase {
+        case .pressed(let at):
+            callOff?()
+            callOff = nil
+            phase = .idle
+            // A release that comes late (the main thread was busy past the threshold) is neither:
+            // the hold never showed.
+            if clock.now() - at < threshold() { onTap() }
+        case .held:
+            phase = .idle
+            onRelease()
+        case .idle:
+            // Registered while the key was down: the press was missed. A wheel showing (opened
+            // by a script) still commits.
+            if isShowing() { onRelease() }
+        }
+    }
+}

@@ -36,6 +36,21 @@ final class HotKeyTextTests: XCTestCase {
         XCTAssertEqual(updated.hotkeys?.loadoutMenu, HotKey(key: "space", modifiers: ["command", "shift"]))
         XCTAssertNil(updated.hotkeys?.dock, "empty turns the hotkey off")
     }
+
+    /// The radial menu's tap time: 200 ms by default, kept within 50 to 1000, beside the hotkey
+    /// it times, which it leaves as it was.
+    @MainActor
+    func testTheTapTimeRoundTripsThroughTheSettingsSchema() throws {
+        let defaults = Config.defaults
+        XCTAssertEqual(MacHUDSettings.values(config: defaults, enabled: true, orbsHidden: false)["hotkeys.tapMilliseconds"] as? Int, 200)
+        let parsed = try MacHUDSettings.schema.validate(["hotkeys.tapMilliseconds": "320"])
+        let updated = MacHUDSettings.applying(parsed, to: defaults)
+        XCTAssertEqual(updated.hotkeys?.tapMilliseconds, 320)
+        XCTAssertEqual(updated.hotkeys?.loadoutMenu, Hotkeys.defaults.loadoutMenu)
+        XCTAssertEqual(MacHUDSettings.values(config: updated, enabled: true, orbsHidden: false)["hotkeys.tapMilliseconds"] as? Int, 320)
+        let low = MacHUDSettings.applying(try MacHUDSettings.schema.validate(["hotkeys.tapMilliseconds": "5"]), to: defaults)
+        XCTAssertEqual(low.hotkeys?.tapMilliseconds, 50)
+    }
 }
 
 final class DockHiddenAppsTests: XCTestCase {

@@ -29,6 +29,9 @@ final class MacHUDSettings {
         .init(key: "hotkeys.loadoutMenu", title: "Radial menu", type: .string,
               default: .string(HotKeyText.format(Hotkeys.defaults.loadoutMenu)), group: "Hotkeys",
               help: "Hold to show the loadout wheel. Modifiers and a key joined by +, e.g. control+option+space; empty turns it off."),
+        .init(key: "hotkeys.tapMilliseconds", title: "Radial menu tap (milliseconds)", type: .int,
+              default: .int(Hotkeys.defaultTapMilliseconds), group: "Hotkeys",
+              help: "Let go of the radial menu's key within this time and it is a tap: the wheel does not show. Held longer, the wheel fades in. 50 to 1000."),
         .init(key: "hotkeys.dock", title: "Tool dock", type: .string,
               default: .string(HotKeyText.format(Hotkeys.defaults.dock)), group: "Hotkeys",
               help: "Shows or hides the tool dock, e.g. control+option+d; empty turns it off."),
@@ -77,6 +80,7 @@ final class MacHUDSettings {
          "browser": config.browser ?? "", "orbsHidden": orbsHidden,
          "hotkeys.loadoutMenu": HotKeyText.format((config.hotkeys ?? .defaults).loadoutMenu),
          "hotkeys.dock": HotKeyText.format((config.hotkeys ?? .defaults).dock),
+         "hotkeys.tapMilliseconds": Int(((config.hotkeys ?? .defaults).tapThreshold * 1000).rounded()),
          "menuBar.enabled": (config.menuBar ?? MenuBarConfig()).isEnabled,
          "menuBar.autoCollapseSeconds": Int((config.menuBar ?? MenuBarConfig()).autoCollapse),
          "menuBar.consumeSiblings": (config.menuBar ?? MenuBarConfig()).consumesSiblings,
@@ -104,6 +108,11 @@ final class MacHUDSettings {
         if case .string(let text)? = values["hotkeys.dock"] {
             c.hotkeys = c.hotkeys ?? .defaults
             c.hotkeys?.dock = HotKeyText.parse(text)
+        }
+        if case .int(let ms)? = values["hotkeys.tapMilliseconds"] {
+            c.hotkeys = c.hotkeys ?? .defaults
+            let range = Hotkeys.tapMillisecondsRange
+            c.hotkeys?.tapMilliseconds = min(max(ms, range.lowerBound), range.upperBound)
         }
         if case .bool(let on)? = values["menuBar.enabled"] {
             c.menuBar = c.menuBar ?? MenuBarConfig()
