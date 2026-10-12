@@ -49,6 +49,8 @@ struct RadialNode: Equatable {
     var icons: [NSImage] = []
     var hotkey: HotKey? = nil
     var children: [RadialNode] = []
+    /// A loadout's row out from the centre (0 the innermost); 0 for every other petal.
+    var row = 0
 
     var outcome: RadialMenu.Outcome? { if case .action(let o) = kind { return o } else { return nil } }
     var isLeaf: Bool { outcome != nil }
@@ -117,24 +119,34 @@ final class RadialMenu {
     /// The top petals' directions: Apply Loadout up, Capture right, Park down, Widgets left.
     /// Each keeps its direction whether or not Widgets is there.
     nonisolated static let topAngles: [String: Double] = [loadoutsID: 0, captureID: .pi / 2, parkID: .pi, widgetsID: 3 * .pi / 2]
-    /// Between neighbouring loadouts, up to `loadoutsAround` of them; more share the whole circle.
-    nonisolated static let loadoutStep = 36.0 * .pi / 180
-    nonisolated static let loadoutsAround = 10
+    /// Between neighbouring loadouts on a row.
+    nonisolated static let loadoutStep = 30.0 * .pi / 180
+    /// The farthest a loadout sits from straight up, either side: with half a step's room past
+    /// it, the loadouts' arc stays 15° or more from Capture's and Widgets' directions.
+    nonisolated static let loadoutSector = 60.0 * .pi / 180
+    /// The rows' places, as multiples of `loadoutStep` from straight up, in the order they fill:
+    /// five on a row (straight up, then 30° and 60° each side), four on the next between them
+    /// (15° and 45° each side), alternating outward. Five labels side by side across the top are
+    /// as many as the sector holds without pushing the row far out.
+    nonisolated static let loadoutRows: [[Double]] = [[0, 1, -1, 2, -2], [0.5, -0.5, 1.5, -1.5]]
     /// Between neighbouring actions beyond Capture, Park or Widgets.
     nonisolated static let toolStep = 30.0 * .pi / 180
     /// Between a loadout's actions.
     nonisolated static let actionStep = 22.0 * .pi / 180
 
-    /// Where each of `count` loadouts goes, as an angle from Apply Loadout's direction: the first
-    /// straight on, then alternately clockwise and anticlockwise of it, `loadoutStep` apart, so a
-    /// loadout added at the end moves none of the others. Past `loadoutsAround` they share the
-    /// whole circle evenly in the same order.
-    nonisolated static func loadoutOffsets(_ count: Int) -> [Double] {
-        let step = count > loadoutsAround ? RadialGeometry.fullTurn / Double(count) : loadoutStep
-        return (0..<count).map { i in
-            let k = Double((i + 1) / 2)
-            return i % 2 == 1 ? k * step : -k * step
+    /// Where each of `count` loadouts goes: its row (0 the innermost) and its angle from Apply
+    /// Loadout's direction, filling `loadoutRows` in turn, so a loadout added at the end moves
+    /// none of the others.
+    nonisolated static func loadoutPlaces(_ count: Int) -> [(row: Int, offset: Double)] {
+        var out: [(row: Int, offset: Double)] = []
+        var row = 0
+        while out.count < count {
+            for place in loadoutRows[row % loadoutRows.count] where out.count < count {
+                out.append((row, place * loadoutStep))
+            }
+            row += 1
         }
+        return out
     }
 
     /// `count` angles `step` apart, centred on 0, in clockwise order.
@@ -153,9 +165,8 @@ final class RadialMenu {
     nonisolated static func tree(loadouts: [LoadoutEntry], offersAllScreens: Bool, park: ParkTargets,
                                  widgets: WidgetsState?) -> [RadialNode] {
         let up = topAngles[loadoutsID]!
-        let offsets = loadoutOffsets(loadouts.count)
-        let entries = zip(loadouts, offsets).map { entry, offset in
-            loadoutNode(entry, angle: RadialGeometry.normalized(up + offset))
+        let entries = zip(loadouts, loadoutPlaces(loadouts.count)).map { entry, place in
+            loadoutNode(entry, angle: RadialGeometry.normalized(up + place.offset), row: place.row)
         }
         var out = [
             RadialNode(id: loadoutsID, name: "Apply Loadout", kind: .loadouts,
@@ -168,7 +179,7 @@ final class RadialMenu {
         return out
     }
 
-    nonisolated static func loadoutNode(_ entry: LoadoutEntry, angle: Double) -> RadialNode {
+    nonisolated static func loadoutNode(_ entry: LoadoutEntry, angle: Double, row: Int = 0) -> RadialNode {
         let name = entry.name
         let actions: [(String, String, String, Outcome)] = [
             ("preview", "Preview", "Preview \(name)", .preview(loadout: name)),
@@ -177,7 +188,7 @@ final class RadialMenu {
         ]
         return RadialNode(id: name, name: name, kind: .loadout(name), hint: "Move out to preview or apply \(name)",
                           angle: angle, icons: entry.icons, hotkey: entry.hotkey,
-                          children: leaves(actions, around: angle, step: actionStep))
+                          children: leaves(actions, around: angle, step: actionStep), row: row)
     }
 
     nonisolated private static func leaves(_ actions: [(id: String, name: String, hint: String, outcome: Outcome)],
@@ -320,7 +331,7 @@ final class RadialMenu {
     }
 
     /// The tree as the socket shows it, each node with its `id`, `path`, `name`, `kind`, `hint`,
-    /// `angle`, the `radius` its word is anchored at, its `digit` among its siblings (1 to 9),
+    /// `angle`, the `radius` its word is anchored at, a loadout's `row` (1 the innermost), its `digit` among its siblings (1 to 9),
     /// the `icons` drawn by it, a loadout's `hotkey`, and its `children` or, for a leaf, its
     /// `action`; with a `selection`, what is highlighted and the hint showing. Also used to
     /// describe the wheel while it is hidden.
@@ -330,6 +341,7 @@ final class RadialMenu {
             var d: [String: Any] = ["id": node.id, "path": path.joined(separator: "/"), "name": node.name,
                                     "kind": node.kind.label, "hint": node.hint, "angle": node.angle]
             if let word = layout.word(path) { d["radius"] = Double(RadialGeometry.radius(of: word.anchor)) }
+            if case .loadout = node.kind { d["row"] = node.row + 1 }
             if digit <= 9 { d["digit"] = digit }
             let icons = layout.icons(of: path)
             if icons > 0 { d["icons"] = icons }
@@ -428,17 +440,8 @@ final class RadialMenu {
     private var pointerHasMoved = false
     /// Where the first pointer report after the wheel opened found it.
     private var firstReport: CGPoint?
-    /// The path the pointer swept into the centre from, and when: moving out again before
-    /// `centreRest` it is open still, so a move straight across the centre (Apply Loadout's
-    /// word to a loadout below it) does not open Capture, Park or Widgets on the far side.
-    private var sweptFrom: (path: [String], at: TimeInterval)?
     /// How far the pointer goes from its first report before the wheel follows it.
     static let pointerTravel: CGFloat = 6
-    /// How long the pointer rests in the centre before the path it swept in from is forgotten
-    /// (`pointerMoved(to:delta:)`).
-    static let centreRest: TimeInterval = 0.35
-    /// Seconds, from any fixed start (tests give their own).
-    var clock: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
 
     /// Moves the pointer to a point in display coordinates, which are AX coordinates (y down
     /// from the primary display's top), without a pause before it moves again. Tests record it
@@ -496,7 +499,6 @@ final class RadialMenu {
         pointerOffset = .zero
         pointerHasMoved = false
         firstReport = nil
-        sweptFrom = nil
         opening += 1
         parkTargetsAsked = false
         parkTargetsStale = false
@@ -628,18 +630,9 @@ final class RadialMenu {
     private func refreshSelection() {
         if let keyboardPath {
             highlight(keyboardPath)
-            return
+        } else {
+            highlight(layout.selection(at: pointerOffset, open: selection))
         }
-        // In the centre nothing is lit, but the path the pointer came from is kept a moment.
-        if RadialGeometry.radius(of: pointerOffset) < layout.deadZone {
-            if !selection.isEmpty { sweptFrom = (selection, clock()) }
-            highlight([])
-            return
-        }
-        var open = selection
-        if open.isEmpty, let swept = sweptFrom, clock() - swept.at < Self.centreRest { open = swept.path }
-        sweptFrom = nil
-        highlight(layout.selection(at: pointerOffset, open: open))
     }
 
     /// The park petal asks for its targets again as it is reached (`asksForParkTargets`).
@@ -674,8 +667,7 @@ final class RadialMenu {
 
     /// A mouse-moved or dragged event: the pointer is at `location` (screen coordinates),
     /// having moved by `delta`. Nothing changes until the pointer has gone `pointerTravel` from
-    /// where the first report found it. Swept through the centre (less than `centreRest` there),
-    /// the pointer comes out with the path it went in with still open; rested there, it starts over.
+    /// where the first report found it.
     func pointerMoved(to location: CGPoint, delta: CGVector) {
         if !pointerHasMoved {
             guard delta.dx != 0 || delta.dy != 0 else { return }

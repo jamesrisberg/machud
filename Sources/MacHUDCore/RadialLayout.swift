@@ -10,9 +10,10 @@ import AppKit
 ///   blending between; above the centre it stands on its anchor, below it hangs from it. The top
 ///   petals sit at `topRadius`; a branch's children sit together on one circle beyond it, as near
 ///   as they can be without touching any word that shows while that branch is open (its
-///   ancestors, their siblings, the top petals, the centre and the digits). Up to ten loadouts
-///   their directions are fixed and how far out they sit depends on the words beside them, not on
-///   how many there are; more share the whole circle (`RadialMenu.loadoutOffsets`).
+///   ancestors, their siblings, the top petals, the centre and the digits). The loadouts sit in
+///   rows in the top sector (`RadialMenu.loadoutPlaces`): each row on its own circle, the next
+///   one out clear of the actions the inner row's loadouts unfold. Their directions are fixed and
+///   how far out a row sits depends on the words beside it, not on how many loadouts there are.
 ///   Under the pointer a petal grows from its anchor (away from the centre), as far as
 ///   `RadialWheelView.grow` without touching a word that shows with it.
 /// - A name is fitted to its width (wrap to two lines, then shrink, then cut after a whole word);
@@ -64,9 +65,23 @@ struct RadialLayout: Equatable {
         var children: [String]
         /// From this radius out, past the branch's word, the pointer picks among its children.
         var start: CGFloat = .infinity
+        /// The pointer picks among its children only inside this radius: the start of the next
+        /// row out, for a loadout on an inner row; no limit otherwise.
+        var end: CGFloat = .infinity
         /// The children's arc, clockwise from `from` to `to` (radians, either may be outside
         /// 0..<2π); nil when it is the whole circle.
         var arc: ClosedRange<Double>? = nil
+        /// The children by row (`RadialNode.row`), innermost first, and where each row starts: past
+        /// it, and inside the next one's start, the pointer picks among that row.
+        var rows: [[String]] = []
+        var rowStarts: [CGFloat] = []
+
+        /// The children the pointer picks among at radius `r`: the row it is out at.
+        func row(at r: CGFloat) -> [String] {
+            guard rows.count > 1 else { return children }
+            let k = rowStarts.lastIndex { r >= $0 } ?? 0
+            return rows[k]
+        }
 
         var hasChildren: Bool { !children.isEmpty }
 
@@ -210,7 +225,7 @@ struct RadialLayout: Equatable {
         let branch = openBranch(open)
         for depth in stride(from: branch.count, through: 1, by: -1) {
             let held = Array(branch.prefix(depth))
-            guard let petal = petals[held], petal.hasChildren, petal.covers(a) else { continue }
+            guard let petal = petals[held], petal.hasChildren, petal.covers(a), r < petal.end else { continue }
             if r >= petal.start { return .beyond(held) }
             let circle = depth == 1 ? deadZone : word(held).map { RadialGeometry.radius(of: $0.anchor) } ?? .infinity
             if r >= circle { return .at(held) }
@@ -218,17 +233,18 @@ struct RadialLayout: Equatable {
         return nil
     }
 
-    /// From the branch at `path` out: its child nearest `a`, then, while `r` is past where that
-    /// one's children start and within their arc, its child nearest `a`, and so on.
+    /// From the branch at `path` out: its child nearest `a` on the row `r` is out at, then, while
+    /// `r` is past where that one's children start (and inside the next row) and within their
+    /// arc, its child nearest `a`, and so on.
     private func outward(from path: [String], radius r: CGFloat, angle a: Double) -> [String] {
         var path = path
-        var ids = path.isEmpty ? top : petals[path]?.children ?? []
+        var ids = path.isEmpty ? top : petals[path]?.row(at: r) ?? []
         while !ids.isEmpty {
             let parent = path
             func distance(_ id: String) -> Double { abs(RadialGeometry.difference(a, petals[parent + [id]]?.angle ?? 0)) }
             path.append(ids.min { distance($0) < distance($1) }!)
-            guard let petal = petals[path], petal.hasChildren, r >= petal.start, petal.covers(a) else { break }
-            ids = petal.children
+            guard let petal = petals[path], petal.hasChildren, r >= petal.start, r < petal.end, petal.covers(a) else { break }
+            ids = petal.row(at: r)
         }
         return path
     }
@@ -300,21 +316,44 @@ struct RadialLayout: Equatable {
         }
 
         /// Lays out the children of `node` (at `path`) and everything under them; `context` is
-        /// what shows beside them, the branch's own word grown.
+        /// what shows beside them, the branch's own word grown. The children go row by row
+        /// (`RadialNode.row`): each row on its circle, clear of the rows inside it and of every
+        /// word their own children unfold, so an inner loadout's actions sit between its row and
+        /// the next.
         func open(_ node: RadialNode, path: [String], word: Word, context: [CGRect]) {
-            let anchorRadius = RadialGeometry.radius(of: word.anchor)
             var petal = Petal(angle: node.angle, children: node.children.map(\.id))
             guard !node.children.isEmpty else { petals[path] = petal; return }
-            let children = place(node.children, parent: path, from: anchorRadius + gap, context: context + [word.grownFrame])
-            words += children
-            petal.start = children.map { Self.distance(to: $0.frame) }.min().map { $0 - gap / 2 } ?? .infinity
+            let rows = Dictionary(grouping: node.children, by: \.row).sorted { $0.key < $1.key }.map(\.value)
+            var from = RadialGeometry.radius(of: word.anchor) + gap
+            // What a row further out must clear: the rows inside it, grown, and what they unfold.
+            var inside = [word.grownFrame]
+            // The words of the rows placed so far, which show beside every loadout's actions.
+            var shown: [CGRect] = []
+            var starts: [CGFloat] = []
+            var placedRows: [[(node: RadialNode, word: Word)]] = []
+            for row in rows {
+                let placed = place(row, parent: path, from: from, context: context + inside)
+                words += placed
+                starts.append(placed.map { Self.distance(to: $0.frame) }.min().map { $0 - gap / 2 } ?? .infinity)
+                shown += placed.map(\.frame)
+                let unfolded = words.count
+                for (child, childWord) in zip(row, placed) {
+                    open(child, path: path + [child.id], word: childWord,
+                         context: context + [word.frame] + shown.filter { $0 != childWord.frame })
+                }
+                inside += placed.map(\.grownFrame) + words[unfolded...].map(\.grownFrame)
+                from = (placed.map { RadialGeometry.radius(of: $0.anchor) }.max() ?? from) + gap
+                placedRows.append(Array(zip(row, placed)))
+            }
+            // An inner row's loadouts pick among their actions only inside the next row.
+            for (k, row) in placedRows.enumerated() where k + 1 < starts.count {
+                for (child, _) in row { petals[path + [child.id]]?.end = starts[k + 1] }
+            }
+            petal.start = starts.first ?? .infinity
+            petal.rows = rows.map { $0.map(\.id) }
+            petal.rowStarts = starts
             petal.arc = Self.arc(of: node.children.map { $0.angle }, around: node.angle)
             petals[path] = petal
-            let siblings = children.map(\.frame)
-            for (child, childWord) in zip(node.children, children) {
-                let rest = siblings.filter { $0 != childWord.frame }
-                open(child, path: path + [child.id], word: childWord, context: context + [word.frame] + rest)
-            }
         }
 
         let topWords = place(tree, parent: [], from: Self.topRadius * s, context: fixed)

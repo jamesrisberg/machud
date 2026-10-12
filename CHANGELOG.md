@@ -78,12 +78,15 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   Park unfolds Park and Restore, Widgets unfolds Reveal (Lower while the widgets are up) and Edit
   (Done while you are editing them). Letting go on an action does it; letting go on a petal that
   has more beyond it, in the centre, or pressing Esc cancels. Hovering a loadout does not preview
-  it. Once your loadouts are out, Capture, Park and Widgets stay out of the way of the pointer
-  wherever loadouts are, even if you cross their words or sweep through the centre to reach a
-  loadout on the far side; rest in the centre a moment to start over on another petal. Each petal is always in the same direction, so the same move reaches the same loadout every
-  time, and adding a loadout moves none of the others. Up to ten loadouts, how big the wheel gets
-  depends on their names, not on how many there are (more share the whole circle and sit a
-  little further out); only the path you are on is drawn.
+  it. Your loadouts fan out above Apply Loadout, between Widgets and Capture: the first straight
+  up, then alternately right and left, up to five in a row. A sixth and more go on a row further
+  out, in the same top part of the wheel, with room between the rows for the actions of the
+  loadouts inside. So the loadouts never sit in Capture's, Park's or Widgets' way: with your
+  loadouts out, moving toward Capture, Park or Widgets opens it, and going back to the centre
+  starts over at once. Each petal is always in the same place, so the same move reaches the same
+  loadout every time, and adding a loadout moves none of the others. Up to five loadouts the wheel
+  is no bigger however many you have; each row further out adds to its size. Only the path you
+  are on is drawn.
 - A quick tap of ⌃⌥Space no longer flashes the wheel: let go within 200 ms and the wheel does not
   show. Held longer, it fades in. The time is a setting (**Radial menu tap**, or
   `machud settings set hotkeys.tapMilliseconds=250`), and your hotkey is kept as it was.
@@ -108,8 +111,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   loadout, on to Apply, let go.
 - For scripts, `machud menu` and `machud radial` describe the wheel as a tree: `tree[]` of
   nodes with `id`, `path` (such as `loadouts/Messaging/apply`), `name`, `kind`, `hint`, `angle`,
-  `radius`, `digit`, `icons`, `hotkey` and either `children` or, for an action, `action`; the
-  selection is `{kind, path, name, hint}`. The flat `wedges[]` (each with its `index`, `title`,
+  `radius`, a loadout's `row`, `digit`, `icons`, `hotkey` and either `children` or, for an
+  action, `action`; the selection is `{kind, path, name, hint}`. The flat `wedges[]` (each with its `index`, `title`,
   `subtitle`, `rings` and `angleStart`/`angleCenter`/`angleEnd`) and the `rings` radii are gone,
   and so are the selection's `index` and `ring`. `machud radial action=select` now takes `path=` (for example
   `path=loadouts/Messaging/apply`); `index=` and `ring=` are gone, and selecting while the wheel

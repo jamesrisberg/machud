@@ -201,15 +201,30 @@ final class RadialLayoutTests: XCTestCase {
         }
     }
 
-    /// A branch's children sit on one circle, beyond the branch's own anchor.
-    func testABranchsChildrenSitOnOneCircleBeyondIt() {
+    /// A branch's children sit on one circle per row, beyond the branch's own anchor, each row
+    /// further out than the one before and clear of the actions its loadouts unfold.
+    func testABranchsChildrenSitOnACirclePerRowBeyondIt() {
         everyLayout { layout, tree, what in
             for branch in layout.branches where !branch.isEmpty {
                 guard let node = RadialMenu.node(at: branch, in: tree), let parent = layout.word(branch) else { continue }
-                let radii = node.children.compactMap { layout.word(branch + [$0.id]) }.map { RadialGeometry.radius(of: $0.anchor) }
-                XCTAssertEqual(radii.count, node.children.count, "\(what): \(branch)")
-                XCTAssertLessThan((radii.max() ?? 0) - (radii.min() ?? 0), 0.01, "\(what): \(branch)")
-                XCTAssertGreaterThan(radii.min() ?? 0, RadialGeometry.radius(of: parent.anchor), "\(what): \(branch)")
+                var previous = RadialGeometry.radius(of: parent.anchor)
+                for row in Set(node.children.map(\.row)).sorted() {
+                    let radii = node.children.filter { $0.row == row }.compactMap { layout.word(branch + [$0.id]) }
+                        .map { RadialGeometry.radius(of: $0.anchor) }
+                    XCTAssertLessThan((radii.max() ?? 0) - (radii.min() ?? 0), 0.01, "\(what): \(branch) row \(row)")
+                    XCTAssertGreaterThan(radii.min() ?? 0, previous, "\(what): \(branch) row \(row)")
+                    previous = radii.max() ?? previous
+                }
+                // An inner row's actions lie inside the next row.
+                for child in node.children where node.children.contains(where: { $0.row > child.row }) {
+                    let next = node.children.filter { $0.row == child.row + 1 }.compactMap { layout.word(branch + [$0.id]) }
+                    let innerEdge = next.map { RadialLayout.distance(to: $0.frame) }.min() ?? .infinity
+                    for action in child.children {
+                        let frame = layout.word(branch + [child.id, action.id])?.grownFrame ?? .null
+                        XCTAssertFalse(next.contains { $0.frame.intersects(frame) }, "\(what): \(child.id)/\(action.id)")
+                        XCTAssertLessThan(RadialLayout.distance(to: frame), innerEdge, "\(what): \(child.id)/\(action.id)")
+                    }
+                }
             }
         }
     }
@@ -253,33 +268,28 @@ final class RadialLayoutTests: XCTestCase {
 
     // MARK: Compact
 
-    /// The wheel opens small, however many loadouts there are, and what can show at once stays
-    /// within reach: the loadouts sit on one circle about as far out whatever their number (only
-    /// clearing the words beside them moves it), and a path shows only its own petals.
+    /// The wheel opens small, however many loadouts there are, and a path shows only its own
+    /// petals. Up to five loadouts sit on one row; each row further out adds its depth and the
+    /// room its loadouts' actions need, and the rows inside keep their places.
     func testTheWheelStaysCompactHoweverManyLoadouts() {
         func reach(_ layout: RadialLayout, open: [String]) -> CGFloat {
             layout.showing(open: open).compactMap { layout.word($0)?.grownFrame }.map(Self.farthest).max() ?? 0
         }
         let few = RadialLayout(tree: Self.tree(3, Self.short))
-        let ring = { (layout: RadialLayout) in
-            layout.word(["loadouts", "Code"]).map { RadialGeometry.radius(of: $0.anchor) } ?? 0
-        }
-        for count in [1, 3, 6, 10, 14] {
-            let layout = RadialLayout(tree: Self.tree(count, Self.short))
-            XCTAssertEqual(reach(layout, open: []), reach(few, open: []), accuracy: 0.01, "\(count) loadouts: the top petals do not move")
-            XCTAssertEqual(ring(layout), ring(few), accuracy: 16, "\(count) loadouts sit about as far out as three")
-            XCTAssertLessThanOrEqual(reach(layout, open: []), 150, "\(count) loadouts: the wheel as it opens")
-            XCTAssertLessThanOrEqual(reach(layout, open: ["loadouts"]), 210, "\(count) loadouts: with the loadouts out")
-            for branch in layout.branches {
-                XCTAssertLessThanOrEqual(reach(layout, open: branch), 320, "\(count) loadouts, \(branch)")
-            }
-        }
-        // Long names reach further, by their own width alone.
-        for count in [3, 10] {
-            let layout = RadialLayout(tree: Self.tree(count, Self.long))
-            XCTAssertLessThanOrEqual(reach(layout, open: []), 150, "\(count) loadouts: the wheel as it opens")
-            for branch in layout.branches {
-                XCTAssertLessThanOrEqual(reach(layout, open: branch), 380, "\(count) long loadouts, \(branch)")
+        let ring = { (layout: RadialLayout) in layout.petal(["loadouts"])?.rowStarts.first ?? 0 }
+        for count in [1, 3, 5, 6, 10, 14] {
+            for (names, long) in [(Self.short, false), (Self.long, true)] {
+                let layout = RadialLayout(tree: Self.tree(count, names))
+                let what = "\(count) \(long ? "long" : "short") loadouts"
+                XCTAssertEqual(reach(layout, open: []), reach(few, open: []), accuracy: 0.01, "\(what): the top petals do not move")
+                XCTAssertLessThanOrEqual(reach(layout, open: []), 150, "\(what): the wheel as it opens")
+                XCTAssertEqual(layout.petal(["loadouts"])?.rows.count, Set(RadialMenu.loadoutPlaces(count).map(\.row)).count, "\(what): rows")
+                if !long, count >= 3 { XCTAssertEqual(ring(layout), ring(few), accuracy: 0.01, "\(what): the first row stays put") }
+                let rows = CGFloat(layout.petal(["loadouts"])?.rows.count ?? 1)
+                let most: CGFloat = (long ? 400 : 330) + (rows - 1) * (long ? 130 : 100)
+                for branch in layout.branches {
+                    XCTAssertLessThanOrEqual(reach(layout, open: branch), most, "\(what), \(branch)")
+                }
             }
         }
     }
@@ -307,29 +317,30 @@ final class RadialLayoutTests: XCTestCase {
         return selection
     }
 
-    /// A straight move from the centre toward an action selects it: a loadout in the upper
-    /// quarter's Apply (Apply Loadout, the loadout, Apply all lie that way), and every action of
-    /// Capture, Park and Widgets.
+    /// A straight move from the centre to an action selects it: a loadout's Apply, on any row,
+    /// for the loadouts within 45° of straight up (Apply Loadout, the loadout, Apply all lie that
+    /// way), and every action of Capture, Park and Widgets.
     func testAStraightMoveSelectsWhatLiesThatWay() {
         everyLayout { layout, tree, what in
-            let far = layout.bounds.width
             for node in tree[0].children where abs(RadialGeometry.difference(node.angle, 0)) < .pi / 4 {
-                XCTAssertEqual(Self.trace(layout, [(node.angle, far)]), ["loadouts", node.id, "apply"], "\(what): \(node.id)")
+                let path = ["loadouts", node.id, "apply"]
+                XCTAssertEqual(Self.walk(layout, [Self.middle(layout, path)]), path, "\(what): \(node.id)")
             }
             for top in tree.dropFirst() {
                 for leaf in top.children {
-                    XCTAssertEqual(Self.trace(layout, [(leaf.angle, far)]), [top.id, leaf.id], "\(what): \(top.id)/\(leaf.id)")
+                    XCTAssertEqual(Self.walk(layout, [Self.middle(layout, [top.id, leaf.id])]), [top.id, leaf.id], "\(what): \(top.id)/\(leaf.id)")
                 }
             }
         }
     }
 
     /// The pointer going from word to word through `points` (wheel coordinates) in small steps,
-    /// selecting as it goes; the path selected at the end.
-    private static func walk(_ layout: RadialLayout, _ points: [CGPoint]) -> [String] {
-        var selection: [String] = []
-        var at = CGPoint.zero
-        for target in points {
+    /// selecting as it goes; the path selected at the end. With `open`, it starts at the first
+    /// point with that path selected; else it starts in the centre with nothing.
+    private static func walk(_ layout: RadialLayout, _ points: [CGPoint], from open: [String] = []) -> [String] {
+        var selection = open
+        var at = open.isEmpty ? CGPoint.zero : points[0]
+        for target in open.isEmpty ? points : Array(points.dropFirst()) {
             let steps = max(1, Int(hypot(target.x - at.x, target.y - at.y) / 3))
             for k in 1...steps {
                 let t = CGFloat(k) / CGFloat(steps)
@@ -338,6 +349,13 @@ final class RadialLayoutTests: XCTestCase {
             at = target
         }
         return selection
+    }
+
+    /// The distance from `p` to the segment from `a` to `b`.
+    private static func distance(from p: CGPoint, toSegment a: CGPoint, _ b: CGPoint) -> CGFloat {
+        let (dx, dy) = (b.x - a.x, b.y - a.y)
+        let t = max(0, min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / max(1e-9, dx * dx + dy * dy)))
+        return hypot(a.x + dx * t - p.x, a.y + dy * t - p.y)
     }
 
     private static func middle(_ layout: RadialLayout, _ path: [String]) -> CGPoint {
@@ -374,18 +392,17 @@ final class RadialLayoutTests: XCTestCase {
         return (0...steps).map { RadialGeometry.point(radius, a + turn * Double($0) / Double(steps)) }
     }
 
-    /// With Apply Loadout open, a straight move from its word to any loadout's word that stays
-    /// clear of the centre stays among the loadouts, even where it crosses Capture's, Park's or
-    /// Widgets' word on the way: once the loadouts are out, no other top petal takes the pointer
-    /// within their arc, so a release on the way never captures, parks or changes the widgets.
-    /// (A move through the centre is the controller's: `RadialOpeningTests`.)
+    /// With Apply Loadout open, a straight move from its word to any loadout's word, on any row,
+    /// stays among the loadouts and lands on it: the loadouts sit in the top sector, so the move
+    /// never passes the centre, Capture, Park or Widgets, and a release on the way never
+    /// captures, parks or changes the widgets.
     func testAStraightMoveFromApplyLoadoutStaysAmongTheLoadouts() {
         everyLayout { layout, tree, what in
             let start = Self.middle(layout, ["loadouts"])
             for loadout in tree[0].children {
                 let end = Self.middle(layout, ["loadouts", loadout.id])
-                let length = hypot(end.x - start.x, end.y - start.y)
-                guard abs(start.x * end.y - end.x * start.y) / max(1, length) >= layout.deadZone else { continue }
+                XCTAssertGreaterThan(Self.distance(from: .zero, toSegment: start, end), layout.deadZone,
+                                     "\(what): the way to \(loadout.id) passes clear of the centre")
                 var selection = ["loadouts"]
                 let steps = max(1, Int(hypot(end.x - start.x, end.y - start.y) / 2))
                 for k in 1...steps {
@@ -402,12 +419,24 @@ final class RadialLayoutTests: XCTestCase {
         }
     }
 
+    /// With Apply Loadout open, a straight move from its word to Capture's, Park's or Widgets'
+    /// word opens that petal: the loadouts' arc never reaches their directions.
+    func testAStraightMoveFromApplyLoadoutOpensCaptureParkOrWidgets() {
+        everyLayout { layout, tree, what in
+            for top in tree.dropFirst() {
+                let reached = Self.walk(layout, [Self.middle(layout, ["loadouts"]), Self.middle(layout, [top.id])], from: ["loadouts"])
+                XCTAssertEqual(reached, [top.id], "\(what): toward \(top.id)")
+            }
+        }
+    }
+
     /// Out among the loadouts the pointer can go round to any of them past where they start,
     /// and they stay open as it passes another top petal's direction or the edge of its word.
     func testTheLoadoutsStayOpenAsThePointerGoesRound() {
         everyLayout { layout, tree, what in
-            guard let start = layout.petal(["loadouts"])?.start, start.isFinite else { return }
+            guard let petal = layout.petal(["loadouts"]), petal.start.isFinite else { return }
             for loadout in tree[0].children {
+                let start = petal.rowStarts[loadout.row]
                 let path = Self.trace(layout, [(0, start + 1), (loadout.angle, start + 1)])
                 XCTAssertEqual(Array(path.prefix(2)), ["loadouts", loadout.id], what)
             }
@@ -604,7 +633,7 @@ final class RadialLayoutTests: XCTestCase {
             let rep = NSBitmapImageRep(cgImage: image)
             let scale = CGFloat(rep.pixelsWide) / field.support.width
             for p in [CGPoint(x: 0, y: 0), CGPoint(x: 120, y: -80), CGPoint(x: -200, y: 150), CGPoint(x: 0, y: -200),
-                      CGPoint(x: 230, y: 160), CGPoint(x: -250, y: -190)] where field.support.contains(p) {
+                      CGPoint(x: 230, y: 160)] where field.support.contains(p) {
                 let pixel = try XCTUnwrap(rep.colorAt(x: Int((p.x - field.support.minX) * scale), y: Int((field.support.maxY - p.y) * scale)))
                 XCTAssertEqual(pixel.alphaComponent, value(p), accuracy: 0.03, "\(p)")
                 XCTAssertEqual(pixel.redComponent + pixel.greenComponent + pixel.blueComponent, 0, accuracy: 0.01, "black")

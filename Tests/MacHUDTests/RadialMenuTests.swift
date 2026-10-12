@@ -51,23 +51,33 @@ final class RadialTreeTests: XCTestCase {
         XCTAssertEqual(without.map { degrees($0.angle) }, [0, 90, 180])
     }
 
-    /// The loadouts unfold around Apply Loadout's direction: the first straight on, then
-    /// alternately clockwise and anticlockwise. A loadout added at the end moves none of the
-    /// others, so each is always in the same direction.
-    func testLoadoutsKeepTheirDirectionsAsMoreAreAdded() {
+    /// The loadouts unfold in the top sector, between Widgets and Capture and well clear of their
+    /// directions: the first straight up, then alternately clockwise and anticlockwise. A row
+    /// holds five (straight up, 30° and 60° each side); the next row, further out, four between
+    /// them (15° and 45° each side); then five again, and so on. A loadout added at the end moves
+    /// none of the others, so each is always in the same direction on the same row.
+    func testLoadoutsStayInTheTopSectorInRowsAndKeepTheirPlaces() {
         let three = Self.tree(["Code", "Mail", "Focus"])[0].children
-        XCTAssertEqual(three.map { degrees($0.angle) }, [0, 36, 324])
-        for count in 1...RadialMenu.loadoutsAround {
+        XCTAssertEqual(three.map { degrees($0.angle) }, [0, 30, 330])
+        XCTAssertEqual(three.map(\.row), [0, 0, 0])
+        let fourteen = Self.tree((0..<14).map { "L\($0)" })[0].children
+        XCTAssertEqual(fourteen.map(\.row), [0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2])
+        XCTAssertEqual(fourteen.map { degrees($0.angle) }, [0, 30, 330, 60, 300, 15, 345, 45, 315, 0, 30, 330, 60, 300])
+        for count in 1...20 {
             let names = (0..<count).map { "L\($0)" }
-            let angles = Self.tree(names)[0].children.map(\.angle)
-            let fewer = Self.tree(Array(names.dropLast()))[0].children.map(\.angle)
-            XCTAssertEqual(Array(angles.prefix(fewer.count)), fewer, "\(count) loadouts")
-            XCTAssertEqual(Set(angles.map(degrees)).count, count, "no two share a direction")
+            let loadouts = Self.tree(names)[0].children
+            let fewer = Self.tree(Array(names.dropLast()))[0].children
+            XCTAssertEqual(Array(loadouts.prefix(fewer.count)).map(\.angle), fewer.map(\.angle), "\(count) loadouts")
+            XCTAssertEqual(Array(loadouts.prefix(fewer.count)).map(\.row), fewer.map(\.row), "\(count) loadouts")
+            for loadout in loadouts {
+                XCTAssertLessThanOrEqual(abs(RadialGeometry.difference(loadout.angle, 0)), RadialMenu.loadoutSector + 1e-9,
+                                         "\(count) loadouts: \(loadout.id) stays in the top sector")
+            }
+            let places = loadouts.map { "\($0.row) \(degrees($0.angle))" }
+            XCTAssertEqual(Set(places).count, count, "no two share a row and a direction")
         }
-        // Past ten they share the whole circle, still none sharing a direction.
-        let many = Self.tree((0..<14).map { "L\($0)" })[0].children.map { degrees($0.angle) }
-        XCTAssertEqual(Set(many).count, 14)
-        XCTAssertEqual(many.first, 0)
+        XCTAssertLessThanOrEqual(RadialMenu.loadoutSector + RadialMenu.loadoutStep / 2, .pi / 2 - .pi / 12 + 1e-9,
+                                 "the loadouts' arc stays at least 15° from Capture's and Widgets' directions")
     }
 
     /// A loadout's actions: Preview, Apply straight on, Clear + Apply; each says what releasing
@@ -216,10 +226,12 @@ final class RadialTreeTests: XCTestCase {
         XCTAssertEqual(top.map { $0["kind"] as? String }, ["loadouts", "capture", "park", "widgets"])
         XCTAssertEqual(top.map { $0["digit"] as? Int }, [1, 2, 3, 4])
         XCTAssertEqual(top[1]["angle"] as? Double ?? 0, .pi / 2, accuracy: 1e-9)
+        XCTAssertNil(top[1]["row"], "only loadouts sit in rows")
         XCTAssertEqual(top[0]["hint"] as? String, "Move out to a loadout")
         let loadouts = try XCTUnwrap(top[0]["children"] as? [[String: Any]])
         XCTAssertEqual(loadouts.map { $0["path"] as? String }, ["loadouts/Morning research and writing", "loadouts/dev/web"])
         XCTAssertEqual(loadouts.map { $0["kind"] as? String }, ["loadout", "loadout"])
+        XCTAssertEqual(loadouts.map { $0["row"] as? Int }, [1, 1], "rows count from 1, the innermost")
         let actions = try XCTUnwrap(loadouts[1]["children"] as? [[String: Any]])
         XCTAssertEqual(actions.map { $0["path"] as? String }, ["loadouts/dev/web/preview", "loadouts/dev/web/apply", "loadouts/dev/web/clear"])
         XCTAssertEqual(actions.map { $0["action"] as? String }, ["preview", "apply", "clearAndApply"])

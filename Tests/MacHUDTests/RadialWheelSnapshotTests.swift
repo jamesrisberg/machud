@@ -76,18 +76,21 @@ final class RadialWheelSnapshotTests: XCTestCase {
         }
         out.append(Shot(name: "stage-3-loadout-03-colourful", tree: three, selection: ["loadouts", "Code"], desktop: .colourful))
 
-        // Many loadouts, and long names.
-        let ten = Self.tree(Self.short, loadouts: 10)
-        out.append(Shot(name: "loadouts-10-bright", tree: ten, selection: ["loadouts"], desktop: .bright))
-        out.append(Shot(name: "loadouts-10-side-clear-dark", tree: ten, selection: ["loadouts", "Music", "clear"], desktop: .dark))
-        out.append(Shot(name: "loadouts-10-bottom-preview-colourful", tree: ten, selection: ["loadouts", "Plan", "preview"],
-                        desktop: .colourful))
+        // More loadouts: up to five on the first row, the rest on rows further out, all in the
+        // top sector; and long names.
+        let six = Self.tree(Self.short, loadouts: 6), ten = Self.tree(Self.short, loadouts: 10)
+        let fourteen = Self.tree(Self.short, loadouts: 14)
+        out.append(Shot(name: "loadouts-03-open-dark", tree: three, selection: ["loadouts"], desktop: .dark))
+        out.append(Shot(name: "loadouts-06-open-bright", tree: six, selection: ["loadouts"], desktop: .bright))
+        out.append(Shot(name: "loadouts-10-open-dark", tree: ten, selection: ["loadouts"], desktop: .dark))
+        out.append(Shot(name: "loadouts-14-open-colourful", tree: fourteen, selection: ["loadouts"], desktop: .colourful))
+        out.append(Shot(name: "loadouts-10-outer-row-actions-bright", tree: ten, selection: ["loadouts", "Chat", "apply"],
+                        desktop: .bright))
+        out.append(Shot(name: "loadouts-10-inner-row-actions-dark", tree: ten, selection: ["loadouts", "Focus", "clear"], desktop: .dark))
         let long = Self.tree(Self.long, loadouts: 6)
         out.append(Shot(name: "loadouts-06-long-dark", tree: long, selection: ["loadouts"], desktop: .dark))
         out.append(Shot(name: "loadouts-06-long-apply-bright", tree: long, selection: ["loadouts", "dev: Browsers", "apply"],
                         desktop: .bright))
-        out.append(Shot(name: "loadouts-14-colourful", tree: Self.tree(Self.short, loadouts: 14), selection: ["loadouts"],
-                        desktop: .colourful))
 
         // Capture (with All screens), Park with a long title, Widgets while revealed.
         out.append(Shot(name: "capture-all-screens-dark", tree: Self.tree(Self.short, loadouts: 3, allScreens: true),
