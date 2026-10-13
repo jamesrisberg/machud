@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-13T20:12:05Z",
+  "updatedAt": "2026-10-13T20:13:10Z",
   "hudkit": "0.4.0",
   "apps": [
     {
@@ -97,6 +97,22 @@
       "publishedAt": "2026-10-13T20:10:46Z",
       "icon": "https://jamesrisberg.github.io/machud/icons/stash.png",
       "homepage": "https://github.com/jamesrisberg/stash",
+      "bundled": true
+    },
+    {
+      "id": "xyz.machud.usagehud",
+      "repo": "usagehud",
+      "name": "UsageHUD",
+      "kind": "hover",
+      "summary": "Claude and Codex subscription usage as a hover panel",
+      "version": "0.1.0",
+      "minOS": "14.0",
+      "download": "https://github.com/jamesrisberg/usagehud/releases/download/v0.1.0/UsageHUD-0.1.0.zip",
+      "sha256": "42b52751001ea78a4f37e1e80dc6f8bcd5e6373b0c96da59050a5345647f2eb4",
+      "size": 2233913,
+      "publishedAt": "2026-10-13T20:13:10Z",
+      "icon": "https://jamesrisberg.github.io/machud/icons/usagehud.png",
+      "homepage": "https://github.com/jamesrisberg/usagehud",
       "bundled": true
     },
     {
