@@ -110,20 +110,25 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - Digits pick among the petals showing (the top petals, then the loadouts, then a loadout's
   actions), and **P** still previews the highlighted loadout. ⇧ no longer jumps to Clear + Apply:
   it sits beside Apply, or press 3 once a loadout is open.
-- The wheel's words are upright on one soft, dark blur that fades out at its edge rather than
-  ending in a line, and the blur grows with the petals that unfold. The wheel is dark in light
-  mode too, so its white words stay readable. A loadout's name sits on one line in its place,
-  shrinking to fit; a long one ends in an ellipsis after a whole word, and the line under the
-  wheel says it in full. Its apps' icons show however many loadouts you have.
-- Over the wheel, the petal under the pointer grows and glows, the others beside it fade back,
+- Every word on the wheel sits in its own glass bubble, the same frosted glass as the search bar
+  and the rest of MacHUD, dark enough that its white words read over a light desktop as well as a
+  dark one (and dark in light mode too). Bubbles pop out with a little spring as they appear: the
+  centre and the four petals as the wheel opens, then whatever unfolds, outward, one ring after
+  another; they shrink away quickly when you move off. With Reduce motion on they only fade. None
+  of this holds you up: the wheel follows the pointer, and letting go acts, at once.
+- A loadout's name sits on one line in its place, shrinking to fit; a long one ends in an
+  ellipsis after a whole word, and the line under the wheel says it in full. Its apps' icons show
+  however many loadouts you have.
+- Over the wheel, the petal under the pointer grows and its bubble takes on your accent colour,
+  the petals on the way to it stay tinted, the words beside it step back,
   and letting go does what that action said, even if the widgets changed while the wheel was
   open. The line under the wheel says what letting go does ("Apply Code", "Park Safari · Docs",
   "Focus a window to park", "Finish editing widgets"), or where to go on from a petal with more
   beyond it ("Move out to a loadout"); a very long window title ends in an ellipsis. The Park
   hint names the window letting go would park, even after a click under the wheel changed the focus.
 - Nothing lights until you move the pointer from the wheel's centre, so pressing and letting go
-  without moving cancels. With Reduce transparency on, the wheel's blur gives way to a plain dark
-  disc.
+  without moving cancels. With Reduce transparency on, the bubbles are solid and dark. The
+  centre is a small disc with Esc (Cancel while nothing is lit) and the petals' digits.
 - The setup guide's radial menu step teaches the new path: hold, onto Apply Loadout, on to your
   loadout, on to Apply, let go.
 - For scripts, `machud menu` and `machud radial` describe the wheel as a tree: `tree[]` of
