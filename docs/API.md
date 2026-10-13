@@ -288,7 +288,8 @@ magickHUD and serversHUD, not MacHUD panels.
 ## Search bar
 
 A keyboard-first bar for launching apps, finding files, inserting snippets and applying
-loadouts. It opens centred on the screen with the pointer, with its field focused, without
+loadouts. A quick tap of the wheel's hotkey (`hotkeys.loadoutMenu`, within
+`hotkeys.tapMilliseconds`) opens it, as does `search show`. It opens centred on the screen with the pointer, with its field focused, without
 making MacHUD the active app (the app you were in stays frontmost), and closes on Esc, when it
 loses the keyboard, and before a row runs.
 
@@ -409,7 +410,7 @@ MacHUD also serves the HUDKit contract every MacHUD-aware app implements (see HU
 | `hello` | | `hudkit` version, `app`, `name`, `panels[] {id, title, symbol, ...}`, `verbs` |
 | `state` | | `panels[] {id, visible, mode, badge?, status?}`, sibling panels included |
 | `subscribe` | `events=state` (optional) | keeps the connection open and pushes `{"event": "state", "panels": [...]}` lines whenever a panel changes: through the socket, a hotkey, the menu, its close button, or a sibling app's own push |
-| `settings` | `get [key=]` / `set k=v ...` / `schema` | MacHUD's own settings: `enabled` (bool), `trigger` (shift/option/control/command/always), `gap` (int), `browser` (bundle id, empty = default), `orbsHidden` (bool), `toolDock.enabled`, `toolDock.position`, `toolDock.autoHide`, `toolDock.iconSize` (int, 24 to 96), `toolDock.magnify`, `hotkeys.loadoutMenu` and `hotkeys.dock` (`control+option+space` form, empty = off), `hotkeys.tapMilliseconds` (int, 50 to 1000, default 200: the wheel's hotkey let go within this time is a tap and the wheel does not show), `menuBar.enabled` (bool), `menuBar.autoCollapseSeconds` (int, 0 = never), `menuBar.consumeSiblings` (bool, default true), `experimental.multiDesktopLoadouts` (bool, default false; see [Multi-desktop loadouts (experimental)](#multi-desktop-loadouts-experimental)). `set` validates every value first; `schema` returns the `HUDSettingsSchema` the settings window renders |
+| `settings` | `get [key=]` / `set k=v ...` / `schema` | MacHUD's own settings: `enabled` (bool), `trigger` (shift/option/control/command/always), `gap` (int), `browser` (bundle id, empty = default), `orbsHidden` (bool), `toolDock.enabled`, `toolDock.position`, `toolDock.autoHide`, `toolDock.iconSize` (int, 24 to 96), `toolDock.magnify`, `hotkeys.loadoutMenu` and `hotkeys.dock` (`control+option+space` form, empty = off), `hotkeys.tapMilliseconds` (int, 50 to 1000, default 200: the wheel's hotkey let go within this time is a tap: the wheel does not show and the search bar opens), `menuBar.enabled` (bool), `menuBar.autoCollapseSeconds` (int, 0 = never), `menuBar.consumeSiblings` (bool, default true), `experimental.multiDesktopLoadouts` (bool, default false; see [Multi-desktop loadouts (experimental)](#multi-desktop-loadouts-experimental)). `set` validates every value first; `schema` returns the `HUDSettingsSchema` the settings window renders |
 | `action` | `name=` | no app-specific actions yet |
 
 

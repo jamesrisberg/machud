@@ -26,7 +26,7 @@ apps that make up the rest of the HUD:
 - **Tool dock**: a Dock-like strip of the sibling apps (**⌃⌥D**).
 - **Search bar**: an Alfred-style bar that launches apps (of similar matches, the one you launch
   most first), opens files Spotlight finds, applies or previews loadouts by name and inserts
-  Stash's snippets, all from the keyboard. `machud search show` opens it
+  Stash's snippets, all from the keyboard. A quick tap of **⌃⌥Space** opens it, as does `machud search show`
   ([docs/API.md#search-bar](docs/API.md#search-bar)).
 - **Widgets**: glass tiles on the desktop that any sibling can serve (widgetHUD's clock, weather
   sessions), placed on a grid, under your windows until **⌃⌥W** raises them.
@@ -81,7 +81,7 @@ permissions request=1` shows every missing prompt (Accessibility and Automation)
 | --- | --- |
 | Shift while dragging a window | Snap it into the region under the cursor |
 | Tab / Esc mid-drag | Next layout / cancel the snap |
-| ⌃⌥Space (hold) | Radial wheel, in the middle of the screen with the pointer moved to its centre: four petals, Apply Loadout (up), Capture (right: this screen, or draw a new layout), Park (down: park the front window / restore parked) and, when an app serves widgets, Widgets (left: reveal / edit). Moving onto a petal unfolds what lies beyond it: Apply Loadout your loadouts, a loadout its Preview / Apply (straight on) / Clear + Apply. Your loadouts fan out above Apply Loadout, between Widgets and Capture, five to a row (more go on rows further out), so Capture, Park and Widgets stay in reach. Let go on an action to do it; anywhere else, or Esc, cancels; back in the centre starts over. Digits pick among the petals showing, **P** previews the highlighted loadout. A quick tap (under 200 ms, a setting) does not open it. The hotkey is a setting |
+| ⌃⌥Space (hold) | Radial wheel, in the middle of the screen with the pointer moved to its centre: four petals, Apply Loadout (up), Capture (right: this screen, or draw a new layout), Park (down: park the front window / restore parked) and, when an app serves widgets, Widgets (left: reveal / edit). Moving onto a petal unfolds what lies beyond it: Apply Loadout your loadouts, a loadout its Preview / Apply (straight on) / Clear + Apply. Your loadouts fan out above Apply Loadout, between Widgets and Capture, five to a row (more go on rows further out), so Capture, Park and Widgets stay in reach. Let go on an action to do it; anywhere else, or Esc, cancels; back in the centre starts over. Digits pick among the petals showing, **P** previews the highlighted loadout. A quick tap (under 200 ms, a setting) opens the search bar instead. The hotkey is a setting |
 | ⌃⌥D | Show / hide the tool dock |
 | ⌃⌥W | Raise the desktop widgets above your windows; again or Esc lowers them |
 | ⌃⌥B | Collapse / expand the menu bar (when menu bar management is on) |

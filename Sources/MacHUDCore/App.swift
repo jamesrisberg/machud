@@ -356,10 +356,12 @@ extension AppDelegate {
     }
 
     /// The search bar (`search.bar.show(query:)`, `search.bar.hide()`) and the `search` verb;
-    /// its loadout rows apply and preview through the loadout menu.
+    /// its loadout rows apply and preview through the loadout menu, and a tap of the wheel's
+    /// hotkey opens it.
     fileprivate func installSearch(_ menu: LoadoutMenu) {
         search = SearchServices(store: store, menu: menu, externals: externals)
         search.registerControl(control)
+        menu.onTap = { [weak search] in search?.bar.show() }
     }
 
     /// The app catalog, the installer (`catalog`, `apps install`) and the Apps tab.

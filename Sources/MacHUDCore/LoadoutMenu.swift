@@ -22,7 +22,7 @@ final class LoadoutMenu {
     /// calls `onTap`.
     let summon: TapOrHold
     /// A tap of the wheel's hotkey (`hotkeys.loadoutMenu`): released within
-    /// `hotkeys.tapMilliseconds`, before the wheel shows. Does nothing until the app sets it.
+    /// `hotkeys.tapMilliseconds`, before the wheel shows. The app opens the search bar on it.
     var onTap: () -> Void = {}
     private var hotkeyIDs: [UInt32] = []
     private var registered: (menu: HotKey?, loadouts: [String: HotKey])?

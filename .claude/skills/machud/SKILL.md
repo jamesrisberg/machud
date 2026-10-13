@@ -193,7 +193,7 @@ machud orb show|hide                      # orbs are hidden while the tool dock 
   `machud panel id=tooldock action=toggle`; `panel mode id=… mode=parked edge=left`.
   The socket's `subscribe` command (not the CLI) streams `state` events.
 - Wheel (⌃⌥Space held, setting `hotkeys.loadoutMenu`; a tap within `hotkeys.tapMilliseconds`
-  does not show it): `machud radial action=show|select|commit|cancel|hide path=<path>`, e.g.
+  opens the search bar instead): `machud radial action=show|select|commit|cancel|hide path=<path>`, e.g.
   `path=loadouts/Work/apply`; `machud menu` describes the wheel as a tree (`tree[]`, each node's
   `path`, `kind`, `hint` and `children` or `action`): Apply Loadout holds the loadouts, each with
   Preview / Apply / Clear + Apply; Capture: This screen / Draw layout, with All screens between

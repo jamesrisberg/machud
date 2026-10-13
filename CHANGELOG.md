@@ -52,7 +52,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   counts from Alfred, only reading them. Return runs
   the selected row, ⌘1–⌘9 run the first nine; on a loadout ⌥Return previews it and ⇧Return clears
   the screen first; on a file or app ⌘Return reveals it in Finder. A snippet is pasted into the
-  app you were in. Esc or clicking away closes the bar. Open it with `machud search show`; scripts
+  app you were in. Esc or clicking away closes the bar. Open it with a quick tap of ⌃⌥Space (held,
+  the same key opens the loadout wheel) or `machud search show`; scripts
   can ask for results with `machud search query text=<words>`.
 
 ### Changed
@@ -103,8 +104,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   a new row of loadouts moves it down only as far as that row needs the room (and on a small
   screen a little sideways), and since the pointer starts at its centre, every move still means
   the same thing. Only the path you are on is drawn.
-- A quick tap of ⌃⌥Space no longer flashes the wheel: let go within 200 ms and the wheel does not
-  show. Held longer, it fades in. The time is a setting (**Radial menu tap**, or
+- A quick tap of ⌃⌥Space opens the search bar instead of flashing the wheel: let go within 200 ms
+  and the wheel does not show. Held longer, it fades in. The time is a setting (**Radial menu tap**, or
   `machud settings set hotkeys.tapMilliseconds=250`), and your hotkey is kept as it was.
 - Digits pick among the petals showing (the top petals, then the loadouts, then a loadout's
   actions), and **P** still previews the highlighted loadout. ⇧ no longer jumps to Clear + Apply:

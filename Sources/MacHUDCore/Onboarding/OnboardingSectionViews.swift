@@ -476,7 +476,7 @@ struct RadialStep: View {
                 action("Preview", "Draws where each window would go first.")
                 action("Apply", "Straight on: apply the loadout.")
                 action("Clear + Apply", "Clear this screen, then apply.")
-                Text("Letting go anywhere but on an action, or in the centre, cancels. A quick tap of the key does not open the wheel. \(model.wheelOffersWidgets ? "Capture, Park and Widgets" : "Capture and Park") are on the wheel too.")
+                Text("Letting go anywhere but on an action, or in the centre, cancels. A quick tap of the key opens the search bar instead. \(model.wheelOffersWidgets ? "Capture, Park and Widgets" : "Capture and Park") are on the wheel too.")
                     .font(.system(size: 11)).foregroundStyle(OnboardingStyle.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
