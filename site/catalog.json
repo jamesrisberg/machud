@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-13T20:18:46Z",
+  "updatedAt": "2026-10-13T20:19:48Z",
   "hudkit": "0.4.0",
   "apps": [
     {
@@ -146,12 +146,12 @@
       "name": "widgetHUD",
       "kind": "widget",
       "summary": "A clock, the weather and your calendar.",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "minOS": "14.0",
-      "download": "https://github.com/jamesrisberg/widgethud/releases/download/v0.3.0/widgetHUD-0.3.0.zip",
-      "sha256": "ee50981dc1aafd73dc545842c75e79908aa04691eb3e6bfa166c70737ebaa41a",
-      "size": 2070497,
-      "publishedAt": "2026-10-02T04:44:58Z",
+      "download": "https://github.com/jamesrisberg/widgethud/releases/download/v0.3.1/widgetHUD-0.3.1.zip",
+      "sha256": "e9f35926997987d338de55366b83b51a1e1ad4fa9d89351c7f69808865128dae",
+      "size": 2228823,
+      "publishedAt": "2026-10-13T20:19:48Z",
       "icon": "https://jamesrisberg.github.io/machud/icons/widgethud.png",
       "homepage": "https://github.com/jamesrisberg/widgethud",
       "bundled": false
