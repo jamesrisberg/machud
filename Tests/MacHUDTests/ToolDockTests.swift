@@ -163,10 +163,37 @@ final class ToolDockLayoutTests: XCTestCase {
         let l = l44(.bottom)
         let dock = l.place(groups: [3, 0], visible: visible).frame
         XCTAssertEqual(l.hiddenFrame(dock, screen: screen).maxY, 1, "one point left showing")
-        XCTAssertEqual(l.revealZone(dock, screen: screen), CGRect(x: dock.minX, y: 0, width: dock.width, height: 4))
+        XCTAssertEqual(l.revealZones(dock, screen: screen), [CGRect(x: dock.minX, y: -4, width: dock.width, height: 8)])
         let corner = l44(.topLeft)
         let lFrame = corner.place(groups: [3, 2], visible: visible).frame
         XCTAssertEqual(corner.hiddenFrame(lFrame, screen: screen).minY, 1079, "a top corner hides past the top")
+    }
+
+    /// The pointer pushed against a screen edge sits on the edge itself (y is the screen's
+    /// maxY at the top, x its maxX at the right): that point brings the dock back, and a
+    /// corner dock comes back from either of its edges, along its span there.
+    func testAutoHideRevealsFromThePointerPushedAgainstEitherEdge() {
+        let screen = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        for position in [HUDDockPosition.top, .bottom, .left, .right, .topLeft, .topRight, .bottomLeft, .bottomRight] {
+            let l = l44(position)
+            let dock = l.place(groups: [3, 2], visible: visible).frame
+            let zones = l.revealZones(dock, screen: screen)
+            func reveals(_ p: CGPoint) -> Bool { zones.contains { $0.contains(p) } }
+            for edge in position.edges {
+                let p: CGPoint
+                switch edge {
+                case .top: p = CGPoint(x: dock.midX, y: screen.maxY)
+                case .bottom: p = CGPoint(x: dock.midX, y: screen.minY)
+                case .left: p = CGPoint(x: screen.minX, y: dock.midY)
+                case .right: p = CGPoint(x: screen.maxX, y: dock.midY)
+                }
+                XCTAssertTrue(reveals(p), "\(position): pushed against the \(edge) edge at \(p)")
+            }
+            XCTAssertFalse(reveals(CGPoint(x: screen.midX, y: screen.midY)), "\(position): not from the middle")
+            let away = CGPoint(x: dock.minX > screen.midX ? screen.minX + 2 : screen.maxX - 2,
+                               y: dock.minY > screen.midY ? screen.minY + 2 : screen.maxY - 2)
+            XCTAssertFalse(reveals(away), "\(position): not from the opposite corner")
+        }
     }
 }
 

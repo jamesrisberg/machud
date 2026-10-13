@@ -91,14 +91,18 @@ struct ToolDockLayout: Equatable {
         HUDParking.offScreenFrame(for: dock, edge: hideEdge, peek: Self.hiddenPeek, in: screen)
     }
 
-    /// The strip along the screen edge that brings an auto-hidden dock back: the dock's
-    /// span, a few points deep.
-    func revealZone(_ dock: CGRect, screen: CGRect, depth: CGFloat = 4) -> CGRect {
-        switch hideEdge {
-        case .bottom: return CGRect(x: dock.minX, y: screen.minY, width: dock.width, height: depth)
-        case .top: return CGRect(x: dock.minX, y: screen.maxY - depth, width: dock.width, height: depth)
-        case .left: return CGRect(x: screen.minX, y: dock.minY, width: depth, height: dock.height)
-        case .right: return CGRect(x: screen.maxX - depth, y: dock.minY, width: depth, height: dock.height)
+    /// The strips along the screen edges that bring an auto-hidden dock back: one along each
+    /// edge the dock sits against (both arms of a corner dock), over the dock's span there,
+    /// `depth` deep on each side of the edge. A pointer pushed against an edge sits on the
+    /// edge itself (at the top, y is the screen's maxY), so the strip straddles it.
+    func revealZones(_ dock: CGRect, screen: CGRect, depth: CGFloat = 4) -> [CGRect] {
+        position.edges.map { edge in
+            switch edge {
+            case .bottom: return CGRect(x: dock.minX, y: screen.minY - depth, width: dock.width, height: 2 * depth)
+            case .top: return CGRect(x: dock.minX, y: screen.maxY - depth, width: dock.width, height: 2 * depth)
+            case .left: return CGRect(x: screen.minX - depth, y: dock.minY, width: 2 * depth, height: dock.height)
+            case .right: return CGRect(x: screen.maxX - depth, y: dock.minY, width: 2 * depth, height: dock.height)
+            }
         }
     }
 
