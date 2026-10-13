@@ -309,7 +309,8 @@ final class RadialLayoutTests: XCTestCase {
     /// screen is chosen for the screen alone (fitting `RadialLayout.fittedRows` full rows, Widgets
     /// and All screens included), never for how many loadouts there are, so up to that many rows
     /// every loadout keeps its direction, row and distance. The wheel opens at the same place while
-    /// the loadouts fill the rows they are on, and moves only down, as a new row needs the room.
+    /// the loadouts fill the rows they are on, and moves only down (and a little sideways on a
+    /// narrow screen), as a new row needs the room.
     func testAddingALoadoutMovesNoneOfTheOthersOnALaptopScreen() {
         let most = RadialMenu.loadoutPlaces(1000).filter { $0.row < RadialLayout.fittedRows }.count
         XCTAssertGreaterThanOrEqual(most, 14, "room for at least three rows")
@@ -783,22 +784,27 @@ final class RadialLayoutTests: XCTestCase {
 
     /// The wheel never outgrows the screen it opens on: on a 1024 by 640 display (a 13-inch at
     /// Larger Text, less the menu bar) or with a Dock at the bottom, with many loadouts and long
-    /// names, every word that can show and the hint are on screen, the wheel in the middle of it.
-    /// Its size is the screen's: full size where the fitted rows fit at full size.
+    /// names, every word that can show and the hint are on screen, inside the margin, the wheel in
+    /// the middle of it. Its size is the screen's: full size where the fitted rows fit at full size,
+    /// and smaller from the first loadout past the fitted rows.
     func testTheWheelFitsTheScreenItOpensOn() {
         let screens = [CGRect(x: 0, y: 0, width: 1024, height: 616), CGRect(x: 0, y: 70, width: 1024, height: 546),
                        CGRect(x: 1024, y: -200, width: 1440, height: 875), CGRect(x: 0, y: 0, width: 1424, height: 851)]
         for visible in screens {
             let most = RadialMenu.loadoutPlaces(1000).filter { $0.row < RadialLayout.fittedRows }.count
-            for count in [0, 3, 10, most, most + 5] {
+            let margin = RadialMenu.screenMargin - 0.5  // the centre is rounded to whole points
+            for count in [0, 1, 3, 5, 6, 9, 10, 14, 15, most, most + 1, most + 5] {
                 let placed = RadialMenu.place(tree: Self.tree(count, Self.long, allScreens: true), visibleFrame: visible)
                 XCTAssertLessThanOrEqual(placed.layout.scale, 1)
                 let words = placed.layout.bounds.offsetBy(dx: placed.center.x, dy: placed.center.y)
-                XCTAssertTrue(visible.insetBy(dx: 1, dy: 1).contains(words), "\(count) loadouts in \(visible): \(words)")
+                XCTAssertTrue(visible.insetBy(dx: margin, dy: margin).contains(words), "\(count) loadouts in \(visible): \(words)")
                 let middle = CGPoint(x: visible.midX, y: visible.midY)
                 XCTAssertLessThan(hypot(placed.center.x - middle.x, placed.center.y - middle.y), visible.height / 3,
                                   "\(count) loadouts: near the middle of the screen")
             }
+            let full = RadialMenu.place(tree: Self.tree(most, Self.long), visibleFrame: visible).layout.scale
+            let past = RadialMenu.place(tree: Self.tree(most + 1, Self.long), visibleFrame: visible).layout.scale
+            XCTAssertLessThan(past, full, "\(visible): a loadout past the fitted rows draws the wheel smaller")
         }
         let roomy = RadialMenu.place(tree: Self.tree(8, Self.long), visibleFrame: CGRect(x: 0, y: 0, width: 1800, height: 1100))
         XCTAssertEqual(roomy.layout.scale, 1, "full size where it fits")

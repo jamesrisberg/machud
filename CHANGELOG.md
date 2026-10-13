@@ -89,9 +89,10 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   not in direction, not to another row and not nearer or further out. The wheel's size is chosen
   for each screen (smaller on a laptop's), never for how many loadouts you have, so on every
   screen the loadouts stay put as you add them, up to 18; a 19th starts a fifth row and the
-  wheel is drawn a little smaller. With up to five loadouts the wheel sits dead centre; a new row
-  of loadouts moves it down only as far as that row needs the room, and since the pointer starts
-  at its centre, every move still means the same thing. Only the path you are on is drawn.
+  wheel is drawn a little smaller. With up to five loadouts the wheel sits dead centre; up to 18,
+  a new row of loadouts moves it down only as far as that row needs the room (and on a small
+  screen a little sideways), and since the pointer starts at its centre, every move still means
+  the same thing. Only the path you are on is drawn.
 - A quick tap of ⌃⌥Space no longer flashes the wheel: let go within 200 ms and the wheel does not
   show. Held longer, it fades in. The time is a setting (**Radial menu tap**, or
   `machud settings set hotkeys.tapMilliseconds=250`), and your hotkey is kept as it was.

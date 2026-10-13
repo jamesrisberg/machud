@@ -471,8 +471,9 @@ struct RadialLayout: Equatable {
     /// screens included, at that size. It depends on the screen and the rows alone.
     static func fitting(_ tree: [RadialNode], in room: CGSize) -> (layout: RadialLayout, extent: CGRect) {
         let rows = tree.first { $0.kind == .loadouts }.map { Set($0.children.map(\.row)).count } ?? 0
-        let scale = screenFit(in: room, rows: max(rows, fittedRows)).scale
-        return (RadialLayout(tree: tree, scale: scale), RadialLayout(tree: fullRows(rows), scale: scale).bounds)
+        let fit = screenFit(in: room, rows: max(rows, fittedRows))
+        let extent = rows >= fittedRows ? fit.extent : RadialLayout(tree: fullRows(rows), scale: fit.scale).bounds
+        return (RadialLayout(tree: tree, scale: fit.scale), extent)
     }
 
     /// The wheel's size on a screen with `room`: full size, or smaller where a wheel with `rows`

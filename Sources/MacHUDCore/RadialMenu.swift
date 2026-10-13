@@ -483,7 +483,8 @@ final class RadialMenu {
         startAnimation()
     }
 
-    /// Sets the wheel up to open on `display`, in the middle of it, with nothing selected and
+    /// Sets the wheel up to open on `display`, in the middle of it as far as its rows of loadouts
+    /// leave room (`centre(of:in:)`), with nothing selected and
     /// the pointer taken to be at the centre until it moves. When `movesPointer`, the pointer (at
     /// `pointer`) is moved to the wheel's centre, so a gesture means the same direction from the
     /// centre every time; it is not moved back. No window is shown and no event is watched.
@@ -560,7 +561,7 @@ final class RadialMenu {
 
     /// The wheel's layout and centre (screen coordinates) on a screen whose visible frame (less
     /// the menu bar and the Dock) is `visibleFrame`: at the screen's size (`RadialLayout.fitting`),
-    /// in the middle of it.
+    /// in the middle of it as far as its rows of loadouts leave room (`centre(of:in:)`).
     static func place(tree: [RadialNode], visibleFrame: CGRect) -> (layout: RadialLayout, center: CGPoint) {
         let room = visibleFrame.insetBy(dx: screenMargin, dy: screenMargin)
         let fitted = RadialLayout.fitting(tree, in: room.size)
@@ -569,8 +570,9 @@ final class RadialMenu {
 
     /// Where the wheel's centre goes: the middle of `room`, moved only as far as keeps `extent`
     /// (the wheel's, about its centre) inside it. The extent is that of the rows of loadouts in
-    /// use, so the wheel moves, down, only when a new row needs the room; an extent too big for
-    /// `room` is centred on it.
+    /// use, so up to `RadialLayout.fittedRows` rows the wheel moves only when a new row needs
+    /// the room: down, and a little sideways where the rows fill the screen's width. An extent
+    /// too big for `room` is centred on it.
     static func centre(of extent: CGRect, in room: CGRect) -> CGPoint {
         func axis(_ low: CGFloat, _ high: CGFloat, _ near: CGFloat, _ far: CGFloat) -> CGFloat {
             guard far - near <= high - low else { return (low + high - near - far) / 2 }
