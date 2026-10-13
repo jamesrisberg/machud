@@ -30,6 +30,15 @@ enum RadialGlass {
     static let glassTint: CGFloat = 0.2
     static let borderAlpha: CGFloat = 0.28
     static let litBorderAlpha: CGFloat = 0.55
+    /// A stem's core, white, at rest and on the path; under it a dark casing, so it reads over a
+    /// light desktop too.
+    static let stemAlpha: CGFloat = 0.6
+    static let litStemAlpha: CGFloat = 0.95
+    static let casingAlpha: CGFloat = 0.3
+    /// The core's and the casing's widths, at full size.
+    static let stemWidth: CGFloat = 1.3
+    static let casingWidth: CGFloat = 3.2
+
     /// The words' opacity at rest (on the path and highlighted they are at full strength).
     static let restText: Float = 0.9
     /// The words' opacity beside the petal on the path, and once the path has gone on past
@@ -92,6 +101,12 @@ enum RadialMotion {
     static let vanishDuration: TimeInterval = 0.12
     /// A change of highlight: the tint, the words and a petal's grow.
     static let restyle: TimeInterval = 0.14
+    /// A stem growing out from its branch as the branch opens; its leaf pops out once the stem
+    /// is this far along (`tip`).
+    static let unfurl: TimeInterval = 0.18
+    static let tip = 0.7
+    /// A stem drawing back as its branch closes.
+    static let retract: TimeInterval = 0.1
     /// The spring: a little under-damped, settled within `bloomDuration`.
     static let stiffness = 680.0
     static let damping = 0.6
@@ -379,6 +394,169 @@ final class RadialLayerView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
+// MARK: - A stem
+
+/// The stem from a branch's bubble to one of its leaves' (an action's): a curve from the middle of
+/// the branch's edge that faces the leaf to the middle of the leaf's near edge, leaving and
+/// arriving square to them; or, for leaves stacked in a column past the branch's top or bottom
+/// edge, from that edge up a trunk beside the column (`trunk`, an x) and into the leaf's side
+/// facing it, so no stem runs behind another leaf. A light core over a dark casing, under the bubbles. It grows out from
+/// the branch (`strokeEnd`) as the branch opens and draws back fast as it closes; with Reduce
+/// motion it fades instead.
+@MainActor
+final class RadialStem {
+    let casing = CAShapeLayer()
+    let core = CAShapeLayer()
+    /// Where it starts and ends, in the wheel view's coordinates.
+    let start: CGPoint
+    let end: CGPoint
+    private(set) var isShowing = false
+    /// On the path to the petal highlighted.
+    private(set) var isLit = false
+    private var generation = 0
+
+    /// The stem from `branch` to `leaf` (bubble frames in the wheel view), on a wheel drawn at `scale`.
+    init(from branch: CGRect, to leaf: CGRect, trunk: CGFloat? = nil, scale s: CGFloat) {
+        let (a, b, c1, c2): (CGPoint, CGPoint, CGPoint, CGPoint)
+        if let trunk {
+            let up = leaf.minY >= branch.maxY - 0.5
+            let inset = min(branch.width / 2, 6 * s)
+            a = CGPoint(x: min(max(trunk, branch.minX + inset), branch.maxX - inset), y: up ? branch.maxY : branch.minY)
+            b = CGPoint(x: trunk < leaf.midX ? leaf.minX : leaf.maxX, y: leaf.midY)
+            c1 = CGPoint(x: trunk, y: b.y)
+            c2 = c1
+        } else if leaf.minY >= branch.maxY - 0.5 || leaf.maxY <= branch.minY + 0.5 {
+            let up = leaf.minY >= branch.maxY - 0.5
+            a = CGPoint(x: branch.midX, y: up ? branch.maxY : branch.minY)
+            b = CGPoint(x: leaf.midX, y: up ? leaf.minY : leaf.maxY)
+            c1 = CGPoint(x: a.x, y: (a.y + b.y) / 2)
+            c2 = CGPoint(x: b.x, y: (a.y + b.y) / 2)
+        } else {
+            let right = leaf.minX >= branch.midX
+            a = CGPoint(x: right ? branch.maxX : branch.minX, y: branch.midY)
+            b = CGPoint(x: right ? leaf.minX : leaf.maxX, y: leaf.midY)
+            c1 = CGPoint(x: (a.x + b.x) / 2, y: a.y)
+            c2 = CGPoint(x: (a.x + b.x) / 2, y: b.y)
+        }
+        start = a
+        end = b
+        let path = CGMutablePath()
+        path.move(to: a)
+        path.addCurve(to: b, control1: c1, control2: c2)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (layer, colour, width) in [(casing, NSColor.black.withAlphaComponent(RadialGlass.casingAlpha), RadialGlass.casingWidth * s),
+                                       (core, NSColor.white.withAlphaComponent(RadialGlass.stemAlpha), RadialGlass.stemWidth * s)] {
+            layer.path = path
+            layer.fillColor = nil
+            layer.strokeColor = colour.cgColor
+            layer.lineWidth = width
+            layer.lineCap = .round
+            layer.isHidden = true
+            layer.opacity = 0
+        }
+        CATransaction.commit()
+    }
+
+    var layers: [CAShapeLayer] { [casing, core] }
+
+    private func now() -> CFTimeInterval { core.convertTime(CACurrentMediaTime(), from: nil) }
+
+    private func set(_ body: () -> Void) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        body()
+        CATransaction.commit()
+    }
+
+    /// Grows out from its branch after `delay` (fading in only without `motion`), or shows at once.
+    func grow(delay: TimeInterval?, motion: Bool) {
+        generation += 1
+        let fromEnd = core.isHidden ? 0 : (core.presentation() ?? core).strokeEnd
+        let fromOpacity = core.isHidden ? 0 : (core.presentation() ?? core).opacity
+        isShowing = true
+        set {
+            for layer in layers {
+                layer.removeAllAnimations()
+                layer.isHidden = false
+                layer.opacity = 1
+                layer.strokeEnd = 1
+            }
+        }
+        guard let delay else { return }
+        let begin = now() + delay
+        for layer in layers {
+            let animation: CABasicAnimation
+            if motion {
+                animation = CABasicAnimation(keyPath: "strokeEnd")
+                animation.fromValue = fromEnd
+                animation.toValue = CGFloat(1)
+                animation.duration = RadialMotion.unfurl
+                animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            } else {
+                animation = CABasicAnimation(keyPath: "opacity")
+                animation.fromValue = fromOpacity
+                animation.toValue = Float(1)
+                animation.duration = RadialMotion.fadeIn
+            }
+            animation.beginTime = begin
+            animation.fillMode = .backwards
+            layer.add(animation, forKey: motion ? "unfurl" : "opacity")
+        }
+    }
+
+    /// Draws back into its branch fast (fading only without `motion`), or goes at once.
+    func retract(animated: Bool, motion: Bool) {
+        generation += 1
+        isShowing = false
+        guard animated, !core.isHidden else {
+            set { for layer in layers { layer.removeAllAnimations(); layer.isHidden = true; layer.opacity = 0 } }
+            return
+        }
+        let generation = self.generation
+        let fromEnd = (core.presentation() ?? core).strokeEnd, fromOpacity = (core.presentation() ?? core).opacity
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        CATransaction.setCompletionBlock { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.generation == generation else { return }
+                self.set { for layer in self.layers { layer.isHidden = true } }
+            }
+        }
+        for layer in layers {
+            layer.removeAllAnimations()
+            let animation: CABasicAnimation
+            if motion {
+                layer.strokeEnd = 0
+                animation = CABasicAnimation(keyPath: "strokeEnd")
+                animation.fromValue = fromEnd
+                animation.toValue = CGFloat(0)
+                animation.duration = RadialMotion.retract
+            } else {
+                layer.opacity = 0
+                animation = CABasicAnimation(keyPath: "opacity")
+                animation.fromValue = fromOpacity
+                animation.toValue = Float(0)
+                animation.duration = RadialMotion.vanishDuration
+            }
+            animation.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            layer.add(animation, forKey: motion ? "unfurl" : "opacity")
+        }
+        CATransaction.commit()
+    }
+
+    /// Lit on the path to the petal highlighted: its core brighter.
+    func light(_ on: Bool, animated: Bool) {
+        guard on != isLit else { return }
+        isLit = on
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(RadialMotion.restyle)
+        CATransaction.setDisableActions(!animated)
+        core.strokeColor = NSColor.white.withAlphaComponent(on ? RadialGlass.litStemAlpha : RadialGlass.stemAlpha).cgColor
+        CATransaction.commit()
+    }
+}
+
 // MARK: - The wheel
 
 /// The wheel's words, each in its glass bubble (`RadialBubble`), on a canvas centred where the
@@ -407,6 +585,9 @@ final class RadialWheelView: NSView {
     private var tree: [RadialNode] = []
     private var origin: CGPoint = .zero
     private var bubbles: [RadialBubble.Role: RadialBubble] = [:]
+    /// Under every bubble: the stems, by the path of the leaf each leads to.
+    private let stemView = RadialLayerView()
+    private var stems: [[String]: RadialStem] = [:]
     /// The pixels per point the pictures are drawn at (0: none yet).
     private var pixels: CGFloat = 0
     /// The pixels per point to draw at; nil: the window's (2 outside one). Tests set it.
@@ -430,6 +611,9 @@ final class RadialWheelView: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
+        stemView.frame = bounds
+        stemView.autoresizingMask = [.width, .height]
+        addSubview(stemView)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
@@ -443,6 +627,8 @@ final class RadialWheelView: NSView {
             // Where the bubbles are and how big depends on the layout: a new one makes them anew.
             bubbles.values.forEach { $0.removeFromSuperview() }
             bubbles = [:]
+            stems.values.forEach { $0.layers.forEach { $0.removeFromSuperlayer() } }
+            stems = [:]
             painted = []
             hint = nil
         } else if tree != self.tree {
@@ -472,6 +658,7 @@ final class RadialWheelView: NSView {
     func open() {
         motion = !reducesMotion()
         for bubble in bubbles.values { bubble.vanish(animated: false, motion: false) }
+        for stem in stems.values { stem.retract(animated: false, motion: false) }
         isOpen = true
         retarget(animated: true)
     }
@@ -480,6 +667,7 @@ final class RadialWheelView: NSView {
     func close() {
         isOpen = false
         for bubble in bubbles.values { bubble.vanish(animated: false, motion: false) }
+        for stem in stems.values { stem.retract(animated: false, motion: false) }
     }
 
     /// At rest with `selection` highlighted and nothing moving (snapshots).
@@ -488,6 +676,9 @@ final class RadialWheelView: NSView {
         self.selection = selection
         retarget(animated: false)
     }
+
+    /// The stem to the leaf at `path`, if it has been made.
+    func stem(_ path: [String]) -> RadialStem? { stems[path] }
 
     /// The bubble for `role`, if it has been made.
     func bubble(_ role: RadialBubble.Role) -> RadialBubble? { bubbles[role] }
@@ -536,20 +727,63 @@ final class RadialWheelView: NSView {
                 let bubble = bubbles[role] ?? make(word)
                 paint(bubble)
                 let (emphasis, scale) = emphasis(of: path)
+                let leaf = self.leaf(path)
                 if bubble.isShowing {
                     bubble.style(emphasis, scale: scale, animated: animate, motion: motion)
                 } else {
                     let r = ring(path)
                     outermost = max(outermost, r)
-                    bubble.appear(emphasis: emphasis, scale: scale, delay: animate ? Double(r) * RadialMotion.stagger : nil,
-                                  motion: motion)
+                    var delay = Double(r) * RadialMotion.stagger
+                    if let leaf {
+                        // Its stem grows first; it pops out at the tip, one after another along the branch.
+                        stem(to: path, from: leaf.branch)?.grow(delay: animate ? delay : nil, motion: motion)
+                        if motion { delay += RadialMotion.unfurl * RadialMotion.tip }
+                        delay += Double(leaf.index) * RadialMotion.stagger
+                    }
+                    bubble.appear(emphasis: emphasis, scale: scale, delay: animate ? delay : nil, motion: motion)
                 }
+                if leaf != nil { stems[path]?.light(!selection.isEmpty && selection.starts(with: path), animated: animate) }
             } else if let bubble = bubbles[role], bubble.isShowing {
                 bubble.vanish(animated: animate, motion: motion)
+                stems[path]?.retract(animated: animate, motion: motion)
             }
         }
         styleHub(animated: animate)
         refreshHint(delay: animate ? Double(outermost + 1) * RadialMotion.stagger : nil)
+    }
+
+    // MARK: Stems
+
+    /// The leaf at `path`: an action, whose stem leads from its branch; its place among its siblings.
+    private func leaf(_ path: [String]) -> (branch: [String], index: Int)? {
+        guard path.count > 1, let node = RadialMenu.node(at: path, in: tree), node.isLeaf,
+              let parent = RadialMenu.node(at: Array(path.dropLast()), in: tree),
+              let index = parent.children.firstIndex(where: { $0.id == node.id }) else { return nil }
+        return (Array(path.dropLast()), index)
+    }
+
+    /// The stem to the leaf at `path` from its branch's bubble, made the first time it shows.
+    private func stem(to path: [String], from branch: [String]) -> RadialStem? {
+        if let stem = stems[path] { return stem }
+        guard let parent = layout.word(branch), let child = layout.word(path), let node = RadialMenu.node(at: branch, in: tree) else { return nil }
+        let s = layout.scale
+        let from = local(RadialGlass.bubble(around: parent.frame, scale: s))
+        // Leaves stacked one above the other past the branch's top or bottom edge are a column
+        // flush with its outer side: their stems run up a trunk beside it on that side, where
+        // nothing else sits.
+        let leaves = node.children.compactMap { layout.word(branch + [$0.id]) }.map { local(RadialGlass.bubble(around: $0.frame, scale: s)) }
+        let past = leaves.allSatisfy { $0.minY >= from.maxY - 0.5 } || leaves.allSatisfy { $0.maxY <= from.minY + 0.5 }
+        let byHeight = leaves.sorted { $0.minY < $1.minY }
+        let stacked = leaves.count > 1 && zip(byHeight, byHeight.dropFirst()).allSatisfy { $0.maxY <= $1.minY + 0.5 }
+        var trunk: CGFloat?
+        if past, stacked {
+            let right = (leaves.map(\.midX).reduce(0, +) / CGFloat(leaves.count)) > from.midX
+            trunk = right ? (leaves.map(\.maxX).max() ?? from.midX) + 6 * s : (leaves.map(\.minX).min() ?? from.midX) - 6 * s
+        }
+        let stem = RadialStem(from: from, to: local(RadialGlass.bubble(around: child.frame, scale: s)), trunk: trunk, scale: s)
+        stem.layers.forEach { stemView.layer?.addSublayer($0) }
+        stems[path] = stem
+        return stem
     }
 
     // MARK: Bubbles

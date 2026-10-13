@@ -379,7 +379,7 @@ final class RadialWheelTests: XCTestCase {
         view.configure(layout: layout, canvas: RadialWheelView.canvas(for: layout), tree: tree, selection: ["loadouts"])
         let now = view.subviews.compactMap { $0 as? RadialBubble }
         XCTAssertTrue(old.allSatisfy { $0.superview == nil }, "the old bubbles are gone")
-        XCTAssertEqual(view.subviews.count, now.count, "nothing else in the view")
+        XCTAssertEqual(view.subviews.count, now.count + 1, "nothing else in the view but the stems'")
         for bubble in now { XCTAssertTrue(view.bubble(bubble.role) === bubble, "\(bubble.role) is the layout's") }
         XCTAssertEqual(Set(now.filter(\.isShowing).map(\.role)),
                        Set(layout.showing(open: ["loadouts"]).map { .word(.node($0)) } + [.word(.centre), .hint]))
@@ -425,5 +425,104 @@ final class RadialWheelTests: XCTestCase {
                 }
             }
         }
+    }
+
+    // MARK: Stems
+
+    /// Every action showing has a stem from its branch's bubble to its own, starting on the
+    /// branch's bubble and ending on the action's; nothing else has one, and a stem goes with its
+    /// action. The stem to the petal on the path is lit.
+    func testEveryActionShowingHasAStemFromItsBranch() throws {
+        for (tree, what) in Self.cases {
+            let (view, layout) = wheel(tree)
+            for selection in selections(layout) {
+                view.settle(selection: selection)
+                let showing = Set(layout.showing(open: layout.openBranch(selection)))
+                for word in layout.words {
+                    guard let path = word.role.path, let node = RadialMenu.node(at: path, in: tree) else { continue }
+                    let stem = view.stem(path)
+                    guard node.isLeaf, showing.contains(path) else {
+                        XCTAssertTrue(stem.map { !$0.isShowing } ?? true, "\(what), \(selection): no stem to \(path)")
+                        continue
+                    }
+                    let shown = try XCTUnwrap(stem, "\(what), \(selection): a stem to \(path)")
+                    XCTAssertTrue(shown.isShowing)
+                    let branch = try XCTUnwrap(bubble(view, Array(path.dropLast())))
+                    let leaf = try XCTUnwrap(bubble(view, path))
+                    let (start, end) = (shown.start, shown.end)
+                    func onEdge(_ p: CGPoint, _ frame: CGRect) -> Bool {
+                        frame.insetBy(dx: -1.5, dy: -1.5).contains(p) && !frame.insetBy(dx: 1.5, dy: 1.5).contains(p)
+                    }
+                    XCTAssertTrue(onEdge(start, branch.frame), "\(what): \(path)'s stem starts on its branch")
+                    XCTAssertTrue(onEdge(end, leaf.frame), "\(what): \(path)'s stem ends on it")
+                    XCTAssertEqual(shown.isLit, !selection.isEmpty && selection.starts(with: path), "\(what), \(selection): \(path)")
+                }
+            }
+        }
+    }
+
+    private func grow(_ stem: RadialStem?) -> CABasicAnimation? { stem?.core.animation(forKey: "unfurl") as? CABasicAnimation }
+
+    /// A branch opening unfurls its stems out from it, and each leaf pops out at its stem's tip
+    /// once the stem gets there, one after another along the branch.
+    func testABranchUnfurlsItsStemsThenPopsItsLeaves() throws {
+        let (view, _) = wheel(RadialLayoutTests.tree(3, RadialLayoutTests.short, allScreens: true))
+        view.open()
+        view.selection = ["capture"]
+        var previous: CFTimeInterval = 0
+        for id in ["screen", "all", "draw"] {
+            let stem = try XCTUnwrap(view.stem(["capture", id]))
+            let unfurl = try XCTUnwrap(grow(stem), id)
+            XCTAssertEqual(unfurl.keyPath, "strokeEnd")
+            XCTAssertEqual(unfurl.fromValue as? CGFloat, 0)
+            XCTAssertEqual(unfurl.toValue as? CGFloat, 1)
+            XCTAssertGreaterThanOrEqual(unfurl.duration, 0.15)
+            XCTAssertLessThanOrEqual(unfurl.duration, 0.2)
+            let leaf = try XCTUnwrap(bloom(bubble(view, ["capture", id])))
+            XCTAssertGreaterThanOrEqual(leaf.begin, unfurl.beginTime + unfurl.duration * 0.6, "\(id) pops at the tip")
+            XCTAssertGreaterThan(leaf.begin, previous, "\(id) after the one before")
+            previous = leaf.begin
+        }
+        XCTAssertEqual(view.stem(["capture", "screen"])?.core.strokeEnd, 1, "where it ends")
+    }
+
+    /// A branch closing draws its stems back fast; with Reduce motion stems only fade, coming and going.
+    func testStemsDrawBackFastAndOnlyFadeWithReduceMotion() throws {
+        let (view, _) = wheel(RadialLayoutTests.tree(3, RadialLayoutTests.short))
+        view.open()
+        view.selection = ["park"]
+        let stem = try XCTUnwrap(view.stem(["park", "restore"]))
+        view.selection = ["capture"]
+        XCTAssertFalse(stem.isShowing)
+        let back = try XCTUnwrap(grow(stem))
+        XCTAssertEqual(back.toValue as? CGFloat, 0)
+        XCTAssertLessThanOrEqual(back.duration, 0.12)
+
+        let (calm, _) = wheel(RadialLayoutTests.tree(3, RadialLayoutTests.short))
+        calm.reducesMotion = { true }
+        calm.open()
+        calm.selection = ["park"]
+        let still = try XCTUnwrap(calm.stem(["park", "park"]))
+        XCTAssertNil(grow(still), "no growing")
+        XCTAssertEqual(still.core.strokeEnd, 1)
+        XCTAssertEqual((still.core.animation(forKey: "opacity") as? CABasicAnimation)?.fromValue as? Float, 0, "it fades in")
+        calm.selection = ["capture"]
+        XCTAssertNil(grow(still), "no drawing back")
+        XCTAssertEqual((still.core.animation(forKey: "opacity") as? CABasicAnimation)?.toValue as? Float, 0, "it fades out")
+    }
+
+    /// The stems sit under every bubble, in the wheel's own view, and a closed wheel shows none.
+    func testStemsSitUnderTheBubblesAndGoWithTheWheel() throws {
+        let (view, _) = wheel(RadialLayoutTests.tree(3, RadialLayoutTests.short))
+        view.open()
+        view.selection = ["loadouts", "Mail", "apply"]
+        let stem = try XCTUnwrap(view.stem(["loadouts", "Mail", "apply"]))
+        let host = try XCTUnwrap(view.subviews.first)
+        XCTAssertFalse(host is RadialBubble, "the stems' view is below every bubble")
+        XCTAssertTrue(stem.core.superlayer === host.layer)
+        view.close()
+        XCTAssertFalse(stem.isShowing)
+        XCTAssertTrue(stem.core.isHidden)
+        XCTAssertNil(stem.core.animationKeys())
     }
 }
