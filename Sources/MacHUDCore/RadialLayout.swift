@@ -16,7 +16,8 @@ import AppKit
 ///   every action the inner row's places unfold. A loadout's direction, row and distance never
 ///   change as loadouts are added, whatever the names.
 ///   Under the pointer a petal grows from its anchor (away from the centre), as far as
-///   `RadialWheelView.grow` without touching a word that shows with it.
+///   `RadialWheelView.grow` without touching a word that shows with it, and without its glass
+///   bubble (`RadialGlass.padding` round its box) covering theirs.
 /// - A name is fitted to its width (wrap to two lines, then shrink, then cut after a whole word;
 ///   a loadout's name keeps to one line);
 ///   a top petal or a loadout shows up to `maxIcons` icons in a row under its name.
@@ -261,6 +262,7 @@ struct RadialLayout: Equatable {
         let gap = Self.wordGap * s
         let clearance = Self.levelGap * s
         let maxGrow = RadialWheelView.grow
+        let padding = CGSize(width: RadialGlass.padding.width * s, height: RadialGlass.padding.height * s)
         let nameStyle = TextFit.Style.name.scaled(s)
         let labelStyle = TextFit.Style.label.scaled(s)
         top = tree.map(\.id)
@@ -324,9 +326,16 @@ struct RadialLayout: Equatable {
             }
             for k in placed.indices {
                 let others = context + placed.indices.filter { $0 != k }.map { placed[$0].frame }
-                placed[k].grow = Self.largestGrowth(placed[k], upTo: maxGrow, avoiding: others, gap: gap)
+                placed[k].grow = Self.largestGrowth(placed[k], upTo: maxGrow, avoiding: others, gap: gap, padding: padding)
             }
             return placed
+        }
+
+        /// The word at `path` grows no further than keeps its bubble off the bubbles of `frames`,
+        /// its children's: they show whenever it is highlighted, placed clear of its grown box.
+        func keepClear(_ path: [String], of frames: [CGRect]) {
+            guard let k = words.lastIndex(where: { $0.role == .node(path) }) else { return }
+            words[k].grow = Self.largestGrowth(words[k], upTo: words[k].grow, avoiding: frames, gap: gap, padding: padding)
         }
 
         /// Lays out the children of `node` (at `path`) and everything under them, on one circle
@@ -339,6 +348,7 @@ struct RadialLayout: Equatable {
             let children = place(node.children, parent: path, from: RadialGeometry.radius(of: word.anchor) + gap,
                                  context: context + [word.grownFrame])
             words += children
+            keepClear(path, of: children.map(\.frame))
             petal.start = children.map { Self.distance(to: $0.frame) }.min().map { $0 - gap / 2 } ?? .infinity
             petal.arc = Self.arc(of: node.children.map { $0.angle }, around: node.angle)
             petals[path] = petal
@@ -410,6 +420,7 @@ struct RadialLayout: Equatable {
                 // An inner row's loadouts pick among their actions only inside the next row.
                 if child.row + 1 < rowCount { petals[childPath]?.end = starts[child.row + 1] }
             }
+            keepClear(path, of: words.filter { $0.role.path.map { $0.count == path.count + 1 && $0.starts(with: path) } ?? false }.map(\.frame))
             petal.start = starts.first ?? .infinity
             petal.rows = (0..<rowCount).map { k in node.children.filter { $0.row == k }.map(\.id) }
             petal.rowStarts = starts
@@ -567,6 +578,12 @@ struct RadialLayout: Equatable {
         return (centre + low - half)...(centre + high + half)
     }
 
+    /// `a` and `b` share some area (touching edges do not).
+    private static func overlaps(_ a: CGRect, _ b: CGRect) -> Bool {
+        let common = a.intersection(b)
+        return !common.isNull && common.width > 0.001 && common.height > 0.001
+    }
+
     /// The distance from the centre to the nearest point of `rect`.
     static func distance(to rect: CGRect) -> CGFloat {
         hypot(max(rect.minX, 0, -rect.maxX), max(rect.minY, 0, -rect.maxY))
@@ -579,11 +596,16 @@ struct RadialLayout: Equatable {
     }
 
     /// The most `word` can grow from its anchor, up to `limit`, without coming within `gap` of
-    /// any of `others`.
-    private static func largestGrowth(_ word: Word, upTo limit: CGFloat, avoiding others: [CGRect], gap: CGFloat) -> CGFloat {
+    /// any of `others`, and without its bubble (its box with `padding` round it, grown with it)
+    /// covering any of theirs.
+    private static func largestGrowth(_ word: Word, upTo limit: CGFloat, avoiding others: [CGRect], gap: CGFloat,
+                                      padding: CGSize) -> CGFloat {
+        let bubbles = others.map { $0.insetBy(dx: -padding.width, dy: -padding.height) }
         func fits(_ factor: CGFloat) -> Bool {
-            let big = grown(word.frame, by: factor, about: word.anchor).insetBy(dx: -gap / 2, dy: -gap / 2)
-            return !others.contains { $0.intersects(big) }
+            let box = grown(word.frame, by: factor, about: word.anchor)
+            let big = box.insetBy(dx: -gap / 2, dy: -gap / 2)
+            let bubble = grown(word.frame.insetBy(dx: -padding.width, dy: -padding.height), by: factor, about: word.anchor)
+            return !others.contains { $0.intersects(big) } && !bubbles.contains { overlaps($0, bubble) }
         }
         if fits(limit) { return limit }
         var (low, high) = (CGFloat(1), limit)

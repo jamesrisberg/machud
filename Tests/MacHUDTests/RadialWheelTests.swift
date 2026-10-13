@@ -404,4 +404,26 @@ final class RadialWheelTests: XCTestCase {
         XCTAssertGreaterThan(view.wordRenders, renders)
         XCTAssertEqual(mail.face.layer?.sublayers?.filter { $0.name == nil }.count, 1, "one picture, not two")
     }
+
+    /// A petal under the pointer grows only as far as its bubble stays off every other bubble
+    /// showing, the centre's disc and the hint's included: with 3, 6, 10 and 14 long-named
+    /// loadouts, in every state the pointer can light.
+    func testALitBubbleNeverCoversAnother() {
+        for count in [3, 6, 10, 14] {
+            let (view, layout) = wheel(RadialLayoutTests.tree(count, RadialLayoutTests.long, allScreens: true))
+            for selection in selections(layout) where !selection.isEmpty {
+                view.settle(selection: selection)
+                guard let lit = bubble(view, selection) else { continue }
+                let frame = view.wheelFrame(of: lit)
+                let grown = RadialLayout.grown(frame, by: lit.scale, about: CGPoint(x: frame.minX + lit.pivot.x, y: frame.minY + lit.pivot.y))
+                for other in view.showingBubbles where other !== lit {
+                    let o = view.wheelFrame(of: other)
+                    let covered = o.intersection(grown)
+                    if !covered.isNull, covered.width > 0.01, covered.height > 0.01 {
+                        XCTFail("\(count) loadouts, \(selection) lit covers \(other.role) by \(covered.size)")
+                    }
+                }
+            }
+        }
+    }
 }
