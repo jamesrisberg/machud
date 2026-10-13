@@ -370,7 +370,7 @@ final class ToolDock: NSObject, Panel {
         guard config().isAutoHide else { return }
         let overPanels = hover.shown.compactMap { panelFrame(of: $0) }.contains { $0.insetBy(dx: -4, dy: -4).contains(mouse) }
         let inside = g.placement.contains(mouse) || overPanels || menuOpen || !hover.shown.isEmpty
-        let trigger = tucked ? g.layout.revealZone(g.frame, screen: g.screen.frame).contains(mouse) : inside
+        let trigger = tucked ? g.layout.revealZones(g.frame, screen: g.screen.frame).contains { $0.contains(mouse) } : inside
         switch autoHide.update(onTrigger: trigger, inside: inside, now: now) {
         case .reveal?:
             tucked = false
