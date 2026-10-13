@@ -271,6 +271,41 @@ final class RadialTreeTests: XCTestCase {
         XCTAssertEqual(icons(8), Array(repeating: RadialLayout.maxIcons, count: 8))
         XCTAssertEqual(icons(14), Array(repeating: RadialLayout.maxIcons, count: 14), "every place keeps room for its icons")
     }
+
+    /// Every node's `x` and `y` in `menu` lie on its word and pick it there; an action's `angle`
+    /// and `radius` are that same point, and a top petal's or loadout's are its anchor on its
+    /// direction. So a script pointing where the JSON says lands on the node it names.
+    @MainActor
+    func testTheMenuJSONSaysWhereEachNodeIs() throws {
+        for (count, names) in [(3, RadialLayoutTests.short), (10, RadialLayoutTests.long), (15, RadialLayoutTests.long), (20, RadialLayoutTests.short)] {
+            let tree = RadialLayoutTests.tree(count, names, allScreens: true)
+            let layout = RadialLayout(tree: tree)
+            let json = RadialMenu.json(tree: tree, layout: layout)
+            func visit(_ nodes: [[String: Any]], parent: [String]) throws {
+                for d in nodes {
+                    let id = try XCTUnwrap(d["id"] as? String)
+                    let path = parent + [id]
+                    let word = try XCTUnwrap(layout.word(path))
+                    let x = try XCTUnwrap(d["x"] as? Double), y = try XCTUnwrap(d["y"] as? Double)
+                    let middle = CGPoint(x: x, y: y)
+                    XCTAssertTrue(word.frame.contains(middle), "\(count): \(path) at its x and y")
+                    XCTAssertEqual(layout.selection(at: middle, open: parent), path, "\(count): \(path) picked at its x and y")
+                    let angle = try XCTUnwrap(d["angle"] as? Double), radius = try XCTUnwrap(d["radius"] as? Double)
+                    let point = RadialGeometry.point(CGFloat(radius), angle)
+                    if d["action"] != nil {
+                        XCTAssertEqual(point.x, middle.x, accuracy: 0.001, "\(count): \(path)")
+                        XCTAssertEqual(point.y, middle.y, accuracy: 0.001, "\(count): \(path)")
+                        XCTAssertEqual(layout.selection(at: point, open: parent), path, "\(count): \(path) picked at its angle and radius")
+                    } else {
+                        XCTAssertEqual(point.x, word.anchor.x, accuracy: 0.001, "\(count): \(path)'s anchor")
+                        XCTAssertEqual(point.y, word.anchor.y, accuracy: 0.001, "\(count): \(path)'s anchor")
+                    }
+                    try visit(d["children"] as? [[String: Any]] ?? [], parent: path)
+                }
+            }
+            try visit(try XCTUnwrap(json["tree"] as? [[String: Any]]), parent: [])
+        }
+    }
 }
 
 final class ParkPetalTests: XCTestCase {

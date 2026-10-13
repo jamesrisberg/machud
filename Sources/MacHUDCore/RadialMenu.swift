@@ -333,18 +333,27 @@ final class RadialMenu {
     }
 
     /// The tree as the socket shows it, each node with its `id`, `path`, `name`, `kind`, `hint`,
-    /// `angle`, the `radius` its word is anchored at, a loadout's `row` (1 the innermost), its `digit` among its siblings (1 to 9),
+    /// `angle` and `radius` (a top petal's or loadout's anchor, an action's word's middle), `x`
+    /// and `y` (its word's middle), a loadout's `row` (1 the innermost), its `digit` among its siblings (1 to 9),
     /// the `icons` drawn by it, a loadout's `hotkey`, and its `children` or, for a leaf, its
     /// `action`; with a `selection`, what is highlighted and the hint showing. Also used to
     /// describe the wheel while it is hidden.
     static func json(tree: [RadialNode], layout: RadialLayout, selection: [String]? = nil) -> [String: Any] {
         func describe(_ node: RadialNode, parent: [String], digit: Int) -> [String: Any] {
             let path = parent + [node.id]
-            // Where the centre sees it: an action sits beside its branch, wherever its place among
-            // its siblings puts it.
             var d: [String: Any] = ["id": node.id, "path": path.joined(separator: "/"), "name": node.name,
-                                    "kind": node.kind.label, "hint": node.hint, "angle": layout.petal(path)?.angle ?? node.angle]
-            if let word = layout.word(path) { d["radius"] = Double(RadialGeometry.radius(of: word.anchor)) }
+                                    "kind": node.kind.label, "hint": node.hint, "angle": node.angle]
+            if let word = layout.word(path) {
+                // `x` and `y` are its word's middle, where pointing picks it. `angle` and `radius`
+                // are one point too: a top petal's or a loadout's anchor, on its direction; an
+                // action's word's middle, since it sits beside its branch rather than on a direction.
+                let middle = CGPoint(x: word.frame.midX, y: word.frame.midY)
+                let point = node.isLeaf ? middle : word.anchor
+                d["x"] = Double(middle.x)
+                d["y"] = Double(middle.y)
+                d["angle"] = node.isLeaf ? RadialGeometry.angle(of: point) : node.angle
+                d["radius"] = Double(RadialGeometry.radius(of: point))
+            }
             if case .loadout = node.kind { d["row"] = node.row + 1 }
             if digit <= 9 { d["digit"] = digit }
             let icons = layout.icons(of: path)
