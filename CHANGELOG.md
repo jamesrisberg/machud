@@ -113,7 +113,7 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 - Every word on the wheel sits in its own glass bubble, the same frosted glass as the search bar
   and the rest of MacHUD, dark enough that its white words read over a light desktop as well as a
   dark one (and dark in light mode too). Bubbles pop out with a little spring as they appear: the
-  centre and the four petals as the wheel opens, then whatever unfolds, outward, one ring after
+  centre and the top petals as the wheel opens, then whatever unfolds, outward, one ring after
   another; they shrink away quickly when you move off. With Reduce motion on they only fade. None
   of this holds you up: the wheel follows the pointer, and letting go acts, at once.
 - A loadout's name sits on one line in its place, shrinking to fit; a long one ends in an
