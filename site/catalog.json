@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-13T20:10:46Z",
+  "updatedAt": "2026-10-13T20:12:05Z",
   "hudkit": "0.4.0",
   "apps": [
     {
@@ -101,11 +101,11 @@
     },
     {
       "kind": "windowed",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "minOS": "14.0",
-      "sha256": "2b035ba5f35a341a178594118619fd9467f91f799b682b8761a7330d8c2c304b",
-      "size": 1981902,
-      "publishedAt": "2026-10-02T04:40:39Z",
+      "sha256": "ea7c6f8cdebbbca689632cabac1dee878b2f398c5aa4cb8aed80938717110adf",
+      "size": 2288890,
+      "publishedAt": "2026-10-13T20:12:05Z",
       "bundled": false
     },
     {
