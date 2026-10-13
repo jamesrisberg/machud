@@ -286,4 +286,122 @@ final class RadialWheelTests: XCTestCase {
             XCTAssertTrue(bubble.glass.subviews.contains { $0 is HUDGlossView })
         }
     }
+
+    // MARK: Pictures, closing and layouts
+
+    /// The picture a bubble shows for its word.
+    private func picture(_ bubble: RadialBubble?) -> CGImage? {
+        guard let layer = bubble?.face.layer?.sublayers?.first(where: { $0.name == nil }), let contents = layer.contents else { return nil }
+        return (contents as! CGImage)
+    }
+
+    /// The red of the picture's pixel at the middle of its icon row's first icon.
+    private func iconRed(_ image: CGImage, bubble: RadialBubble, word: RadialLayout.Word, wheel: RadialWheelView) -> CGFloat? {
+        let rep = NSBitmapImageRep(cgImage: image)
+        let frame = wheel.wheelFrame(of: bubble)
+        let s = word.frame.minY - frame.minY
+        let side = RadialLayout.iconSize
+        let row = CGFloat(word.icons) * side + CGFloat(word.icons - 1) * RadialLayout.iconSpacing
+        let x = word.frame.midX - row / 2 + side / 2 - frame.minX
+        let y = s + side / 2
+        let pixels = CGFloat(image.width) / frame.width
+        return rep.colorAt(x: Int(x * pixels), y: Int((frame.height - y) * pixels))?.redComponent
+    }
+
+    private static func swatch(_ colour: NSColor) -> NSImage {
+        NSImage(size: CGSize(width: 16, height: 16), flipped: false) { rect in
+            colour.setFill()
+            rect.fill()
+            return true
+        }
+    }
+
+    /// A loadout whose app changes, with as many icons as before, shows its new icon the next
+    /// time it shows: the layout is the same, the picture is not.
+    func testALoadoutsNewIconShowsTheNextTimeItShows() throws {
+        func tree(_ colour: NSColor) -> [RadialNode] {
+            RadialMenu.tree(loadouts: ["Code", "Mail", "Notes"].map { .init(name: $0, icons: [Self.swatch(colour), Self.swatch(colour)]) },
+                            offersAllScreens: false, park: .init(), widgets: .init())
+        }
+        let red = tree(.red), blue = tree(.blue)
+        let layout = RadialLayout(tree: red)
+        XCTAssertEqual(RadialLayout(tree: blue), layout, "the same layout")
+        let canvas = RadialWheelView.canvas(for: layout)
+        let view = RadialWheelView(frame: CGRect(origin: .zero, size: canvas.size))
+        view.configure(layout: layout, canvas: canvas, tree: red)
+        view.settle(selection: ["loadouts"])
+        let mail = try XCTUnwrap(bubble(view, ["loadouts", "Mail"]))
+        let word = try XCTUnwrap(layout.word(["loadouts", "Mail"]))
+        let before = try XCTUnwrap(picture(mail))
+        XCTAssertGreaterThan(try XCTUnwrap(iconRed(before, bubble: mail, word: word, wheel: view)), 0.8, "red")
+        view.close()
+        view.configure(layout: RadialLayout(tree: blue), canvas: canvas, tree: blue, selection: [])
+        view.settle(selection: ["loadouts"])
+        let after = try XCTUnwrap(picture(bubble(view, ["loadouts", "Mail"])))
+        XCTAssertFalse(after === before)
+        XCTAssertLessThan(try XCTUnwrap(iconRed(after, bubble: mail, word: word, wheel: view)), 0.2, "blue now")
+    }
+
+    /// Closed while a bubble is going away, the wheel hides it at once with nothing left
+    /// running, and reopened it never resumes mid-exit: the bubble stays gone until its word
+    /// shows again, then pops out from the start.
+    func testClosingDuringAnExitThenReopeningStartsAfresh() throws {
+        let (view, _) = wheel(RadialLayoutTests.tree(3, RadialLayoutTests.short))
+        view.open()
+        view.selection = ["loadouts"]
+        let mail = try XCTUnwrap(bubble(view, ["loadouts", "Mail"]))
+        view.selection = ["park"]
+        XCTAssertNotNil(fade(mail), "going away")
+        view.close()
+        for bubble in [mail] + view.showingBubbles {
+            XCTAssertTrue(bubble.isHidden, "\(bubble.role)")
+            XCTAssertNil(bubble.layer?.animationKeys(), "\(bubble.role): nothing running")
+        }
+        XCTAssertTrue(view.showingBubbles.isEmpty)
+        view.selection = []
+        view.open()
+        XCTAssertTrue(mail.isHidden)
+        XCTAssertFalse(mail.isShowing)
+        XCTAssertNil(mail.layer?.animationKeys(), "not resumed")
+        view.selection = ["loadouts"]
+        XCTAssertEqual(try XCTUnwrap(bloom(mail)).sizes.first ?? 0, RadialMotion.bloomFrom, accuracy: 0.001, "from the start")
+        XCTAssertEqual(fade(mail)?.fromValue as? Float, 0)
+    }
+
+    /// A new layout replaces every bubble: none of the old ones is left in the view.
+    func testANewLayoutLeavesNoBubbleBehind() {
+        let (view, _) = wheel(RadialLayoutTests.tree(6, RadialLayoutTests.short))
+        view.settle(selection: ["loadouts", "Mail", "apply"])
+        let old = view.subviews.compactMap { $0 as? RadialBubble }
+        XCTAssertFalse(old.isEmpty)
+        let tree = RadialLayoutTests.tree(10, RadialLayoutTests.long)
+        let layout = RadialLayout(tree: tree)
+        view.configure(layout: layout, canvas: RadialWheelView.canvas(for: layout), tree: tree, selection: ["loadouts"])
+        let now = view.subviews.compactMap { $0 as? RadialBubble }
+        XCTAssertTrue(old.allSatisfy { $0.superview == nil }, "the old bubbles are gone")
+        XCTAssertEqual(view.subviews.count, now.count, "nothing else in the view")
+        for bubble in now { XCTAssertTrue(view.bubble(bubble.role) === bubble, "\(bubble.role) is the layout's") }
+        XCTAssertEqual(Set(now.filter(\.isShowing).map(\.role)),
+                       Set(layout.showing(open: ["loadouts"]).map { .word(.node($0)) } + [.word(.centre), .hint]))
+    }
+
+    /// A change of backing scale draws every picture showing again at the new scale.
+    func testABackingScaleChangeRedrawsThePictures() throws {
+        let (view, _) = wheel(RadialLayoutTests.tree(3, RadialLayoutTests.short))
+        view.backingScale = 2
+        view.settle(selection: ["loadouts"])
+        let mail = try XCTUnwrap(bubble(view, ["loadouts", "Mail"]))
+        let before = try XCTUnwrap(picture(mail))
+        let renders = view.wordRenders
+        view.backingScale = 1
+        view.viewDidChangeBackingProperties()
+        let after = try XCTUnwrap(picture(mail))
+        XCTAssertFalse(after === before)
+        XCTAssertEqual(after.width, before.width / 2, accuracy: 1)
+        XCTAssertEqual(mail.face.layer?.sublayers?.first { $0.name == nil }?.contentsScale, 1)
+        XCTAssertEqual(view.bubble(.word(.centre))?.picture("esc")?.contentsScale, 1)
+        XCTAssertEqual(view.bubble(.hint)?.picture("hint")?.contentsScale, 1)
+        XCTAssertGreaterThan(view.wordRenders, renders)
+        XCTAssertEqual(mail.face.layer?.sublayers?.filter { $0.name == nil }.count, 1, "one picture, not two")
+    }
 }

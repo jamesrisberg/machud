@@ -409,6 +409,11 @@ final class RadialWheelView: NSView {
     private var bubbles: [RadialBubble.Role: RadialBubble] = [:]
     /// The pixels per point the pictures are drawn at (0: none yet).
     private var pixels: CGFloat = 0
+    /// The pixels per point to draw at; nil: the window's (2 outside one). Tests set it.
+    var backingScale: CGFloat?
+    /// The bubbles whose pictures are of the current tree at `pixels`: the others are drawn
+    /// again as they next show.
+    private var painted = Set<RadialBubble.Role>()
     /// How many pictures of the petals' words and the centre's have been drawn (tests). The
     /// hint's is drawn again whenever its words change.
     private(set) var wordRenders = 0
@@ -435,10 +440,14 @@ final class RadialWheelView: NSView {
     /// Shows `layout`'s words for `tree` on `canvas`, with `selection` highlighted when given.
     func configure(layout: RadialLayout, canvas: RadialMenu.Canvas, tree: [RadialNode], selection: [String]? = nil) {
         if layout != self.layout || canvas.center != origin {
-            // The bubbles depend on the layout alone; a new one makes them anew.
+            // Where the bubbles are and how big depends on the layout: a new one makes them anew.
             bubbles.values.forEach { $0.removeFromSuperview() }
             bubbles = [:]
+            painted = []
             hint = nil
+        } else if tree != self.tree {
+            // The same words from another tree: their pictures (a loadout's icons) may differ.
+            painted = []
         }
         self.layout = layout
         self.tree = tree
@@ -525,6 +534,7 @@ final class RadialWheelView: NSView {
             let role = RadialBubble.Role.word(word.role)
             if showing.contains(path) {
                 let bubble = bubbles[role] ?? make(word)
+                paint(bubble)
                 let (emphasis, scale) = emphasis(of: path)
                 if bubble.isShowing {
                     bubble.style(emphasis, scale: scale, animated: animate, motion: motion)
@@ -544,9 +554,9 @@ final class RadialWheelView: NSView {
 
     // MARK: Bubbles
 
-    private var backingPixels: CGFloat { window?.backingScaleFactor ?? 2 }
+    private var backingPixels: CGFloat { backingScale ?? window?.backingScaleFactor ?? 2 }
 
-    /// A petal's bubble, its picture drawn.
+    /// A petal's bubble, its picture not drawn yet (`paint`).
     private func make(_ word: RadialLayout.Word) -> RadialBubble {
         let s = layout.scale
         let frame = RadialGlass.bubble(around: word.frame, scale: s)
@@ -554,9 +564,21 @@ final class RadialWheelView: NSView {
         bubble.pivot = CGPoint(x: word.anchor.x - frame.minX, y: word.anchor.y - frame.minY)
         addSubview(bubble)
         bubbles[bubble.role] = bubble
-        if pixels == 0 { pixels = backingPixels }
-        draw(word, in: bubble)
         return bubble
+    }
+
+    /// Draws `bubble`'s pictures unless they are already of the current tree at the current
+    /// scale. The hint's are drawn whenever its words change (`refreshHint`).
+    private func paint(_ bubble: RadialBubble) {
+        guard !painted.contains(bubble.role) else { return }
+        if pixels == 0 { pixels = backingPixels }
+        bubble.clearPictures()
+        switch bubble.role {
+        case .word(.centre): drawHub(bubble)
+        case .word(let role): if let word = layout.word(role) { draw(word, in: bubble) }
+        case .hint: return
+        }
+        painted.insert(bubble.role)
     }
 
     private func draw(_ word: RadialLayout.Word, in bubble: RadialBubble) {
@@ -574,6 +596,7 @@ final class RadialWheelView: NSView {
     /// petal's digit by the dead zone's edge, brighter while its petal is on the path.
     private func styleHub(animated: Bool) {
         let bubble = bubbles[.word(.centre)] ?? makeHub()
+        paint(bubble)
         let cancels = selection.isEmpty
         if !bubble.isShowing {
             bubble.appear(emphasis: .rest, scale: 1, delay: animated ? 0 : nil, motion: motion)
@@ -598,8 +621,6 @@ final class RadialWheelView: NSView {
         bubble.pivot = CGPoint(x: disc.width / 2, y: disc.height / 2)
         addSubview(bubble)
         bubbles[bubble.role] = bubble
-        if pixels == 0 { pixels = backingPixels }
-        drawHub(bubble)
         return bubble
     }
 
@@ -668,19 +689,11 @@ final class RadialWheelView: NSView {
 
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
-        guard window != nil, backingPixels != pixels, !bubbles.isEmpty else { return }
+        guard pixels != 0, backingPixels != pixels else { return }
+        // Every picture again at the new scale: those showing now, the others as they show.
         pixels = backingPixels
-        // Every picture again at the new scale.
-        for (role, bubble) in bubbles {
-            bubble.clearPictures()
-            switch role {
-            case .word(.centre): drawHub(bubble)
-            case .word(let role): if let word = layout.word(role) { draw(word, in: bubble) }
-            case .hint: hint = nil
-            }
-        }
-        refreshHint()
-        styleHub(animated: false)
+        painted = []
+        hint = nil
         retarget(animated: false)
     }
 

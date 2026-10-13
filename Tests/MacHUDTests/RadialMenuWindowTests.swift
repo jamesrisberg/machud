@@ -54,10 +54,12 @@ final class RadialMenuWindowTests: XCTestCase {
         }
     }
 
-    /// The words are drawn into their pictures once per layout and backing scale, as their
-    /// bubbles are first needed: the same wheel opened again reuses them, new words draw them anew.
+    /// The words are drawn into their pictures once per layout, tree and backing scale, as
+    /// their bubbles are first needed: the same wheel opened again reuses them; the same words
+    /// with a tree whose nodes differ (an icon) draw them again as they next show, and new words
+    /// make new bubbles.
     @MainActor
-    func testTheWordsAreDrawnOncePerLayout() {
+    func testTheWordsAreDrawnOncePerLayoutAndTree() {
         let tree = RadialLayoutTests.tree(8, RadialLayoutTests.short)
         let layout = RadialLayout(tree: tree)
         let canvas = RadialWheelView.canvas(for: layout)
@@ -70,12 +72,19 @@ final class RadialMenuWindowTests: XCTestCase {
         let unfolded = view.wordRenders
         XCTAssertGreaterThan(unfolded, first, "the loadouts and Mail's actions, the first time they show")
         view.close()
-        view.configure(layout: RadialLayout(tree: tree), canvas: canvas, tree: RadialLayoutTests.tree(8, RadialLayoutTests.short), selection: [])
+        view.configure(layout: RadialLayout(tree: tree), canvas: canvas, tree: tree, selection: [])
         view.open()
         view.selection = ["loadouts", "Mail"]
-        XCTAssertEqual(view.wordRenders, unfolded, "the same words again, drawn once")
+        XCTAssertEqual(view.wordRenders, unfolded, "the same tree again: drawn once")
+        view.close()
+        let icons = RadialLayoutTests.tree(8, RadialLayoutTests.short)
+        XCTAssertNotEqual(icons, tree, "other icon images")
+        view.configure(layout: RadialLayout(tree: icons), canvas: canvas, tree: icons, selection: [])
+        view.open()
+        XCTAssertGreaterThan(view.wordRenders, unfolded, "the same words with other icons: drawn again as they show")
         let other = RadialLayoutTests.tree(8, RadialLayoutTests.long)
+        let before = view.wordRenders
         view.configure(layout: RadialLayout(tree: other), canvas: RadialWheelView.canvas(for: RadialLayout(tree: other)), tree: other)
-        XCTAssertGreaterThan(view.wordRenders, unfolded, "new words")
+        XCTAssertGreaterThan(view.wordRenders, before, "new words")
     }
 }
