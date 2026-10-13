@@ -194,6 +194,9 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   agent, about 80 ms later.
 
 ### Fixed
+- An auto-hidden tool dock comes back when you push the pointer against the screen's edge: the
+  very edge now counts (before, the pointer had to stop just short of it), and a dock in a corner
+  comes back from either of its edges.
 - The black waveform under the notch while you dictate now tucks up into the camera housing, so
   the housing's rounded bottom corners no longer leave two small gaps above it.
 - With the pointer at the very top of a screen (just after using the menu bar), capturing a
