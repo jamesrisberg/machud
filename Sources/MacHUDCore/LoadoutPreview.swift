@@ -75,7 +75,6 @@ final class LoadoutPreview {
             view.grid = grid
             view.gap = gap
             view.steps = here
-            view.fromSteps = steps.filter { $0.from?.screen == screen.localizedName && $0.to.screen != screen.localizedName }
             view.resetEdits()
             let w = PreviewWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
             w.isOpaque = false
@@ -256,8 +255,6 @@ private final class PreviewView: NSView {
     var grid: GridSize = .default
     var gap: CGFloat = 0
     var steps: [PlacementPlan.Step] = []
-    /// Slots whose window leaves this display: their current frame is outlined.
-    var fromSteps: [PlacementPlan.Step] = []
 
     /// Region frames as drawn (view coordinates), by region id; edits change these.
     private var frames: [String: CGRect] = [:]
@@ -400,15 +397,6 @@ private final class PreviewView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         NSColor.black.withAlphaComponent(0.35).setFill()
         bounds.fill()
-        for step in fromSteps {
-            guard let frame = step.from?.frame else { continue }
-            let path = NSBezierPath(roundedRect: local(frame).insetBy(dx: 2, dy: 2), xRadius: 10, yRadius: 10)
-            path.setLineDash([6, 4], count: 2, phase: 0)
-            path.lineWidth = 2
-            NSColor.white.withAlphaComponent(0.6).setStroke()
-            path.stroke()
-            label("\(step.occupant) leaves for \(step.to.screen ?? "?")", sub: nil, in: local(frame), color: .white)
-        }
         for step in steps {
             guard let frame = frames[step.regionID] else { continue }
             let edited = frame != originals[step.regionID]
@@ -420,14 +408,6 @@ private final class PreviewView: NSView {
             (edited ? NSColor.white : color.withAlphaComponent(0.95)).setStroke()
             path.lineWidth = 3
             path.stroke()
-            // Where the window is now, when it is on this display too.
-            if let from = step.from?.frame, step.from?.screen == step.to.screen, step.action != .stay {
-                let old = NSBezierPath(roundedRect: local(from).insetBy(dx: 2, dy: 2), xRadius: 10, yRadius: 10)
-                old.setLineDash([5, 4], count: 2, phase: 0)
-                old.lineWidth = 1.5
-                color.withAlphaComponent(0.6).setStroke()
-                old.stroke()
-            }
             var sub = edited ? "region changed · Apply saves it" : "\(LoadoutPreview.label(for: step.action)) — \(step.reason)"
             if !edited, let space = step.to.space, step.action == .switchSpace { sub += " · desktop \(space)" }
             label(step.occupant, sub: sub, in: r, color: edited ? .white : color)
