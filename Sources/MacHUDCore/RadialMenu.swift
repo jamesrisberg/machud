@@ -399,6 +399,8 @@ final class RadialMenu {
 
     private var window: NSWindow?
     let wheel = RadialWheelView()
+    /// The dark veil over the screen under the wheel, in a window of its own.
+    let scrim = RadialScrim()
     private var monitors: [Any] = []
     private var keyTap: CFMachPort?
     private var keyMonitor: Any?
@@ -471,13 +473,18 @@ final class RadialMenu {
         // Opened by the hotkey, the wheel moves the pointer to its centre; opened by a script, on
         // the screen holding the point it gave, it leaves the pointer alone.
         prepare(tree: tree, at: NSEvent.mouseLocation, on: display, movesPointer: point == nil)
+        present()
+        startTracking()
+        wheel.open()
+    }
 
+    /// Orders the wheel's window in over its screen, with the scrim fading in just under it.
+    /// Nothing is watched and nothing pops out (`wheel.open()`).
+    func present() {
         let w = window ?? makeWindow()
         if w.frame != screenFrame { w.setFrame(screenFrame, display: false) }
         w.orderFrontRegardless()
-
-        startTracking()
-        wheel.open()
+        scrim.show(on: screenFrame, below: w)
     }
 
     /// Sets the wheel up to open on `display`, in the middle of it as far as its rows of loadouts
@@ -513,6 +520,7 @@ final class RadialMenu {
         stopTracking()
         wheel.close()
         window?.orderOut(nil)
+        scrim.hide()
         if wasVisible { onDismiss?() }
     }
 
