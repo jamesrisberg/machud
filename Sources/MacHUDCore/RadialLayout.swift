@@ -350,26 +350,41 @@ struct RadialLayout: Equatable {
             let upright = abs(cos(a)) >= abs(sin(a)) * 3.0.squareRoot() - 1e-9
             let level = abs(sin(a)) >= sin(75 * Double.pi / 180)
             let n = nodes.count
-            // Each leaf's place along the way they lie (0 nearest the branch), its offset along
-            // and out, and the direction it is upright for.
+            // Each leaf's word, made once, upright the way it lies (a column's flush with the
+            // branch's outer side: on the right it ends at its anchor, on the left starts there).
+            let sixth = Double.pi / 6
+            let facing: Double
+            if upright {
+                facing = up ? 0 : 6 * sixth
+            } else if level {
+                facing = right ? 3 * sixth : 9 * sixth
+            } else if up {
+                facing = right ? 11 * sixth : sixth
+            } else {
+                facing = right ? 7 * sixth : 5 * sixth
+            }
+            let made = nodes.map { petalWord($0, path: parent + [$0.id], radius: 0, angle: facing) }
+            func at(_ i: Int, _ anchor: CGPoint) -> Word {
+                var word = made[i]
+                word.frame = word.frame.offsetBy(dx: anchor.x - word.anchor.x, dy: anchor.y - word.anchor.y)
+                word.anchor = anchor
+                return word
+            }
+            // Each leaf's anchor: along the way they lie (`spacing` apart), `d` out from the edge.
             func leaves(spacing: CGFloat, beyond d: CGFloat) -> [Word] {
-                nodes.enumerated().map { i, node in
-                    let path = parent + [node.id]
+                (0..<n).map { i in
                     if upright {
                         let t = (CGFloat(i) - CGFloat(n - 1) / 2) * spacing * (up ? 1 : -1)
-                        let edge = CGPoint(x: box.midX + t, y: up ? box.maxY : box.minY)
-                        return petalWord(node, path: path, radius: d + Self.branchBend * abs(t), origin: edge, angle: up ? 0 : .pi)
+                        let lift = d + Self.branchBend * abs(t)
+                        return at(i, CGPoint(x: box.midX + t, y: up ? box.maxY + lift : box.minY - lift))
                     }
                     if level {
                         let t = (CGFloat(i) - CGFloat(n - 1) / 2) * spacing * (right ? -1 : 1)
-                        let edge = CGPoint(x: right ? box.maxX : box.minX, y: box.midY + t)
-                        return petalWord(node, path: path, radius: d, origin: edge, angle: right ? .pi / 2 : 3 * .pi / 2)
+                        return at(i, CGPoint(x: right ? box.maxX + d : box.minX - d, y: box.midY + t))
                     }
                     let k = CGFloat((right != up) ? i : n - 1 - i)
-                    let edge = CGPoint(x: right ? box.maxX : box.minX, y: (up ? box.maxY : box.minY) + (up ? 1 : -1) * k * spacing)
-                    // Flush with the outer side: a leaf on the right ends there, on the left starts there.
-                    let angle = up ? (right ? 11 * Double.pi / 6 : Double.pi / 6) : (right ? 7 * Double.pi / 6 : 5 * Double.pi / 6)
-                    return petalWord(node, path: path, radius: 0, origin: CGPoint(x: edge.x, y: edge.y + (up ? d : -d)), angle: angle)
+                    let y = up ? box.maxY + d + k * spacing : box.minY - d - k * spacing
+                    return at(i, CGPoint(x: right ? box.maxX : box.minX, y: y))
                 }
             }
             // The least room between them that keeps their bubbles apart; then out until clear.
