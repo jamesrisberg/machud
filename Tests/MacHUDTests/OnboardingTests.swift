@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import XCTest
 import HUDKit
 @testable import MacHUDCore
@@ -533,6 +534,18 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(((services.statusJSON["radial"] as? [String: Any])?["applied"] as? [String: Any])?["loadout"] as? String, "Desk")
     }
 
+    /// Whether the wheel has a Widgets petal is published: the step's picture of the wheel
+    /// changes as an app starts or stops serving widgets while the step is open.
+    func testTheWheelsPictureFollowsWhetherItHasWidgets() {
+        let model = makeModel()
+        XCTAssertFalse(model.wheelOffersWidgets)
+        var changes = 0
+        let watch = model.objectWillChange.sink { changes += 1 }
+        model.wheelOffersWidgets = true
+        XCTAssertEqual(changes, 1)
+        watch.cancel()
+    }
+
     func testRadialPracticeWithoutAFirstLoadoutUsesTheFirstThereIs() {
         let model = makeModel()
         XCTAssertNil(model.practiceTarget)
@@ -805,7 +818,8 @@ final class OnboardingTests: XCTestCase {
     /// Renders every step offscreen (never on screen) into `MACHUD_ONBOARDING_SNAPSHOT_DIR`,
     /// else a temporary folder, and checks each image has the card drawn on it. The checklist
     /// is mid-way (some sections done, one skipped, the rest to do); `fresh-` shows the welcome
-    /// checklist before anything, `after-` the radial menu once practised.
+    /// checklist before anything, `after-` the radial menu once practised (and its wheel's picture
+    /// with a Widgets petal).
     func testSnapshotsEveryStep() throws {
         let model = makeModel()
         connect()
@@ -856,6 +870,10 @@ final class OnboardingTests: XCTestCase {
         loadouts.apply("Deep Work", placed: 3)
         XCTAssertEqual(model.status(of: .radial), .done)
         try OnboardingSnapshot.write(model, shot: .init(file: "", step: .radial), to: out.appendingPathComponent("onboarding-after-radial.png"))
+        // The wheel's picture with a Widgets petal, as the wheel has one while an app serves widgets.
+        model.wheelOffersWidgets = true
+        try OnboardingSnapshot.write(model, shot: .init(file: "", step: .radial), to: out.appendingPathComponent("onboarding-after-radial-widgets.png"))
+        model.wheelOffersWidgets = false
         try OnboardingSnapshot.write(model, shot: .init(file: "", step: .done), to: out.appendingPathComponent("onboarding-after-done.png"))
         XCTAssertEqual(model.step, .radial, "snapshots do not move the overlay")
     }

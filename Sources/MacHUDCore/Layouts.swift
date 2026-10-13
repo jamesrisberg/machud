@@ -209,7 +209,8 @@ typealias HotKey = HUDHotKey
 typealias HotKeyCenter = HUDHotKeyCenter
 
 struct Hotkeys: Codable, Equatable {
-    /// Hold to show the radial loadout menu; drag toward a loadout; release to apply.
+    /// Hold to show the loadout wheel; move out along a path to an action; release to do it.
+    /// A tap (`tapMilliseconds`) does not show it.
     var loadoutMenu: HotKey?
     /// Show or hide the tool dock (⌃⌥D).
     var dock: HotKey?
@@ -219,8 +220,21 @@ struct Hotkeys: Codable, Equatable {
     /// Reveal the desktop widgets; press again or Esc lowers them. Absent means ⌃⌥W; an
     /// empty `key` turns it off.
     var widgets: HotKey? = nil
+    /// `loadoutMenu` released within this many milliseconds is a tap, not a hold: the wheel does
+    /// not show. Absent means 200; kept within 50...1000.
+    var tapMilliseconds: Int? = nil
 
     static let defaultWidgets = HotKey(key: "w", modifiers: ["control", "option"])
+    static let defaultTapMilliseconds = 200
+    static let tapMillisecondsRange = 50...1000
+    static let defaultTapThreshold = TimeInterval(defaultTapMilliseconds) / 1000
+
+    /// How long `loadoutMenu` is held before it is a hold, in seconds.
+    var tapThreshold: TimeInterval {
+        let ms = min(max(tapMilliseconds ?? Self.defaultTapMilliseconds, Self.tapMillisecondsRange.lowerBound),
+                     Self.tapMillisecondsRange.upperBound)
+        return TimeInterval(ms) / 1000
+    }
 
     /// The widget reveal hotkey in effect.
     var widgetsReveal: HotKey? {

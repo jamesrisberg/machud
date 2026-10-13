@@ -429,9 +429,10 @@ struct RadialStep: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             StepTitle(title: "The radial menu",
-                      subtitle: "Hold \(model.hotkeys.radialWheel) anywhere and a wheel of your loadouts opens under the pointer. Flick toward one and let go: your windows jump into place.")
+                      subtitle: "Hold \(model.hotkeys.radialWheel) anywhere and a small wheel opens in the middle of the screen, the pointer at its centre. Move up onto Apply Loadout, on to a loadout, on to Apply, and let go: your windows jump into place.")
             HStack(alignment: .top, spacing: 18) {
-                RadialDiagram(target: model.practiceTarget ?? "Your loadout", hotkey: model.hotkeys.radialWheel)
+                RadialDiagram(target: model.practiceTarget ?? "Your loadout", hotkey: model.hotkeys.radialWheel,
+                              widgets: model.wheelOffersWidgets)
                     .frame(width: 300, height: 300)
                 VStack(alignment: .leading, spacing: 12) {
                     if let target = model.practiceTarget {
@@ -440,7 +441,7 @@ struct RadialStep: View {
                         OnboardingPanel {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Make a loadout first").font(.system(size: 14, weight: .semibold))
-                                Text("The wheel lists your loadouts; there are none yet.").font(.system(size: 12))
+                                Text("Apply Loadout on the wheel lists your loadouts; there are none yet.").font(.system(size: 12))
                                     .foregroundStyle(OnboardingStyle.secondary)
                                 Button("Go to First loadout") { model.go(to: .loadout) }.buttonStyle(HUDButtonStyle(kind: .primary))
                             }
@@ -458,9 +459,10 @@ struct RadialStep: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Practice").font(.system(size: 14, weight: .semibold))
                 step(1, "Nudge a window or two out of place, so you can see them go back.")
-                step(2, "Hold \(model.hotkeys.radialWheel). Keep holding: the wheel stays open while you do.")
-                step(3, "Move the pointer toward \(target), onto its middle ring (Apply).")
-                step(4, "Let go. MacHUD applies it, and this step ticks itself off.")
+                step(2, "Hold \(model.hotkeys.radialWheel). Keep holding: the wheel opens and stays open while you do.")
+                step(3, "Move up onto Apply Loadout: your loadouts unfold beyond it.")
+                step(4, "Move on to \(target), then on to Apply.")
+                step(5, "Let go. MacHUD applies it, and this step ticks itself off.")
                 HStack(spacing: 8) {
                     Button("Try it on the desktop") { model.startPractice() }.buttonStyle(HUDButtonStyle(kind: .primary))
                     Text("The setup shrinks to a small card.").font(.system(size: 11)).foregroundStyle(OnboardingStyle.secondary)
@@ -470,12 +472,12 @@ struct RadialStep: View {
         }
         OnboardingPanel {
             VStack(alignment: .leading, spacing: 6) {
-                Text("The rings").font(.system(size: 12, weight: .semibold)).foregroundStyle(OnboardingStyle.secondary)
-                ring("Inner", "Preview: draws where each window would go first.")
-                ring("Middle", "Apply the loadout.")
-                ring("Outer", "Clear this screen, then apply.")
-                Text("Release in the centre to cancel. Capture and Park live on the wheel too.")
-                    .font(.system(size: 11)).foregroundStyle(OnboardingStyle.secondary)
+                Text("A loadout's actions").font(.system(size: 12, weight: .semibold)).foregroundStyle(OnboardingStyle.secondary)
+                action("Preview", "Draws where each window would go first.")
+                action("Apply", "Straight on: apply the loadout.")
+                action("Clear + Apply", "Clear this screen, then apply.")
+                Text("Letting go anywhere but on an action, or in the centre, cancels. A quick tap of the key does not open the wheel. \(model.wheelOffersWidgets ? "Capture, Park and Widgets" : "Capture and Park") are on the wheel too.")
+                    .font(.system(size: 11)).foregroundStyle(OnboardingStyle.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -499,62 +501,84 @@ struct RadialStep: View {
         }
     }
 
-    private func ring(_ name: String, _ text: String) -> some View {
+    private func action(_ name: String, _ text: String) -> some View {
         HStack(spacing: 8) {
-            Text(name).font(.system(size: 11, weight: .semibold)).frame(width: 50, alignment: .leading)
+            Text(name).font(.system(size: 11, weight: .semibold)).frame(width: 84, alignment: .leading)
             Text(text).font(.system(size: 11))
         }
     }
 }
 
-/// The wheel as a picture: the loadout wedge highlighted on its middle ring, Capture and Park
-/// beside it, the hotkey in the centre.
+/// The wheel as a picture, along the path the practice takes: the top petals around the hotkey
+/// (Widgets only while the wheel has it), Apply Loadout lit, the loadout beyond it and its three actions beyond that, Apply lit,
+/// with the pointer on it and a line showing the way it came.
 struct RadialDiagram: View {
     let target: String
     let hotkey: String
+    let widgets: Bool
+
+    private static let petals: [(name: String, angle: Double, radius: Double, lit: Bool)] = [
+        ("Apply Loadout", 0, 0.36, true), ("Capture", 90, 0.5, false), ("Park", 180, 0.36, false), ("Widgets", 270, 0.5, false),
+    ]
+    private static let actions: [(name: String, angle: Double, lit: Bool)] = [("Preview", -28, false), ("Apply", 0, true),
+                                                                               ("Clear + Apply", 28, false)]
+
+    /// The point `radius` (a fraction of `r`) out from `c` at `degrees` clockwise from straight up.
+    private static func at(_ c: CGPoint, _ r: CGFloat, _ degrees: Double, _ radius: Double) -> CGPoint {
+        let a = degrees * .pi / 180
+        return CGPoint(x: c.x + CGFloat(sin(a)) * r * CGFloat(radius), y: c.y - CGFloat(cos(a)) * r * CGFloat(radius))
+    }
 
     var body: some View {
         GeometryReader { geo in
             let side = min(geo.size.width, geo.size.height)
-            let c = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
-            let r = side / 2 - 4
-            let wedges: [(String, Double, Bool)] = [(target, -90, true), ("Capture", 30, false), ("Park", 150, false)]
-            ZStack {
-                ForEach(0..<3, id: \.self) { ring in
-                    Circle().stroke(Color.white.opacity(0.14), lineWidth: 1)
-                        .frame(width: r * 2 * (0.42 + 0.29 * Double(ring)), height: r * 2 * (0.42 + 0.29 * Double(ring)))
-                        .position(c)
-                }
-                ForEach(Array(wedges.enumerated()), id: \.offset) { _, wedge in
-                    Self.wedge(center: c, inner: r * 0.21, outer: r, start: wedge.1 - 58, end: wedge.1 + 58)
-                        .fill(wedge.2 ? OnboardingStyle.accent.opacity(0.18) : Color.white.opacity(0.06))
-                    Self.wedge(center: c, inner: r * 0.21, outer: r, start: wedge.1 - 58, end: wedge.1 + 58)
-                        .stroke(Color.white.opacity(0.25), lineWidth: 1)
-                    if wedge.2 {
-                        Self.wedge(center: c, inner: r * 0.42, outer: r * 0.71, start: wedge.1 - 58, end: wedge.1 + 58)
-                            .fill(OnboardingStyle.accent.opacity(0.55))
-                    }
-                    let a = wedge.1 * .pi / 180
-                    Text(wedge.0).font(.system(size: 12, weight: wedge.2 ? .semibold : .regular))
-                        .lineLimit(1).frame(width: r * 0.8)
-                        .position(x: c.x + cos(a) * r * 0.86, y: c.y + sin(a) * r * 0.86)
-                }
-                Circle().fill(Color.black.opacity(0.4)).frame(width: r * 0.4, height: r * 0.4).position(c)
-                KeyCap(text: hotkey).position(c)
-                Image(systemName: "cursorarrow").font(.system(size: 18)).foregroundStyle(.white)
-                    .shadow(radius: 2)
-                    .position(x: c.x + 4, y: c.y - r * 0.56)
-            }
+            let c = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2 + side * 0.1)
+            diagram(centre: c, r: side / 2, frame: geo.size)
         }
     }
 
-    /// An annular sector between `inner` and `outer` radii, angles in degrees (0 = right, y down).
-    static func wedge(center: CGPoint, inner: CGFloat, outer: CGFloat, start: Double, end: Double) -> Path {
-        Path { p in
-            p.addArc(center: center, radius: outer, startAngle: .degrees(start), endAngle: .degrees(end), clockwise: false)
-            p.addArc(center: center, radius: inner, startAngle: .degrees(end), endAngle: .degrees(start), clockwise: true)
-            p.closeSubpath()
+    private func diagram(centre c: CGPoint, r: CGFloat, frame: CGSize) -> some View {
+        let pointer = Self.at(c, r, 0, 0.8)
+        // The dark disc and its soft edge stay inside the frame.
+        let blur: CGFloat = 14
+        let disc = min(frame.width, frame.height) - 2 * blur
+        return ZStack {
+            Circle().fill(Color.black.opacity(0.35)).frame(width: disc, height: disc)
+                .position(x: frame.width / 2, y: frame.height / 2).blur(radius: blur)
+            // The way the pointer goes, in the gaps between the words.
+            Path { p in
+                for (from, to) in [(0.12, 0.28), (0.43, 0.52), (0.67, 0.72)] {
+                    p.move(to: Self.at(c, r, 0, from))
+                    p.addLine(to: Self.at(c, r, 0, to))
+                }
+            }
+            .stroke(OnboardingStyle.accent.opacity(0.6), style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [3, 4]))
+            ForEach(Self.petals.indices.filter { widgets || Self.petals[$0].name != "Widgets" }, id: \.self) { i in
+                petal(Self.petals[i].name, lit: Self.petals[i].lit)
+                    .position(Self.at(c, r, Self.petals[i].angle, Self.petals[i].radius))
+            }
+            Text(target).font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.white)
+                .lineLimit(1).frame(maxWidth: r * 0.9).position(Self.at(c, r, 0, 0.6))
+            ForEach(Self.actions.indices, id: \.self) { i in
+                action(Self.actions[i].name, lit: Self.actions[i].lit).position(Self.at(c, r, Self.actions[i].angle, 0.8))
+            }
+            KeyCap(text: hotkey).position(c)
+            Image(systemName: "cursorarrow").font(.system(size: 18)).foregroundStyle(Color.white)
+                .shadow(radius: 2)
+                .position(x: pointer.x + 10, y: pointer.y + 14)
         }
+    }
+
+    private func petal(_ name: String, lit: Bool) -> some View {
+        Text(name).font(.system(size: 12, weight: lit ? .semibold : .regular))
+            .foregroundStyle(lit ? Color.white : Color.white.opacity(0.45))
+            .lineLimit(1).fixedSize()
+    }
+
+    private func action(_ name: String, lit: Bool) -> some View {
+        Text(name).font(.system(size: 11, weight: lit ? .bold : .medium))
+            .foregroundStyle(lit ? OnboardingStyle.accent : Color.white.opacity(0.7))
+            .lineLimit(1).fixedSize()
     }
 }
 
@@ -590,7 +614,7 @@ struct DoneStep: View {
             }
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
                 card("waveform", "Talk", "Hold fn to dictate; tap then hold, or click the orb, for the agent.")
-                card("circle.circle", "Arrange", "Hold \(model.hotkeys.radialWheel) and flick to a loadout.")
+                card("circle.circle", "Arrange", "Hold \(model.hotkeys.radialWheel), then Apply Loadout, a loadout, Apply.")
                 card("dock.rectangle", "Tools", "\(model.hotkeys.toolDock) shows or hides the tool dock.")
                 card("terminal", "Script it", "machud help lists every command; agents use it too.")
             }
@@ -647,10 +671,10 @@ struct OnboardingCompactCard: View {
                 HStack(spacing: 6) {
                     Text("Hold").font(.system(size: 13))
                     KeyCap(text: model.hotkeys.radialWheel, large: true)
-                    Text("→ move to").font(.system(size: 13))
+                    Text("→ Apply Loadout →").font(.system(size: 13))
                     Text(model.practiceTarget ?? "your loadout").font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(OnboardingStyle.accent)
-                    Text("→ let go").font(.system(size: 13))
+                    Text("→ Apply → let go").font(.system(size: 13))
                 }
                 Text("Waiting for you to apply it… the setup comes back when it lands.")
                     .font(.system(size: 12)).foregroundStyle(OnboardingStyle.secondary)

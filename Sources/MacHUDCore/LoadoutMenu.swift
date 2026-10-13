@@ -1,6 +1,6 @@
 import AppKit
 
-/// Wires loadouts into the UI: the hold-to-show radial wheel, the status-bar
+/// Wires loadouts into the UI: the wheel's hotkey (a tap or a hold), the status-bar
 /// section, per-loadout hotkeys and the `radial` / `menu` / `preview` control commands.
 /// Every list offers `ExperimentalLoadouts.offered` and a capture takes the display under the
 /// pointer, unless multi-desktop loadouts (experimental) are on; each reads the config when
@@ -10,7 +10,7 @@ final class LoadoutMenu {
     private let store: LayoutStore
     /// Opens the visual editor (wired by the app so the empty-capture alert can offer it).
     var openEditor: (() -> Void)?
-    /// Opens the editor on a fresh, empty layout (the capture wedge's outer ring, the menu's Draw a New Layout…).
+    /// Opens the editor on a fresh, empty layout (the wheel's Capture › Draw layout, the menu's Draw a New Layout…).
     var openNewLayout: (() -> Void)?
     /// Opens the editor on a loadout's layout with that loadout selected.
     var editLoadout: ((String) -> Void)?
@@ -18,6 +18,12 @@ final class LoadoutMenu {
     var library: LoadoutLibrary?
     private let engine: LoadoutEngine
     private let radial = RadialMenu()
+    /// The wheel's hotkey, told apart: a hold shows the wheel and its release commits it, a tap
+    /// calls `onTap`.
+    let summon: TapOrHold
+    /// A tap of the wheel's hotkey (`hotkeys.loadoutMenu`): released within
+    /// `hotkeys.tapMilliseconds`, before the wheel shows. Does nothing until the app sets it.
+    var onTap: () -> Void = {}
     private var hotkeyIDs: [UInt32] = []
     private var registered: (menu: HotKey?, loadouts: [String: HotKey])?
     private var registrationDeferred = false
@@ -53,9 +59,10 @@ final class LoadoutMenu {
         return menu
     }
 
-    init(store: LayoutStore, engine: LoadoutEngine) {
+    init(store: LayoutStore, engine: LoadoutEngine, clock: TapOrHold.Clock = .system) {
         self.store = store
         self.engine = engine
+        summon = TapOrHold(clock: clock, threshold: { [weak store] in store?.hotkeys.tapThreshold ?? Hotkeys.defaultTapThreshold })
         parkTargets = { [weak engine] in
             guard let engine else { return .init() }
             return .init(focused: engine.focusedWindowLabel(), parked: engine.parking.parked.map(\.record.label))
@@ -67,27 +74,36 @@ final class LoadoutMenu {
             self.registrationDeferred = false
             self.registerHotkeys()
         }
+        summon.isShowing = { [weak self] in self?.radial.isVisible ?? false }
+        summon.onHold = { [weak self] in self?.showRadial() }
+        summon.onRelease = { [weak self] in self?.radial.commit() }
+        summon.onTap = { [weak self] in self?.onTap() }
+        summon.onIdle = { [weak self] in
+            guard let self, self.registrationDeferred, !self.radial.isVisible else { return }
+            self.registrationDeferred = false
+            self.registerHotkeys()
+        }
     }
 
-    // MARK: Wedges
+    // MARK: The tree
 
     /// What the widgets are doing (revealed, being edited), read as the wheel opens; nil while
-    /// no app serves widgets, when the wheel has no Widgets wedge. `onWidgets` is what its rings
-    /// do: set revealing (`edit` false) or editing (`edit` true) to `on`, the state the button
-    /// showed.
-    var widgetsState: (() -> RadialMenu.Wedge.WidgetsState?)?
+    /// no app serves widgets, when the wheel has no Widgets petal. `onWidgets` is what its
+    /// actions do: set revealing (`edit` false) or editing (`edit` true) to `on`, the state the
+    /// action showed.
+    var widgetsState: (() -> RadialMenu.WidgetsState?)?
     var onWidgets: ((_ edit: Bool, _ on: Bool) -> Void)?
 
-    /// What the park wedge acts on, read as the wheel opens: the focused window and the parked
-    /// ones. As the park wedge becomes highlighted they are read again off the main thread
+    /// What the park petal acts on, read as the wheel opens: the focused window and the parked
+    /// ones. As the park petal is reached they are read again off the main thread
     /// (`readParkTargets`).
-    var parkTargets: () -> RadialMenu.Wedge.ParkTargets
+    var parkTargets: () -> RadialMenu.ParkTargets
 
-    /// Reads the park wedge's targets and calls back with them on the main thread. The parked
+    /// Reads the park petal's targets and calls back with them on the main thread. The parked
     /// windows and the frontmost app are known here; the focused window's label takes
     /// Accessibility calls, which a hung app answers only at its timeout, so it is read on a
     /// queue of its own and the wheel's hint changes when it comes.
-    private func readParkTargets(_ answer: @escaping @MainActor @Sendable (RadialMenu.Wedge.ParkTargets) -> Void) {
+    private func readParkTargets(_ answer: @escaping @MainActor @Sendable (RadialMenu.ParkTargets) -> Void) {
         let parked = engine.parking.parked.map(\.record.label)
         guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != getpid() else {
             answer(.init(focused: nil, parked: parked))
@@ -100,32 +116,20 @@ final class LoadoutMenu {
         }
     }
 
-    /// Where the park wedge's targets are read again while the wheel is open.
+    /// Where the park petal's targets are read again while the wheel is open.
     private static let parkQueue = DispatchQueue(label: "machud.wheel.park", qos: .userInitiated)
 
-    func wedges() -> [RadialMenu.Wedge] {
-        func symbol(_ name: String) -> [NSImage] {
-            [NSImage(systemSymbolName: name, accessibilityDescription: nil)].compactMap { $0 }
-        }
-        var tools = [
-            RadialMenu.Wedge(name: "Capture", icons: symbol("camera.viewfinder"),
-                             kind: .capture(offersAllScreens: store.config.multiDesktopLoadouts)),
-            RadialMenu.Wedge(name: "Park", icons: symbol("rectangle.portrait.and.arrow.right"), kind: .park(parkTargets())),
-        ]
-        if let state = widgetsState?() {
-            tools.append(RadialMenu.Wedge(name: "Widgets", icons: symbol("square.grid.2x2"), kind: .widgets(state)))
-        }
-        return offered.map {
-            RadialMenu.Wedge(name: $0.name, icons: RadialMenu.icons(for: $0, panels: engine.panels),
-                             kind: .loadout($0.name), hotkey: $0.hotkey)
-        } + tools
+    /// The wheel's tree as it opens now: the loadouts offered, Capture (with All screens while
+    /// multi-desktop loadouts are on), Park, and Widgets while an app serves widgets.
+    func tree() -> [RadialNode] {
+        RadialMenu.tree(loadouts: offered.map { .init(name: $0.name, icons: RadialMenu.icons(for: $0, panels: engine.panels),
+                                                      hotkey: $0.hotkey) },
+                        offersAllScreens: store.config.multiDesktopLoadouts, park: parkTargets(), widgets: widgetsState?())
     }
 
     func showRadial(at point: CGPoint? = nil) {
         guard !radial.isVisible else { return }
-        let hk = store.hotkeys.loadoutMenu
-        radial.shiftSelectsOuter = !(hk?.modifiers.contains { $0.lowercased() == "shift" } ?? false)
-        radial.show(wedges: wedges(), at: point)
+        radial.show(tree: tree(), at: point)
     }
 
     func handle(_ outcome: RadialMenu.Outcome) {
@@ -144,7 +148,7 @@ final class LoadoutMenu {
                 let count = engine.parking.restoreAll(animated: true)
                 Toast.show(count == 0 ? "Nothing is parked" : "Restored \(count) parked", seconds: 2)
             } else if let error = engine.parkFocusedWindow() {
-                NSLog("MacHUD: park wedge: %@", error)
+                NSLog("MacHUD: wheel park: %@", error)
                 Toast.show("Could not park", detail: error, seconds: 3)
             }
         case .apply(let name, let clear):
@@ -350,7 +354,7 @@ final class LoadoutMenu {
     }
 
     /// Whether a capture covers every display rather than the one under the pointer: only with
-    /// multi-desktop loadouts on, when asked (the wheel's ring) or, when not asked (the menu
+    /// multi-desktop loadouts on, when asked (the wheel's All screens or This screen) or, when not asked (the menu
     /// bar), when more than one display has windows.
     nonisolated static func capturesEveryScreen(allScreens: Bool?, screensWithWindows: Int, multiDesktop: Bool) -> Bool {
         multiDesktop && (allScreens ?? (screensWithWindows > 1))
@@ -453,14 +457,15 @@ final class LoadoutMenu {
 
     // MARK: Hotkeys
 
-    /// Carbon delivers the release event only to a still-registered hotkey, so
-    /// re-register only when the keys actually changed, and never while the wheel
-    /// is being held open.
+    /// The wheel's hotkey goes through `summon`, which tells a tap from a hold. Carbon delivers
+    /// the release event only to a still-registered hotkey, so re-register only when the keys
+    /// actually changed, and never while the key is down or the wheel is showing
+    /// (`defersRegistration`): then it waits until the wheel goes away or the key is up again.
     func registerHotkeys() {
         let menuKey = Env.noHotkeys ? nil : store.hotkeys.loadoutMenu
         let perLoadout = Env.noHotkeys ? [:] : Self.loadoutHotkeys(in: store.config)
         if let registered, registered.menu == menuKey, registered.loadouts == perLoadout { return }
-        if radial.isVisible {
+        if Self.defersRegistration(wheelShowing: radial.isVisible, key: summon.phase) {
             registrationDeferred = true
             return
         }
@@ -469,9 +474,9 @@ final class LoadoutMenu {
         registered = (menuKey, perLoadout)
         if let hk = menuKey,
            let id = HotKeyCenter.shared.register(hk, onPress: { [weak self] in
-               MainActor.assumeIsolated { self?.showRadial() }
+               MainActor.assumeIsolated { self?.summon.press() }
            }, onRelease: { [weak self] in
-               MainActor.assumeIsolated { self?.radial.commit() }
+               MainActor.assumeIsolated { self?.summon.release() }
            }) {
             hotkeyIDs.append(id)
         }
@@ -485,6 +490,12 @@ final class LoadoutMenu {
                 hotkeyIDs.append(id)
             }
         }
+    }
+
+    /// Whether registering the hotkeys again has to wait: while the wheel's key is down (its
+    /// release would be lost) or the wheel is showing.
+    nonisolated static func defersRegistration(wheelShowing: Bool, key: TapOrHold.Phase) -> Bool {
+        wheelShowing || key != .idle
     }
 
     /// The hotkeys of the loadouts offered (`ExperimentalLoadouts.offered`), by loadout name: a
@@ -733,8 +744,8 @@ final class LoadoutMenu {
             if self.radial.isVisible {
                 response.merge(self.radial.json) { a, _ in a }
             } else {
-                let wedges = self.wedges()
-                response.merge(RadialMenu.json(wedges: wedges, layout: RadialLayout(wedges: wedges))) { a, _ in a }
+                let tree = self.tree()
+                response.merge(RadialMenu.json(tree: tree, layout: RadialLayout(tree: tree))) { a, _ in a }
                 response["visible"] = false
             }
             if let last = self.lastApply { response["lastApply"] = last }
@@ -777,11 +788,13 @@ final class LoadoutMenu {
             case "cancel":
                 self.radial.cancel()
             case "select":
-                guard let index = args["index"].flatMap(Int.init) else {
-                    done(["ok": false, "error": "index required"]); return
+                guard let text = args["path"], !text.isEmpty else {
+                    done(["ok": false, "error": "path required (e.g. path=loadouts/<name>/apply)"]); return
                 }
-                let ring: RadialGeometry.Ring? = args["ring"].flatMap { RadialGeometry.Ring(rawValue: $0.lowercased()) }
-                self.radial.select(index: index, ring: ring)
+                guard self.radial.isVisible else { done(["ok": false, "error": "the wheel is not showing"]); return }
+                guard let path = RadialMenu.path(text, in: self.radial.tree), self.radial.select(path: path) else {
+                    done(["ok": false, "error": "no such path \(text)"]); return
+                }
             case "commit", "release":
                 self.radial.commit()
             case let other:
@@ -818,4 +831,87 @@ final class FieldSync: NSObject, NSTextFieldDelegate {
     }
 
     @objc func toggled(_ sender: NSButton) { to.isEnabled = sender.state == .on }
+}
+
+/// Tells a tap of a hotkey from a hold, by time: released within `threshold` it is a tap
+/// (`onTap`), and nothing else happens; still held at `threshold`, it is a hold (`onHold`), and
+/// its release is `onRelease`. A press while `isShowing` (the wheel opened by a script) is a
+/// hold already, so its release commits. Repeated presses while the key is down are ignored.
+/// The clock is injected, so tests step time by hand.
+@MainActor
+final class TapOrHold {
+    /// The time now and a way to run something later that can be called off.
+    struct Clock {
+        /// Seconds, from any fixed start.
+        var now: () -> TimeInterval
+        /// Runs the block on the main thread after a delay; the returned closure calls it off.
+        var after: (_ delay: TimeInterval, _ run: @escaping @MainActor () -> Void) -> () -> Void
+
+        static let system = Clock(now: { ProcessInfo.processInfo.systemUptime }, after: { delay, run in
+            let item = DispatchWorkItem { MainActor.assumeIsolated { run() } }
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+            return { item.cancel() }
+        })
+    }
+
+    enum Phase: Equatable {
+        case idle
+        /// Down since this time, not yet a hold.
+        case pressed(at: TimeInterval)
+        case held
+    }
+
+    var onTap: () -> Void = {}
+    var onHold: () -> Void = {}
+    var onRelease: () -> Void = {}
+    /// The key is up again (after `onTap` or `onRelease`, or a late release).
+    var onIdle: () -> Void = {}
+    /// Whether what a hold shows is already showing.
+    var isShowing: () -> Bool = { false }
+    /// Read at each press, so a changed setting takes effect at once.
+    let threshold: () -> TimeInterval
+    private let clock: Clock
+    private(set) var phase: Phase = .idle
+    private var callOff: (() -> Void)?
+
+    init(clock: Clock = .system, threshold: @escaping () -> TimeInterval) {
+        self.clock = clock
+        self.threshold = threshold
+    }
+
+    func press() {
+        guard phase == .idle else { return }
+        if isShowing() {
+            phase = .held
+            return
+        }
+        phase = .pressed(at: clock.now())
+        callOff = clock.after(threshold()) { [weak self] in
+            guard let self, case .pressed = self.phase else { return }
+            self.callOff = nil
+            self.phase = .held
+            self.onHold()
+        }
+    }
+
+    func release() {
+        switch phase {
+        case .pressed(let at):
+            callOff?()
+            callOff = nil
+            phase = .idle
+            // A release that comes late (the main thread was busy past the threshold) is neither:
+            // the hold never showed.
+            if clock.now() - at < threshold() { onTap() }
+            onIdle()
+        case .held:
+            phase = .idle
+            onRelease()
+            onIdle()
+        case .idle:
+            // Registered while the key was down: the press was missed. A wheel showing (opened
+            // by a script) still commits.
+            if isShowing() { onRelease() }
+        }
+    }
 }

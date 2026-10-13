@@ -192,11 +192,13 @@ machud orb show|hide                      # orbs are hidden while the tool dock 
 - `machud panels` lists panels (siblings' carry `app` and `health`);
   `machud panel id=tooldock action=toggle`; `panel mode id=… mode=parked edge=left`.
   The socket's `subscribe` command (not the CLI) streams `state` events.
-- Wheel (⌃⌥Space, setting `hotkeys.loadoutMenu`): `machud radial action=show|select|commit|cancel|hide
-  index=<n> ring=inner|middle|outer`; `machud menu` describes the wedges and the hint each
-  ring shows (a loadout: Preview / Apply / Clear + Apply; capture: This screen / Draw layout,
-  with All screens between them while multi-desktop loadouts are on; park: Park / Restore;
-  widgets: Reveal or Lower / Edit or Done).
+- Wheel (⌃⌥Space held, setting `hotkeys.loadoutMenu`; a tap within `hotkeys.tapMilliseconds`
+  does not show it): `machud radial action=show|select|commit|cancel|hide path=<path>`, e.g.
+  `path=loadouts/Work/apply`; `machud menu` describes the wheel as a tree (`tree[]`, each node's
+  `path`, `kind`, `hint` and `children` or `action`): Apply Loadout holds the loadouts, each with
+  Preview / Apply / Clear + Apply; Capture: This screen / Draw layout, with All screens between
+  them while multi-desktop loadouts are on; Park: Park / Restore; Widgets: Reveal or Lower /
+  Edit or Done. `commit` on a petal with children cancels.
 - Menu bar hiding (off until enabled): `machud menubar state|collapse|expand|toggle|peek|enable|disable`.
 - MacHUD's settings: `machud settings get`, `machud settings set menuBar.enabled=1`,
   `machud settings schema`.

@@ -80,56 +80,56 @@ final class LoadoutMenuTests: XCTestCase {
 
     func testWithMultiDesktopLoadoutsOffTheWheelOffersOneScreenLoadoutsAndOneCapture() throws {
         let (menu, _, _) = try make(multiDesktop: false)
-        let wedges = menu.wedges()
-        XCTAssertEqual(wedges.map(\.name), ["Code", "Reading", "My HUD", "Capture", "Park"])
-        XCTAssertEqual(wedges[3].kind, .capture(offersAllScreens: false))
+        let tree = menu.tree()
+        XCTAssertEqual(tree.map(\.name), ["Apply Loadout", "Capture", "Park"])
+        XCTAssertEqual(tree[0].children.map(\.name), ["Code", "Reading", "My HUD"])
+        XCTAssertEqual(tree[1].kind, .capture(offersAllScreens: false))
     }
 
     func testWithMultiDesktopLoadoutsOnTheWheelIsAsBefore() throws {
         let (menu, _, _) = try make(multiDesktop: true)
-        let wedges = menu.wedges()
-        XCTAssertEqual(wedges.map(\.name), ["Desk", "Code", "Reading", "My HUD", "Capture", "Park"])
-        XCTAssertEqual(wedges[4].kind, .capture(offersAllScreens: true))
+        let tree = menu.tree()
+        XCTAssertEqual(tree[0].children.map(\.name), ["Desk", "Code", "Reading", "My HUD"])
+        XCTAssertNotNil(tree[0].children[0].hotkey)
+        XCTAssertEqual(tree[1].kind, .capture(offersAllScreens: true))
     }
 
-    /// A loadout wedge's hints name the loadout and nothing else.
-    func testALoadoutWedgesHintsNameTheLoadout() throws {
+    /// A loadout's actions' hints name the loadout and nothing else.
+    func testALoadoutsHintsNameTheLoadout() throws {
         let (menu, _, _) = try make(multiDesktop: false)
-        let code = try XCTUnwrap(menu.wedges().first)
-        XCTAssertEqual(RadialGeometry.Ring.allCases.map { RadialMenu.hint($0, for: code.kind) },
-                       ["Preview Code", "Apply Code", "Clear this screen and apply Code"])
+        let code = try XCTUnwrap(menu.tree().first?.children.first)
+        XCTAssertEqual(code.children.map(\.hint), ["Preview Code", "Apply Code", "Clear this screen and apply Code"])
     }
 
-    /// The park wedge reads the focused window and the parked ones as the wheel opens.
-    func testTheParkWedgeKnowsTheFocusedAndTheParkedWindows() throws {
+    /// The park petal reads the focused window and the parked ones as the wheel opens.
+    func testTheParkPetalKnowsTheFocusedAndTheParkedWindows() throws {
         let (menu, _, _) = try make(multiDesktop: false)
         menu.parkTargets = { .init(focused: "Notes · Groceries", parked: ["Mail · Inbox", "Terminal"]) }
-        let park = try XCTUnwrap(menu.wedges().last)
+        let park = try XCTUnwrap(menu.tree().last)
         XCTAssertEqual(park.name, "Park")
         XCTAssertEqual(park.kind, .park(.init(focused: "Notes · Groceries", parked: ["Mail · Inbox", "Terminal"])))
-        XCTAssertEqual([RadialMenu.hint(.inner, for: park.kind), RadialMenu.hint(.middle, for: park.kind)],
-                       ["Park Notes · Groceries", "Restore 2 parked windows"])
+        XCTAssertEqual(park.children.map(\.hint), ["Park Notes · Groceries", "Restore 2 parked windows"])
         menu.parkTargets = { .init() }
-        XCTAssertEqual(menu.wedges().last?.kind, .park(.init()))
+        XCTAssertEqual(menu.tree().last?.kind, .park(.init()))
     }
 
-    /// While any app serves widgets the wheel has a Widgets wedge, which reads the widgets'
+    /// While any app serves widgets the wheel has a Widgets petal, which reads the widgets'
     /// state as the wheel opens: revealed or not, being edited or not.
-    func testTheWidgetsWedgeKnowsWhatTheWidgetsAreDoing() throws {
+    func testTheWidgetsPetalKnowsWhatTheWidgetsAreDoing() throws {
         let (menu, _, _) = try make(multiDesktop: false)
-        XCTAssertEqual(menu.wedges().last?.name, "Park", "no widgets wedge without a widgets hook")
+        XCTAssertEqual(menu.tree().last?.name, "Park", "no widgets petal without a widgets hook")
         menu.widgetsState = { nil }
-        XCTAssertEqual(menu.wedges().last?.name, "Park", "no widgets wedge while no app serves widgets")
+        XCTAssertEqual(menu.tree().last?.name, "Park", "no widgets petal while no app serves widgets")
         menu.widgetsState = { .init(revealed: true, editing: false) }
-        let widgets = try XCTUnwrap(menu.wedges().last)
+        let widgets = try XCTUnwrap(menu.tree().last)
         XCTAssertEqual(widgets.name, "Widgets")
         XCTAssertEqual(widgets.kind, .widgets(.init(revealed: true, editing: false)))
-        XCTAssertEqual(RadialMenu.ringLabel(.inner, for: widgets.kind), "Lower")
+        XCTAssertEqual(widgets.children.first?.name, "Lower")
         menu.widgetsState = { .init(revealed: false, editing: true) }
-        XCTAssertEqual(menu.wedges().last?.kind, .widgets(.init(revealed: false, editing: true)))
+        XCTAssertEqual(menu.tree().last?.kind, .widgets(.init(revealed: false, editing: true)))
     }
 
-    /// The widgets wedge's outcome reaches the app with the target it showed: the app sets that
+    /// The widgets petal's outcome reaches the app with the target it showed: the app sets that
     /// state rather than toggling the one it finds.
     func testTheWidgetsOutcomeCarriesItsTargetToTheApp() throws {
         let (menu, _, _) = try make(multiDesktop: false)
@@ -184,7 +184,7 @@ final class LoadoutMenuTests: XCTestCase {
     // MARK: - What a capture covers
 
     func testACaptureCoversTheScreenUnderThePointerUnlessMultiDesktopLoadoutsAreOn() {
-        // Off: one screen, whatever has windows and whichever ring was asked for.
+        // Off: one screen, whatever has windows and whichever capture was asked for.
         XCTAssertFalse(LoadoutMenu.capturesEveryScreen(allScreens: nil, screensWithWindows: 2, multiDesktop: false))
         XCTAssertFalse(LoadoutMenu.capturesEveryScreen(allScreens: false, screensWithWindows: 2, multiDesktop: false))
         XCTAssertFalse(LoadoutMenu.capturesEveryScreen(allScreens: true, screensWithWindows: 2, multiDesktop: false))

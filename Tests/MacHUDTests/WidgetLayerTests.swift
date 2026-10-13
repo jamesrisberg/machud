@@ -478,12 +478,10 @@ final class WidgetLayerTests: XCTestCase {
                                  .action("Remove", .remove("W1"))])
     }
 
-    func testTheWheelHasATwoRingWidgetsWedge() {
-        XCTAssertEqual(RadialMenu.ringCount(for: .widgets(.init())), 2)
-        XCTAssertEqual(RadialMenu.ringLabel(.inner, for: .widgets(.init())), "Reveal")
-        XCTAssertEqual(RadialMenu.ringLabel(.middle, for: .widgets(.init())), "Edit")
-        XCTAssertEqual(RadialMenu.hint(.inner, for: .widgets(.init())), "Reveal widgets")
-        XCTAssertEqual(RadialMenu.hint(.middle, for: .widgets(.init())), "Edit widgets")
+    func testTheWheelHasAWidgetsPetalWithTwoActions() {
+        let widgets = RadialMenu.widgetsNode(.init())
+        XCTAssertEqual(widgets.children.map(\.name), ["Reveal", "Edit"])
+        XCTAssertEqual(widgets.children.map(\.hint), ["Reveal widgets", "Edit widgets"])
         XCTAssertEqual(Hotkeys.defaults.widgetsReveal, HotKey(key: "w", modifiers: ["control", "option"]))
         XCTAssertNil(Hotkeys(loadoutMenu: nil, dock: nil, widgets: HotKey(key: "", modifiers: [])).widgetsReveal)
     }

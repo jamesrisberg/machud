@@ -33,8 +33,8 @@ captured for that loadout alone, naming them). Below the list: *Capture This Scr
 Loadout…*, *Save Dock and Panels as HUD Loadout…*, *Draw a New Layout…*, *Snap Layout* (a
 submenu of the layouts ⇧-drag snaps into, with *Edit Snap Layout…*) and *Restore Cleared
 Windows*. The raw layout file items (*Edit layouts.json…*, *Reveal layouts.json in Finder*,
-*Reload Config*) live under **Advanced**. On the wheel a loadout's buttons read *Preview* /
-*Apply* / *Clear + Apply* and the capture wedge's *This screen* / *Draw layout*; the line under
+*Reload Config*) live under **Advanced**. On the wheel a loadout's actions read *Preview* /
+*Apply* / *Clear + Apply* and Capture's *This screen* / *Draw layout*; the line under
 the wheel says what letting go does (*Clear this screen and apply Work*, *Capture this screen as
 a loadout*).
 
