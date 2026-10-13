@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-13T20:19:48Z",
+  "updatedAt": "2026-10-13T20:20:29Z",
   "hudkit": "0.4.0",
   "apps": [
     {
@@ -114,15 +114,6 @@
       "icon": "https://jamesrisberg.github.io/machud/icons/usagehud.png",
       "homepage": "https://github.com/jamesrisberg/usagehud",
       "bundled": true
-    },
-    {
-      "kind": "windowed",
-      "version": "0.4.0",
-      "minOS": "14.0",
-      "sha256": "ea7c6f8cdebbbca689632cabac1dee878b2f398c5aa4cb8aed80938717110adf",
-      "size": 2288890,
-      "publishedAt": "2026-10-13T20:12:05Z",
-      "bundled": false
     },
     {
       "id": "xyz.machud.sift",
