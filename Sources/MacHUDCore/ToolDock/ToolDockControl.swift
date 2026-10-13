@@ -36,7 +36,7 @@ extension ToolDock {
             break
         case "show": setEnabled(true)
         case "hide": setEnabled(false)
-        case "toggle": setEnabled(!config().isEnabled)
+        case "toggle": setEnabled(!isShowing)
         case "position":
             var position: HUDDockPosition?
             if let raw = args["position"] ?? args["to"] {

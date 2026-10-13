@@ -73,6 +73,18 @@ final class ToolDock: NSObject, Panel {
     /// Set while a click or summon drives the hover machine, so the hover panel it shows
     /// reports not reaching the screen; a passing hover only records it.
     private var showsLoudly = false
+    /// Brought up by the HUD summon (`HUDSummon`): it shows, out of its edge, whatever
+    /// `toolDock.enabled` and `autoHide` say, and changes neither.
+    private(set) var summoned = false
+    /// The summon puts the dock on the display holding this point (the wheel's centre).
+    private var summonPoint: CGPoint?
+    /// See `HUDSummonDock.hoverPaused`. Pausing closes a panel shown by hovering; a pinned one stays.
+    var hoverPaused = false {
+        didSet {
+            guard hoverPaused, !oldValue, let active = hover.active else { return }
+            perform(hover.close(active))
+        }
+    }
 
     init(registry: PanelRegistry, externals: ExternalPanels, config: @escaping () -> ToolDockConfig,
          saveConfig: @escaping (ToolDockConfig) -> Void, stateURL: URL = ToolDockStore.defaultURL, ui: Bool = true) {
@@ -108,7 +120,17 @@ final class ToolDock: NSObject, Panel {
     func show() { setEnabled(true) }
     func hide() { setEnabled(false) }
 
+    /// On screen now: turned on, or brought up by the summon (which needs a button to show).
+    var isShowing: Bool { config().isEnabled || showsForSummon }
+    private var showsForSummon: Bool { summoned && !items.isEmpty }
+
+    /// Turns the dock on or off. A summon showing it ends here: the setting is what the user
+    /// asked for.
     func setEnabled(_ on: Bool) {
+        if summoned {
+            summoned = false
+            summonPoint = nil
+        }
         var c = config()
         guard c.isEnabled != on else { refresh(); return }
         c.enabled = on
@@ -129,11 +151,16 @@ final class ToolDock: NSObject, Panel {
         var frame: CGRect { placement.frame }
     }
 
-    func geometry() -> Geometry? {
+    /// Where the dock is now: on the summon's display while summoned, else on its own.
+    func geometry() -> Geometry? { geometry(summoned: summoned) }
+
+    /// `summoned` false: where the settings put it, which is what the dock registry publishes.
+    func geometry(summoned: Bool) -> Geometry? {
         let list = screens()
         guard let first = list.first else { return nil }
         let c = config()
-        let screen = list.first { $0.name == c.screen } ?? first
+        let onSummon = summoned ? summonPoint.flatMap { p in list.first { $0.frame.contains(p) } } : nil
+        let screen = onSummon ?? list.first { $0.name == c.screen } ?? first
         let groups = ToolDockModel.groups(items)
         let layout = ToolDockLayout(position: c.dockPosition, iconSize: CGFloat(c.icon))
             .fitted(groups: groups, visible: screen.visible)
@@ -170,29 +197,30 @@ final class ToolDock: NSObject, Panel {
             perform(hover.retain(Set(items.filter(\.isHover).map(\.id))))
         }
         watchRegistry()
-        guard c.isEnabled, let g = geometry() else {
-            unpublish()
+        // Sibling strips sit next to the dock the settings place, never a summoned one.
+        if c.isEnabled, let g = geometry(summoned: false) { publish(g) } else { unpublish() }
+        guard c.isEnabled || showsForSummon, let g = geometry() else {
+            shownConfig = nil
             guard ui else { return }
             stopTimer()
             if let w = dockWindow, w.isVisible { HUDAnimation.fadeOut(w) }
-            shownConfig = nil
             return
         }
-        publish(g)
-        guard ui else { return }
-        let window = dockWindow ?? makeWindow()
-        if let view {
-            view.style = g.layout.style
-            view.magnify = c.isMagnified
-            view.apply(items: items.map { $0.stripItem(indicator: indicator(for: $0)) }, placement: g.placement.local)
-        }
-        if !c.isAutoHide {
+        if summoned || !c.isAutoHide {
             tucked = false
             _ = autoHide.conceal()
         } else if shownConfig?.isAutoHide != true {
             // Just turned on: start hidden.
             tucked = true
             _ = autoHide.conceal()
+        }
+        shownConfig = c
+        guard ui else { return }
+        let window = dockWindow ?? makeWindow()
+        if let view {
+            view.style = g.layout.style
+            view.magnify = c.isMagnified
+            view.apply(items: items.map { $0.stripItem(indicator: indicator(for: $0)) }, placement: g.placement.local)
         }
         let target = tucked ? g.hidden : g.frame
         if !isDragging {
@@ -203,8 +231,52 @@ final class ToolDock: NSObject, Panel {
                 setFrame(target, animated: true)
             }
         }
-        shownConfig = c
         startTimer()
+    }
+
+    // MARK: - HUD summon
+
+    /// See `HUDSummonDock.setSummoned`. Put back, an auto-hidden dock tucks away again and the
+    /// panels open from its buttons close with it, as they do when it is turned off; windowed
+    /// panels are windows and stay.
+    func setSummoned(_ on: Bool, at point: CGPoint?) {
+        if on {
+            summoned = true
+            summonPoint = point
+            refresh()
+            return
+        }
+        guard summoned else { return }
+        summoned = false
+        summonPoint = nil
+        let c = config()
+        if !c.isEnabled || c.isAutoHide { perform(hover.shown.flatMap { hover.close($0) }) }
+        if c.isEnabled, c.isAutoHide {
+            tucked = true
+            _ = autoHide.conceal()
+        }
+        refresh()
+    }
+
+    /// See `HUDSummonDock.summonKeepFrames`: the dock's arms, the hover panels showing and the
+    /// windowed panels of its buttons that are on screen, each as the app reports it.
+    var summonKeepFrames: [CGRect] {
+        guard isShowing, let g = geometry() else { return [] }
+        var out = g.placement.segments.map { $0.insetBy(dx: -2, dy: -2) }
+        out += hover.shown.compactMap { panelFrame(of: $0) }
+        for item in items where !item.isHover {
+            for id in item.panelIDs {
+                guard let panel = registry.panel(id: id), panel.isVisible else { continue }
+                if let external = panel as? ExternalPanel {
+                    if let f = externals.supervisor.record(external.app.id)?.frames[external.panelID] ?? external.currentFrame {
+                        out.append(f)
+                    }
+                } else if let f = panel.window?.frame {
+                    out.append(f)
+                }
+            }
+        }
+        return out
     }
 
     // MARK: - Dock registry
@@ -357,7 +429,7 @@ final class ToolDock: NSObject, Panel {
 
     /// One poll of the pointer: hover buttons and auto-hide. Public for tests.
     func step(mouse: CGPoint, now: TimeInterval) {
-        guard !isDragging, let g = geometry() else { return }
+        guard !isDragging, !hoverPaused, let g = geometry() else { return }
         var buttons: [String: CGRect] = [:]
         if !tucked {
             for item in items where item.isHover {
@@ -367,7 +439,8 @@ final class ToolDock: NSObject, Panel {
         let region = hover.active.map { hoverRegion($0, in: g) } ?? []
         perform(hover.update(mouse: mouse, buttons: buttons, region: region, now: now))
 
-        guard config().isAutoHide else { return }
+        // Summoned, it stays out until the summon ends.
+        guard config().isAutoHide, !summoned else { return }
         let overPanels = hover.shown.compactMap { panelFrame(of: $0) }.contains { $0.insetBy(dx: -4, dy: -4).contains(mouse) }
         let inside = g.placement.contains(mouse) || overPanels || menuOpen || !hover.shown.isEmpty
         let trigger = tucked ? g.layout.revealZone(g.frame, screen: g.screen.frame).contains(mouse) : inside
@@ -835,7 +908,7 @@ final class ToolDock: NSObject, Panel {
         let c = config()
         var d: [String: Any] = ["enabled": c.isEnabled, "position": c.dockPosition.rawValue,
                                 "autoHide": c.isAutoHide, "iconSize": c.icon, "magnify": c.isMagnified,
-                                "visible": isVisible, "tucked": tucked]
+                                "visible": isVisible, "tucked": tucked, "summoned": summoned]
         if let screen = c.screen { d["screen"] = screen }
         let g = geometry()
         if let g {
