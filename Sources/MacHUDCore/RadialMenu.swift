@@ -44,7 +44,9 @@ struct RadialNode: Equatable {
     /// The line under the wheel while it is highlighted: what releasing does, or where to go on.
     var hint: String
     /// Its direction from the centre, clockwise from straight up, in radians: the same every
-    /// time the wheel opens with the same petals (`RadialMenu.tree`).
+    /// time the wheel opens with the same petals (`RadialMenu.tree`). An action's only orders it
+    /// among its siblings: `RadialLayout` places it as a leaf beside its branch, and the
+    /// direction the centre sees it in is its petal's (`RadialLayout.petal(_:)`).
     var angle: Double
     var icons: [NSImage] = []
     var hotkey: HotKey? = nil
@@ -129,9 +131,8 @@ final class RadialMenu {
     /// (15° and 45° each side), alternating outward. Five labels side by side across the top are
     /// as many as the sector holds without pushing the row far out.
     nonisolated static let loadoutRows: [[Double]] = [[0, 1, -1, 2, -2], [0.5, -0.5, 1.5, -1.5]]
-    /// Between neighbouring actions beyond Capture, Park or Widgets.
-    nonisolated static let toolStep = 30.0 * .pi / 180
-    /// Between a loadout's actions.
+    /// Between neighbouring actions of a branch (a loadout's, Capture's, Park's or Widgets'), in
+    /// the tree: it orders them clockwise about the branch's direction.
     nonisolated static let actionStep = 22.0 * .pi / 180
 
     /// Where each of `count` loadouts goes: its row (0 the innermost) and its angle from Apply
@@ -188,12 +189,13 @@ final class RadialMenu {
         ]
         return RadialNode(id: name, name: name, kind: .loadout(name), hint: "Move out to preview or apply \(name)",
                           angle: angle, icons: entry.icons, hotkey: entry.hotkey,
-                          children: leaves(actions, around: angle, step: actionStep), row: row)
+                          children: leaves(actions, around: angle), row: row)
     }
 
+    /// `actions` as leaves fanning out about `angle`, their branch's direction.
     nonisolated private static func leaves(_ actions: [(id: String, name: String, hint: String, outcome: Outcome)],
-                                           around angle: Double, step: Double) -> [RadialNode] {
-        zip(actions, spread(actions.count, step: step)).map { action, offset in
+                                           around angle: Double) -> [RadialNode] {
+        zip(actions, spread(actions.count, step: actionStep)).map { action, offset in
             RadialNode(id: action.id, name: action.name, kind: .action(action.outcome), hint: action.hint,
                        angle: RadialGeometry.normalized(angle + offset))
         }
@@ -206,7 +208,7 @@ final class RadialMenu {
         actions.append(("draw", "Draw layout", "Draw a new layout", .drawLayout))
         return RadialNode(id: captureID, name: "Capture", kind: .capture(offersAllScreens: offersAllScreens),
                           hint: "Move out to capture", angle: angle, icons: symbol("camera.viewfinder"),
-                          children: leaves(actions, around: angle, step: toolStep))
+                          children: leaves(actions, around: angle))
     }
 
     nonisolated static func parkNode(_ targets: ParkTargets) -> RadialNode {
@@ -221,7 +223,7 @@ final class RadialMenu {
         return RadialNode(id: parkID, name: "Park", kind: .park(targets), hint: "Move out to park or restore", angle: angle,
                           icons: symbol("rectangle.portrait.and.arrow.right"),
                           children: leaves([("park", "Park", park, .park(restore: false)), ("restore", "Restore", restore, .park(restore: true))],
-                                           around: angle, step: toolStep))
+                                           around: angle))
     }
 
     nonisolated static func widgetsNode(_ state: WidgetsState) -> RadialNode {
@@ -233,7 +235,7 @@ final class RadialMenu {
                           angle: angle, icons: symbol("square.grid.2x2"),
                           children: leaves([("reveal", reveal.0, reveal.1, .widgets(edit: false, on: !state.revealed)),
                                             ("edit", edit.0, edit.1, .widgets(edit: true, on: !state.editing))],
-                                           around: angle, step: toolStep))
+                                           around: angle))
     }
 
     // MARK: Reading the tree
@@ -338,8 +340,10 @@ final class RadialMenu {
     static func json(tree: [RadialNode], layout: RadialLayout, selection: [String]? = nil) -> [String: Any] {
         func describe(_ node: RadialNode, parent: [String], digit: Int) -> [String: Any] {
             let path = parent + [node.id]
+            // Where the centre sees it: an action sits beside its branch, wherever its place among
+            // its siblings puts it.
             var d: [String: Any] = ["id": node.id, "path": path.joined(separator: "/"), "name": node.name,
-                                    "kind": node.kind.label, "hint": node.hint, "angle": node.angle]
+                                    "kind": node.kind.label, "hint": node.hint, "angle": layout.petal(path)?.angle ?? node.angle]
             if let word = layout.word(path) { d["radius"] = Double(RadialGeometry.radius(of: word.anchor)) }
             if case .loadout = node.kind { d["row"] = node.row + 1 }
             if digit <= 9 { d["digit"] = digit }

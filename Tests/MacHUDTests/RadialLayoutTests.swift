@@ -188,6 +188,8 @@ final class RadialLayoutTests: XCTestCase {
         everyLayout { layout, tree, what in
             for word in layout.words {
                 guard let path = word.role.path, let node = RadialMenu.node(at: path, in: tree) else { continue }
+                // An action sits beside its branch instead (`testABranchsActionsSitAsLeavesJustBeyondIt`).
+                if node.isLeaf { continue }
                 let a = node.angle
                 XCTAssertEqual(RadialGeometry.angle(of: word.anchor), RadialGeometry.normalized(a), accuracy: 1e-6, "\(what): \(path)")
                 let f = word.frame, anchor = word.anchor
@@ -200,11 +202,41 @@ final class RadialLayoutTests: XCTestCase {
         }
     }
 
-    /// A branch's children sit on one circle per row, beyond the branch's own anchor, each row
-    /// further out than the one before and clear of the actions its loadouts unfold.
-    func testABranchsChildrenSitOnACirclePerRowBeyondIt() {
+    /// A branch's actions sit as leaves just beyond it: all past the same edge of its grown word
+    /// (above or below a loadout or Park, beside Capture or Widgets), the nearest a stem's length
+    /// and both bubbles from its word grown and no further than three of those, the others
+    /// packed close behind it.
+    func testABranchsActionsSitAsLeavesJustBeyondIt() {
         everyLayout { layout, tree, what in
             for branch in layout.branches where !branch.isEmpty {
+                guard let node = RadialMenu.node(at: branch, in: tree), let parent = layout.word(branch),
+                      node.children.allSatisfy(\.isLeaf) else { continue }
+                let s = layout.scale
+                let room = (2 * RadialGlass.padding.width + RadialLayout.stem) * s
+                let words = node.children.compactMap { layout.word(branch + [$0.id]) }
+                let g = parent.grownFrame
+                let edges: [(String, (CGRect) -> Bool)] = [("above", { $0.minY >= g.maxY }), ("below", { $0.maxY <= g.minY }),
+                                                          ("right", { $0.minX >= g.maxX }), ("left", { $0.maxX <= g.minX })]
+                XCTAssertTrue(edges.contains { _, beyond in words.allSatisfy { beyond($0.frame) } }, "\(what): \(branch) past one edge")
+                func apart(_ f: CGRect) -> CGFloat { max(f.minY - g.maxY, g.minY - f.maxY, f.minX - g.maxX, g.minX - f.maxX) }
+                for word in words {
+                    XCTAssertFalse(g.insetBy(dx: -room + 0.01, dy: -room + 0.01).intersects(word.frame), "\(what): \(word.role) keeps a stem's room")
+                }
+                let gaps = words.map { apart($0.frame) }
+                // Three rooms: a loadout at a row's edge has its neighbour's place above it.
+                XCTAssertLessThan(gaps.min() ?? 0, 3 * room, "\(what): \(branch)'s nearest action is near it")
+                let step = (words.map(\.frame.height).max() ?? 0) + 2 * RadialGlass.padding.height * s + RadialLayout.wordGap * s
+                XCTAssertLessThanOrEqual((gaps.max() ?? 0) - (gaps.min() ?? 0), CGFloat(words.count - 1) * step + 0.5,
+                                         "\(what): \(branch)'s actions packed close")
+            }
+        }
+    }
+
+    /// The loadouts sit on one circle per row, beyond Apply Loadout's anchor, each row further
+    /// out than the one before and clear of the actions the row inside it unfolds.
+    func testTheLoadoutsSitOnACirclePerRowBeyondApplyLoadout() {
+        everyLayout { layout, tree, what in
+            for branch in layout.branches where branch == [RadialMenu.loadoutsID] {
                 guard let node = RadialMenu.node(at: branch, in: tree), let parent = layout.word(branch) else { continue }
                 var previous = RadialGeometry.radius(of: parent.anchor)
                 for row in Set(node.children.map(\.row)).sorted() {
@@ -214,14 +246,12 @@ final class RadialLayoutTests: XCTestCase {
                     XCTAssertGreaterThan(radii.min() ?? 0, previous, "\(what): \(branch) row \(row)")
                     previous = radii.max() ?? previous
                 }
-                // An inner row's actions lie inside the next row.
+                // An inner row's actions keep clear of the next row's places.
                 for child in node.children where node.children.contains(where: { $0.row > child.row }) {
                     let next = node.children.filter { $0.row == child.row + 1 }.compactMap { layout.word(branch + [$0.id]) }
-                    let innerEdge = next.map { RadialLayout.distance(to: $0.frame) }.min() ?? .infinity
                     for action in child.children {
                         let frame = layout.word(branch + [child.id, action.id])?.grownFrame ?? .null
                         XCTAssertFalse(next.contains { $0.frame.intersects(frame) }, "\(what): \(child.id)/\(action.id)")
-                        XCTAssertLessThan(RadialLayout.distance(to: frame), innerEdge, "\(what): \(child.id)/\(action.id)")
                     }
                 }
             }
@@ -389,7 +419,8 @@ final class RadialLayoutTests: XCTestCase {
                 }
                 let rows = CGFloat(petal?.rows.count ?? 1)
                 for branch in layout.branches {
-                    XCTAssertLessThanOrEqual(reach(layout, open: branch), 400 + (rows - 1) * 210, "\(what), \(branch)")
+                    // A loadout at the sector's edge has its actions beside it, further round.
+                    XCTAssertLessThanOrEqual(reach(layout, open: branch), 410 + (rows - 1) * 210, "\(what), \(branch)")
                 }
             }
         }
@@ -465,20 +496,17 @@ final class RadialLayoutTests: XCTestCase {
     }
 
     /// Any loadout's actions are reached the way the wheel unfolds them: onto Apply Loadout,
-    /// out past where the loadouts start and round to the loadout, onto it, out past where its
-    /// actions start and round to the action, onto it. Nothing on the way is previewed or
-    /// applied: only the release does that.
+    /// out past where the loadouts start and round to the loadout, onto it, and on to the action
+    /// along its branch. Nothing on the way is previewed or applied: only the release does that.
     func testEveryActionIsReachedAlongItsPath() {
         everyLayout { layout, tree, what in
             guard let ring = layout.petal(["loadouts"])?.start, ring.isFinite else { return }
             for loadout in tree[0].children {
-                guard let out = layout.petal(["loadouts", loadout.id])?.start else { return XCTFail(what) }
                 for action in loadout.children {
                     let path = ["loadouts", loadout.id, action.id]
                     var points = [Self.middle(layout, ["loadouts"])]
                     points += Self.arc(from: 0, to: loadout.angle, radius: ring + 2)
                     points.append(Self.middle(layout, ["loadouts", loadout.id]))
-                    points += Self.arc(from: loadout.angle, to: action.angle, radius: out + 2)
                     points.append(Self.middle(layout, path))
                     XCTAssertEqual(Self.walk(layout, points), path, what)
                 }
