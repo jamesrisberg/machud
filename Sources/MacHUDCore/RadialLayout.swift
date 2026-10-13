@@ -184,24 +184,36 @@ struct RadialLayout: Equatable {
 
     /// The path the pointer at `p` selects, the last selection being `open`:
     /// - nothing (the centre) inside the dead zone;
-    /// - the highlighted petal while the pointer is on it as it is grown;
-    /// - a petal open along `open`, the deepest first, keeps the pointer while it is within its
-    ///   children's arc and either past where they start (`hold(_:radius:angle:)`: the petal under
-    ///   the pointer among what unfolded beyond it, else its child nearest the pointer's
-    ///   direction, and on out) or out at the petal's own circle (the word under the pointer among
-    ///   its siblings and what unfolded beyond them, else the petal itself). A top petal's own
-    ///   circle starts at the dead zone's edge and it has no siblings there: while it is open, no
-    ///   other top petal takes the pointer within its children's arc; going back through the
-    ///   centre does. So moving among a branch's children, from Apply Loadout's word to a loadout
-    ///   across Capture's, Park's or Widgets' word, or from a loadout toward its outermost action
-    ///   across a neighbour's direction, never opens another branch on the way;
+    /// - a petal along `open` while the pointer is on its word (the highlighted one's grown), the
+    ///   deepest first: back on a loadout's name, the loadout, not one of its actions;
+    /// - a petal open along `open`, the deepest first, keeps the pointer (`hold(_:radius:angle:)`):
+    ///   - a branch whose children are actions (a loadout, Capture, Park, Widgets), wherever the
+    ///     pointer is on its actions or the way out to them (`Petal.leaves`), whatever its
+    ///     direction: the word under the pointer among its siblings and what unfolded beyond them,
+    ///     else its action nearest the pointer;
+    ///   - any petal out at its own circle within its children's arc (a top petal: past the dead
+    ///     zone): the word under the pointer among its siblings and what unfolded beyond them,
+    ///     else the petal itself;
+    ///   - Apply Loadout past where the loadouts start, within their arc: the word under the
+    ///     pointer among them and what unfolded beyond them, else the loadout nearest the
+    ///     pointer's direction on the row it is out at, and on to that one's actions where the
+    ///     pointer is on their way.
+    ///   A top petal has no siblings at its own circle: while it is open, no other top petal
+    ///   takes the pointer within its children's arc; going back through the centre does. So
+    ///   moving among a branch's children, from Apply Loadout's word to a loadout across
+    ///   Capture's, Park's or Widgets' word, or from a loadout out to its actions, never opens
+    ///   another branch on the way;
     /// - else the petal showing under the pointer;
     /// - else, out from the centre, the top petal nearest its direction, then (past where that
     ///   branch's children start, within their arc) the child nearest it, and so on.
     func selection(at p: CGPoint, open: [String]) -> [String] {
         let r = RadialGeometry.radius(of: p)
         guard r >= deadZone, !top.isEmpty else { return [] }
-        if !open.isEmpty, let lit = word(open), lit.grownFrame.contains(p) { return open }
+        for depth in stride(from: open.count, through: 1, by: -1) {
+            let path = Array(open.prefix(depth))
+            guard let word = word(path) else { continue }
+            if (depth == open.count ? word.grownFrame : word.frame).contains(p) { return path }
+        }
         let a = RadialGeometry.angle(of: p)
         let shown = showing(open: openBranch(open))
         func under(_ scope: [String]) -> [String]? {
@@ -209,7 +221,7 @@ struct RadialLayout: Equatable {
         }
         if let hold = hold(open, radius: r, angle: a) {
             switch hold {
-            case .beyond(let held): return under(hold.scope) ?? outward(from: held, radius: r, angle: a)
+            case .beyond(let held), .leaves(let held): return under(hold.scope) ?? outward(from: held, radius: r, angle: a)
             case .at(let held): return under(hold.scope) ?? held
             }
         }
@@ -218,17 +230,20 @@ struct RadialLayout: Equatable {
 
     /// How a petal open along a path keeps the pointer (`selection(at:open:)`).
     enum Hold: Equatable {
-        /// Past where its children start, within their arc.
+        /// Apply Loadout past where its children start, within their arc.
         case beyond([String])
+        /// On a branch's actions or the way out to them (`Petal.leaves`).
+        case leaves([String])
         /// Out at its own circle (a top petal: past the dead zone), within its children's arc.
         case at([String])
 
         /// Where the words keep the pointer: the held petal's descendants past where its
-        /// children start, and out at its own circle its siblings' too, below the top petals.
+        /// children start, and on its actions or out at its own circle its siblings' too, below
+        /// the top petals.
         var scope: [String] {
             switch self {
             case .beyond(let held): return held
-            case .at(let held): return held.count == 1 ? held : Array(held.dropLast())
+            case .at(let held), .leaves(let held): return held.count == 1 ? held : Array(held.dropLast())
             }
         }
     }
@@ -236,14 +251,13 @@ struct RadialLayout: Equatable {
     /// The petal along `open` that keeps a pointer at radius `r` and angle `a`, the deepest first.
     func hold(_ open: [String], radius r: CGFloat, angle a: Double) -> Hold? {
         let branch = openBranch(open)
+        let p = RadialGeometry.point(r, a)
         for depth in stride(from: branch.count, through: 1, by: -1) {
             let held = Array(branch.prefix(depth))
-            guard let petal = petals[held], petal.hasChildren, petal.covers(a) else { continue }
-            if r >= petal.end {
-                let p = RadialGeometry.point(r, a)
-                guard petal.leaves.contains(where: { $0.contains(p) }) else { continue }
-            }
-            if r >= petal.start { return .beyond(held) }
+            guard let petal = petals[held], petal.hasChildren else { continue }
+            if petal.leaves.contains(where: { $0.contains(p) }) { return .leaves(held) }
+            guard petal.covers(a), r < petal.end else { continue }
+            if petal.leaves.isEmpty, r >= petal.start { return .beyond(held) }
             let circle = depth == 1 ? deadZone : word(held).map { RadialGeometry.radius(of: $0.anchor) } ?? .infinity
             if r >= circle { return .at(held) }
         }
@@ -269,8 +283,14 @@ struct RadialLayout: Equatable {
                 return abs(RadialGeometry.difference(a, petals[parent + [id]]?.angle ?? 0))
             }
             path.append(ids.min { distance($0) < distance($1) }!)
-            guard let petal = petals[path], petal.hasChildren, r >= petal.start, petal.covers(a),
-                  r < petal.end || petal.leaves.contains(where: { $0.contains(p) }) else { break }
+            guard let petal = petals[path], petal.hasChildren else { break }
+            // On to a branch's actions only on their way; to Apply Loadout's loadouts past where
+            // they start, within their arc.
+            if petal.leaves.isEmpty {
+                guard r >= petal.start, r < petal.end, petal.covers(a) else { break }
+            } else {
+                guard petal.leaves.contains(where: { $0.contains(p) }) else { break }
+            }
             ids = petal.row(at: r)
         }
         return path
