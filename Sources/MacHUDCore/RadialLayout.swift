@@ -45,8 +45,6 @@ struct RadialLayout: Equatable {
         var style: TextFit.Style
         /// The word's box, icons included.
         var frame: CGRect
-        /// Where each line sits across the frame: 0 at its left edge, 1 at its right.
-        var align: CGFloat
         /// Icons in a row under the lines.
         var icons: Int
         /// The point the word is anchored at, on its direction; it grows from here.
@@ -525,15 +523,14 @@ struct RadialLayout: Equatable {
         let fit = TextFit(lines: ["\(index + 1)"], size: style.preferred, truncated: false)
         let p = RadialGeometry.point(deadZone - digitInset * s, angle)
         return Word(role: .digit(index), fit: fit, style: style, frame: box(fit, style: style, centredAt: p),
-                    align: 0.5, icons: 0, anchor: p)
+                    icons: 0, anchor: p)
     }
 
     /// The centre's word, as wide as the wider of "Esc" and "Cancel".
     private static func centre(scale s: CGFloat) -> Word {
         let style = TextFit.Style.centre.scaled(s)
         let fit = TextFit(lines: ["Cancel"], size: style.preferred, truncated: false)
-        return Word(role: .centre, fit: fit, style: style, frame: box(fit, style: style, centredAt: .zero), align: 0.5,
-                    icons: 0, anchor: .zero)
+        return Word(role: .centre, fit: fit, style: style, frame: box(fit, style: style, centredAt: .zero), icons: 0, anchor: .zero)
     }
 
     /// 0 for `x` at or below `-0.5`, 1 at or above `0.5`, smoothly between.
@@ -549,7 +546,7 @@ struct RadialLayout: Equatable {
         let align = 1 - blend(sin(a)), lift = 1 - blend(cos(a))
         return Word(role: .node(path), fit: TextFit(lines: [], size: 0, truncated: false), style: .name,
                     frame: CGRect(x: anchor.x - align * size.width, y: anchor.y - lift * size.height, width: size.width, height: size.height),
-                    align: align, icons: 0, anchor: anchor)
+                    icons: 0, anchor: anchor)
     }
 
     /// A petal anchored at `radius` on direction `a`, growing away from the centre.
@@ -564,7 +561,7 @@ struct RadialLayout: Equatable {
         let lift = 1 - blend(cos(a))
         return Word(role: .node(path), fit: fit, style: style,
                     frame: CGRect(x: anchor.x - align * w, y: anchor.y - lift * h, width: w, height: h),
-                    align: align, icons: icons, anchor: anchor)
+                    icons: icons, anchor: anchor)
     }
 
     /// The arc covering `angles` around `centre`, half a step past the outermost on each side;
