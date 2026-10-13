@@ -67,6 +67,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   can ask for results with `machud search query text=<words>`.
 
 ### Changed
+- A loadout's preview shows only where each window will go: the dashed outlines of where windows
+  are now, and of windows leaving for another display, are gone (the windows show through anyway).
 - The wheel's dimmed backdrop now darkens your windows, the menu bar and the Dock, but not the HUD:
   the tool dock, raised widgets and the apps' panels stay bright under the wheel.
 - A loadout is the screen you are looking at. **Capture This Screen as Loadout…** (the Loadouts
