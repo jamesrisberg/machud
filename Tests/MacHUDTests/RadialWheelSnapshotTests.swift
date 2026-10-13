@@ -4,12 +4,13 @@ import XCTest
 @testable import MacHUDCore
 
 /// Renders the loadout wheel offscreen for review, as the screen would show it: a generated
-/// desktop (shapes and text, never a screenshot), sharp outside the field and, inside it,
-/// blurred (a Gaussian of radius 25 pt, the soft backdrop's) through the field's blur profile
-/// for what shows, under the wheel's tint through its tint profile, with the wheel's view drawn
-/// on top, settled with the shot's path highlighted. No window is ordered in and nothing acts on
-/// the desktop. Pictures go to `MACHUD_WHEEL_SNAPSHOT_DIR`; without it they are rendered and
-/// checked, and nothing is written.
+/// desktop (shapes and text, never a screenshot) and the wheel's view drawn over it, settled with
+/// the shot's path highlighted (or posed part-way through popping out). Under each bubble the
+/// desktop is blurred (a Gaussian of radius 25 pt, the window server's blur under HUDKit's glass)
+/// within the bubble's shape, at full strength even while it fades in; with Reduce transparency
+/// it is an opaque dark grey there instead (the system's material, a guess). No window is
+/// ordered in and nothing acts on the desktop. Pictures go to `MACHUD_WHEEL_SNAPSHOT_DIR`;
+/// without it they are rendered and checked, and nothing is written.
 @MainActor
 final class RadialWheelSnapshotTests: XCTestCase {
     enum Desktop: String, CaseIterable { case bright, dark, colourful }
@@ -19,15 +20,11 @@ final class RadialWheelSnapshotTests: XCTestCase {
                                "Design critique", "Evening reading", "Code", "Customer support rotation", "Music"]
     private static let apps = ["com.apple.Safari", "com.apple.Terminal", "com.apple.Notes", "com.apple.mail", "com.apple.Music"]
 
-    /// Seen around the canvas, so the picture shows where the field ends.
+    /// Seen around the canvas.
     private static let margin: CGFloat = 40
 
     private var directory: URL? {
         ProcessInfo.processInfo.environment["MACHUD_WHEEL_SNAPSHOT_DIR"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
-    }
-
-    private static func symbol(_ name: String) -> [NSImage] {
-        [NSImage(systemSymbolName: name, accessibilityDescription: nil)].compactMap { $0 }
     }
 
     private static func appIcons(_ count: Int) -> [NSImage] {
@@ -49,17 +46,20 @@ final class RadialWheelSnapshotTests: XCTestCase {
         var tree: [RadialNode]
         var selection: [String]
         var desktop: Desktop
-        /// Reduce transparency on: the soft backdrop shows the system's opaque material.
+        /// Reduce transparency on: the glass shows the system's opaque material.
         var reduced = false
         /// A whole screen of this visible size (a 24 pt menu bar above it), the wheel in the middle of it.
         var screen: CGSize?
+        /// Posed this long after the wheel opened on `from`, then moved to `selection`, rather than at rest.
+        var after: TimeInterval?
+        var from: [String] = []
     }
 
     // MARK: The set
 
     /// What is rendered without `MACHUD_WHEEL_SNAPSHOT_DIR`.
-    private static let checked: Set<String> = ["stage-3-actions-03-bright", "system-material-reduce-transparency-06-bright",
-                                               "screen-1024x640-03-open-bright"]
+    private static let checked: Set<String> = ["stage-3-actions-03-bright", "reduce-transparency-06-bright",
+                                               "screen-1024x640-03-open-bright", "bloom-actions-03-bright-0.08s"]
 
     private func shots() -> [Shot] {
         var out: [Shot] = []
@@ -67,7 +67,7 @@ final class RadialWheelSnapshotTests: XCTestCase {
 
         // The three stages of a path, on a bright and a dark desktop: the top petals as the
         // wheel opens, Apply Loadout reached with three loadouts out, and a loadout's actions out.
-        for desktop in [Desktop.bright, .dark] {
+        for desktop in [Desktop.bright, .dark, .colourful] {
             out.append(Shot(name: "stage-1-top-03-\(desktop.rawValue)", tree: three, selection: [], desktop: desktop))
             out.append(Shot(name: "stage-2-loadouts-03-\(desktop.rawValue)", tree: three, selection: ["loadouts"], desktop: desktop))
             out.append(Shot(name: "stage-3-actions-03-\(desktop.rawValue)", tree: three, selection: ["loadouts", "Reading", "apply"],
@@ -75,14 +75,24 @@ final class RadialWheelSnapshotTests: XCTestCase {
         }
         out.append(Shot(name: "stage-3-loadout-03-colourful", tree: three, selection: ["loadouts", "Code"], desktop: .colourful))
 
+        // Popping out, part-way: the wheel opening, and a loadout's actions unfolding.
+        for t in [0.04, 0.08, 0.14] {
+            out.append(Shot(name: "bloom-open-03-bright-\(t)s", tree: three, selection: [], desktop: .bright, after: t))
+            out.append(Shot(name: "bloom-loadouts-03-dark-\(t)s", tree: three, selection: ["loadouts"], desktop: .dark, after: t))
+            out.append(Shot(name: "bloom-actions-03-bright-\(t)s", tree: three, selection: ["loadouts", "Reading"], desktop: .bright,
+                            after: t, from: ["loadouts"]))
+        }
+        out.append(Shot(name: "bloom-loadouts-14-colourful-0.1s", tree: Self.tree(Self.short, loadouts: 14), selection: ["loadouts"],
+                        desktop: .colourful, after: 0.1))
+
         // More loadouts: up to five on the first row, the rest on rows further out, all in the
         // top sector; and long names.
         let six = Self.tree(Self.short, loadouts: 6), ten = Self.tree(Self.short, loadouts: 10)
         let fourteen = Self.tree(Self.short, loadouts: 14)
-        out.append(Shot(name: "loadouts-03-open-dark", tree: three, selection: ["loadouts"], desktop: .dark))
         out.append(Shot(name: "loadouts-06-open-bright", tree: six, selection: ["loadouts"], desktop: .bright))
         out.append(Shot(name: "loadouts-10-open-dark", tree: ten, selection: ["loadouts"], desktop: .dark))
         out.append(Shot(name: "loadouts-14-open-colourful", tree: fourteen, selection: ["loadouts"], desktop: .colourful))
+        out.append(Shot(name: "loadouts-14-open-bright", tree: fourteen, selection: ["loadouts"], desktop: .bright))
         out.append(Shot(name: "loadouts-10-outer-row-actions-bright", tree: ten, selection: ["loadouts", "Chat", "apply"],
                         desktop: .bright))
         out.append(Shot(name: "loadouts-10-inner-row-actions-dark", tree: ten, selection: ["loadouts", "Focus", "clear"], desktop: .dark))
@@ -109,9 +119,11 @@ final class RadialWheelSnapshotTests: XCTestCase {
         out.append(Shot(name: "no-widgets-no-loadouts-dark", tree: Self.tree(Self.short, loadouts: 0, widgets: nil),
                         selection: ["loadouts"], desktop: .dark))
 
-        // The system's material (Reduce transparency on): opaque and dark, through a plain soft disc.
-        out.append(Shot(name: "system-material-reduce-transparency-06-bright", tree: Self.tree(Self.short, loadouts: 6),
+        // Reduce transparency on: the system's opaque material under every bubble.
+        out.append(Shot(name: "reduce-transparency-06-bright", tree: Self.tree(Self.short, loadouts: 6),
                         selection: ["loadouts", "Mail"], desktop: .bright, reduced: true))
+        out.append(Shot(name: "reduce-transparency-03-actions-colourful", tree: three, selection: ["loadouts", "Reading", "apply"],
+                        desktop: .colourful, reduced: true))
 
         // Whole screens, the wheel in the middle (the pointer moved to its centre as it shows;
         // and on an action): a 13-inch display at Larger Text (1024 by 640, less the menu bar)
@@ -130,17 +142,10 @@ final class RadialWheelSnapshotTests: XCTestCase {
     func testSnapshotsOfTheWheel() throws {
         if let directory { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true) }
         // Without a folder to write to, a few pictures are rendered and checked: one of each way
-        // the harness composes (the blur, the system's material, a whole screen with its pointer).
+        // the harness composes (the blur, the system's material, a whole screen with its
+        // pointer, a pose part-way through popping out).
         let shots = directory == nil ? shots().filter { Self.checked.contains($0.name) } : shots()
-        var pictures = try shots.map { shot in (shot.name, try XCTUnwrap(render(shot), shot.name)) }
-        if directory != nil {
-            // The two profiles alone, with a loadout's actions out, white where they are full.
-            let layout = RadialLayout(tree: Self.tree(Self.short, loadouts: 3))
-            let whole = RadialField(layout: layout, reduced: false)
-            let field = RadialField(shape: .init(layout: layout, open: ["loadouts", "Reading"], reduced: false), over: whole.support)
-            pictures.append(("profile-blur-03-actions", try XCTUnwrap(Self.profile(field.blurImage, size: field.support.size))))
-            pictures.append(("profile-tint-03-actions", try XCTUnwrap(Self.profile(field.tintImage, size: field.support.size))))
-        }
+        let pictures = try shots.map { shot in (shot.name, try XCTUnwrap(render(shot), shot.name)) }
         XCTAssertFalse(pictures.isEmpty)
         for (name, rep) in pictures {
             try assertNotBlank(rep, name)
@@ -152,62 +157,44 @@ final class RadialWheelSnapshotTests: XCTestCase {
         if let directory { print("Wheel snapshots: \(directory.path)") }
     }
 
-    /// How long the wheel takes, offscreen at 2x, printed for review: from a hotkey press to
-    /// its first frame (laying it out, its field, its words) the first time it opens and when it
-    /// opens again, at three and ten loadouts on a large and a small display; how long a
-    /// loadout's actions take to unfold the first time (their field); and one frame with a
-    /// loadout's actions out and one lit.
-    func testHowLongTheWheelTakesToOpenAndToDraw() throws {
+    /// How long the wheel takes, offscreen at 2x, printed for review: from a hotkey press to its
+    /// bubbles showing (laying it out, making the bubbles and drawing their words) the first time
+    /// it opens and when it opens again, at three and ten loadouts on a large and a small
+    /// display; and how long the pointer moving from one loadout to the next takes on the main
+    /// thread, one loadout's actions going and the next one's coming, the first time and after.
+    func testHowLongTheWheelTakesToOpenAndToFollowThePointer() throws {
         let displays = [("1440x900", RadialMenu.Display(frame: CGRect(x: 0, y: 0, width: 1440, height: 900),
                                                         visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 875), primaryHeight: 900)),
                         ("1024x640", RadialMenu.Display(frame: CGRect(x: 0, y: 0, width: 1024, height: 640),
                                                         visibleFrame: CGRect(x: 0, y: 0, width: 1024, height: 616), primaryHeight: 640))]
         for (label, display) in displays {
-            for loadouts in [3, 10] {
+            for loadouts in [3, 10, 20] {
                 let menu = RadialMenu()
                 menu.warpPointer = { _ in }
-                let context = try XCTUnwrap(Self.context(size: CGSize(width: 1400, height: 1400)))
+                let window = menu.makeWindow()
+                defer { window.close() }
                 var times: [Double] = []
                 for _ in 0..<3 {
                     let start = Date()
                     menu.prepare(tree: Self.tree(Self.long, loadouts: loadouts), at: CGPoint(x: display.frame.midX, y: display.frame.midY),
                                  on: display, movesPointer: true)
-                    NSGraphicsContext.saveGraphicsState()
-                    NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-                    NSAppearance(named: .darkAqua)?.performAsCurrentDrawingAppearance { menu.wheel.draw(menu.wheel.bounds) }
-                    NSGraphicsContext.restoreGraphicsState()
+                    menu.wheel.open()
                     times.append(Date().timeIntervalSince(start) * 1000)
+                    menu.wheel.close()
                 }
-                let unfold = Date()
-                _ = menu.field(open: ["loadouts", menu.tree[0].children[0].id])
-                let unfolding = Date().timeIntervalSince(unfold) * 1000
-                print(String(format: "Wheel open to first frame, %d loadouts on %@: first %.0f ms, then %.0f ms and %.0f ms; a loadout's actions' field %.1f ms",
-                             loadouts, label, times[0], times[1], times[2], unfolding))
+                menu.wheel.open()
+                let ids = menu.tree[0].children.map(\.id)
+                var moves: [Double] = []
+                for round in 0..<2 {
+                    let start = Date()
+                    for id in ids { menu.select(path: ["loadouts", id]) }
+                    moves.append(Date().timeIntervalSince(start) * 1000 / Double(ids.count))
+                    if round == 0 { menu.select(path: ["park"]) }
+                }
+                print(String(format: "Wheel open, %d loadouts on %@: first %.0f ms, then %.0f ms and %.0f ms; loadout to loadout %.2f ms, then %.2f ms",
+                             loadouts, label, times[0], times[1], times[2], moves[0], moves[1]))
             }
         }
-
-        let tree = Self.tree(Self.long, loadouts: 10)
-        let layout = RadialLayout(tree: tree)
-        let field = RadialField(layout: layout, reduced: false)
-        let view = RadialWheelView(frame: CGRect(origin: .zero, size: field.canvas.size))
-        view.configure(layout: layout, canvas: field.canvas, tree: tree)
-        view.settle(selection: ["loadouts", tree[0].children[3].id, "apply"])
-        let context = try XCTUnwrap(Self.context(size: field.canvas.size))
-        let frames = 30
-        var elapsed: TimeInterval = 0
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-        NSAppearance(named: .darkAqua)?.performAsCurrentDrawingAppearance {
-            view.draw(view.bounds)
-            let start = Date()
-            for _ in 0..<frames {
-                context.clear(CGRect(origin: .zero, size: field.canvas.size))
-                view.draw(view.bounds)
-            }
-            elapsed = Date().timeIntervalSince(start)
-        }
-        NSGraphicsContext.restoreGraphicsState()
-        print(String(format: "Wheel frame at ten loadouts, an action lit: %.2f ms", elapsed / Double(frames) * 1000))
     }
 
     // MARK: Rendering
@@ -220,65 +207,121 @@ final class RadialWheelSnapshotTests: XCTestCase {
         return context
     }
 
+    /// Each animation on `layer` evaluated `t` after `start` (layer time) into the layer's model
+    /// values: the spring's samples as they are, the fades linearly.
+    private static func pose(_ layer: CALayer, at t: TimeInterval, from start: CFTimeInterval) {
+        for key in layer.animationKeys() ?? [] {
+            guard let animation = layer.animation(forKey: key) else { continue }
+            let begin = animation.beginTime == 0 ? start : animation.beginTime
+            let u = max(0, min(1, (start + t - begin) / animation.duration))
+            if let keys = animation as? CAKeyframeAnimation, let values = keys.values as? [NSValue] {
+                layer.setValue(values[Int((u * Double(values.count - 1)).rounded())], forKeyPath: keys.keyPath!)
+            } else if let basic = animation as? CABasicAnimation, basic.keyPath == "opacity",
+                      let from = basic.fromValue as? Float, let to = basic.toValue as? Float {
+                layer.opacity = from + (to - from) * Float(u)
+            } else if let basic = animation as? CABasicAnimation, let from = basic.fromValue as? NSValue, let to = basic.toValue as? NSValue {
+                // A shrink: a scale and a translation, each linear between its ends.
+                let (a, b) = (from.caTransform3DValue, to.caTransform3DValue)
+                func mix(_ x: CGFloat, _ y: CGFloat) -> CGFloat { x + (y - x) * CGFloat(u) }
+                var m = CATransform3DIdentity
+                (m.m11, m.m22, m.m41, m.m42) = (mix(a.m11, b.m11), mix(a.m22, b.m22), mix(a.m41, b.m41), mix(a.m42, b.m42))
+                layer.setValue(NSValue(caTransform3D: m), forKeyPath: basic.keyPath!)
+            }
+        }
+    }
+
+    /// The wheel's view for `shot`, settled or posed, in an offscreen window that is never
+    /// ordered in.
+    private func wheel(_ shot: Shot, layout: RadialLayout, canvas: RadialMenu.Canvas) -> (RadialWheelView, NSWindow) {
+        let window = NSWindow(contentRect: CGRect(origin: .zero, size: canvas.size), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: .darkAqua)
+        let view = RadialWheelView(frame: CGRect(origin: .zero, size: canvas.size))
+        window.contentView?.addSubview(view)
+        view.reducesMotion = { false }
+        view.configure(layout: layout, canvas: canvas, tree: shot.tree)
+        if let t = shot.after {
+            // Opened on `from` and settled there (unless that is where it stays), then moved on.
+            view.selection = shot.from
+            var start = view.layer.map { $0.convertTime(CACurrentMediaTime(), from: nil) } ?? CACurrentMediaTime()
+            view.open()
+            if shot.from != shot.selection {
+                for bubble in view.subviews.compactMap({ $0 as? RadialBubble }) { bubble.layer?.removeAllAnimations() }
+                start = view.layer.map { $0.convertTime(CACurrentMediaTime(), from: nil) } ?? CACurrentMediaTime()
+            }
+            view.selection = shot.selection
+            for bubble in view.subviews.compactMap({ $0 as? RadialBubble }) where !bubble.isHidden {
+                if let layer = bubble.layer { Self.pose(layer, at: t, from: start) }
+            }
+        } else {
+            view.settle(selection: shot.selection)
+        }
+        // A window never ordered in builds its views' layers when it is told to display.
+        window.display()
+        return (view, window)
+    }
+
+    /// Every layer of the tree has drawn its contents.
+    private static func display(_ layer: CALayer) {
+        layer.displayIfNeeded()
+        for sub in layer.sublayers ?? [] { display(sub) }
+    }
+
     private func render(_ shot: Shot) -> NSBitmapImageRep? {
         let layout: RadialLayout
         let centre: CGPoint
-        let size: CGSize
         if let screen = shot.screen {
-            // A whole screen with its menu bar, the wheel where it would open.
             let placed = RadialMenu.place(tree: shot.tree, visibleFrame: CGRect(origin: .zero, size: screen))
-            layout = placed.layout
-            centre = placed.center
-            size = CGSize(width: screen.width, height: screen.height + 24)
+            (layout, centre) = (placed.layout, placed.center)
         } else {
-            layout = RadialLayout(tree: shot.tree)
-            centre = .zero
-            size = .zero
+            (layout, centre) = (RadialLayout(tree: shot.tree), .zero)
         }
-        // The field of what shows with this selection, over the whole wheel's rectangle.
-        let whole = RadialField(layout: layout, reduced: shot.reduced)
-        let field = RadialField(shape: .init(layout: layout, open: shot.selection, reduced: shot.reduced), over: whole.support)
-        let profiles = (rect: field.support, blur: field.blurImage, tint: field.tintImage)
-        // Otherwise the picture is the profiles' rectangle with a margin.
-        let (picture, wheelCentre) = shot.screen != nil ? (size, centre)
-            : (CGSize(width: profiles.rect.width + 2 * Self.margin, height: profiles.rect.height + 2 * Self.margin),
-               CGPoint(x: Self.margin - profiles.rect.minX, y: Self.margin - profiles.rect.minY))
+        let canvas = RadialWheelView.canvas(for: layout)
+        let picture = shot.screen.map { CGSize(width: $0.width, height: $0.height + 24) }
+            ?? CGSize(width: canvas.size.width + 2 * Self.margin, height: canvas.size.height + 2 * Self.margin)
+        let wheelCentre = shot.screen != nil ? centre : CGPoint(x: Self.margin + canvas.center.x, y: Self.margin + canvas.center.y)
         guard let context = Self.context(size: picture) else { return nil }
         let bounds = CGRect(origin: .zero, size: picture)
-        let rect = profiles.rect.offsetBy(dx: wheelCentre.x, dy: wheelCentre.y)
 
         let desktop = Self.desktop(shot.desktop, size: picture)
         context.draw(desktop, in: bounds)
         if shot.screen != nil { Self.menuBar(in: context, width: picture.width, top: picture.height) }
-        // The backdrop through the blur profile: the blurred desktop, or with Reduce
-        // transparency the system's material (opaque, dark; its grey here is a guess).
-        guard let blurMask = Self.grey(profiles.blur), let tintMask = Self.grey(profiles.tint) else { return nil }
-        context.saveGState()
-        context.clip(to: rect, mask: blurMask)
-        if shot.reduced {
-            context.setFillColor(NSColor(srgbRed: 0.16, green: 0.16, blue: 0.17, alpha: 1).cgColor)
-            context.fill(bounds)
-        } else if let blurred = Self.blur(desktop) {
-            context.draw(blurred, in: bounds)
+
+        let (view, window) = wheel(shot, layout: layout, canvas: canvas)
+        defer { window.close() }
+        let origin = CGPoint(x: wheelCentre.x - canvas.center.x, y: wheelCentre.y - canvas.center.y)
+        // The window server's blur, under every bubble that draws, in its shape as it is now.
+        let blurred = shot.reduced ? nil : Self.blur(desktop)
+        for bubble in view.subviews.compactMap({ $0 as? RadialBubble }) where !bubble.isHidden && (bubble.layer?.opacity ?? 0) > 0 {
+            guard let layer = bubble.layer else { continue }
+            let frame = bubble.frame.offsetBy(dx: origin.x, dy: origin.y)
+            let radius = bubble.glass.style.cornerRadius
+            var shape = CGPath(roundedRect: CGRect(origin: .zero, size: frame.size), cornerWidth: radius, cornerHeight: radius, transform: nil)
+            var move = CGAffineTransform(translationX: frame.minX, y: frame.minY)
+            let t = layer.sublayerTransform
+            var scale = CGAffineTransform(a: t.m11, b: t.m12, c: t.m21, d: t.m22, tx: t.m41, ty: t.m42)
+            let anchor = CGPoint(x: layer.anchorPoint.x * frame.width, y: layer.anchorPoint.y * frame.height)
+            scale = CGAffineTransform(translationX: -anchor.x, y: -anchor.y).concatenating(scale).concatenating(CGAffineTransform(translationX: anchor.x, y: anchor.y))
+            shape = shape.copy(using: &scale) ?? shape
+            shape = shape.copy(using: &move) ?? shape
+            context.saveGState()
+            context.addPath(shape)
+            context.clip()
+            if let blurred {
+                context.draw(blurred, in: bounds)
+            } else {
+                context.setFillColor(NSColor(srgbRed: 0.16, green: 0.16, blue: 0.17, alpha: 1).cgColor)
+                context.fill(bounds)
+            }
+            context.restoreGState()
         }
-        context.restoreGState()
-        // The wheel's tint through its profile.
+        // The bubbles.
+        guard let layer = view.layer else { return nil }
+        Self.display(layer)
         context.saveGState()
-        context.clip(to: rect, mask: tintMask)
-        context.setFillColor(NSColor.black.withAlphaComponent(RadialField.darkness).cgColor)
-        context.fill(bounds)
+        context.translateBy(x: origin.x, y: origin.y)
+        NSAppearance(named: .darkAqua)?.performAsCurrentDrawingAppearance { layer.render(in: context) }
         context.restoreGState()
-        // The words.
-        let view = RadialWheelView(frame: CGRect(origin: .zero, size: field.canvas.size))
-        view.configure(layout: layout, canvas: field.canvas, tree: shot.tree)
-        view.settle(selection: shot.selection)
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-        context.saveGState()
-        context.translateBy(x: wheelCentre.x - field.canvas.center.x, y: wheelCentre.y - field.canvas.center.y)
-        NSAppearance(named: .darkAqua)?.performAsCurrentDrawingAppearance { view.draw(view.bounds) }
-        context.restoreGState()
-        NSGraphicsContext.restoreGraphicsState()
         // On a whole screen, the pointer: at the wheel's centre as it shows (moved there as it
         // opens), or on the word it lights.
         if shot.screen != nil {
@@ -286,27 +329,7 @@ final class RadialWheelSnapshotTests: XCTestCase {
             if let word = layout.word(shot.selection) {
                 pointer = CGPoint(x: centre.x + word.frame.midX, y: centre.y + word.frame.midY)
             }
-            // An arrow pointer, its tip at `pointer` (the system's cursor image draws nothing offscreen).
-            let tip = [(0.0, 0.0), (0, -17), (4, -13), (7, -20), (10, -19), (7, -12.5), (12, -12.5)]
-            let arrow = NSBezierPath()
-            for (k, (x, y)) in tip.enumerated() {
-                let p = CGPoint(x: pointer.x + x, y: pointer.y + y)
-                if k == 0 { arrow.move(to: p) } else { arrow.line(to: p) }
-            }
-            arrow.close()
-            NSGraphicsContext.saveGraphicsState()
-            NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-            let shadow = NSShadow()
-            shadow.shadowColor = NSColor.black.withAlphaComponent(0.4)
-            shadow.shadowBlurRadius = 2
-            shadow.shadowOffset = NSSize(width: 0, height: -1)
-            shadow.set()
-            NSColor.black.setFill()
-            arrow.fill()
-            NSColor.white.setStroke()
-            arrow.lineWidth = 1.2
-            arrow.stroke()
-            NSGraphicsContext.restoreGraphicsState()
+            Self.arrow(at: pointer, in: context)
         }
         guard let image = context.makeImage() else { return nil }
         let rep = NSBitmapImageRep(cgImage: image)
@@ -314,33 +337,28 @@ final class RadialWheelSnapshotTests: XCTestCase {
         return rep
     }
 
-    /// A profile image as a picture: white where it is full, black where it is 0.
-    private static func profile(_ image: CGImage, size: CGSize) -> NSBitmapImageRep? {
-        guard let context = context(size: size), let mask = grey(image) else { return nil }
-        let bounds = CGRect(origin: .zero, size: size)
-        context.setFillColor(NSColor.black.cgColor)
-        context.fill(bounds)
-        context.clip(to: bounds, mask: mask)
-        context.setFillColor(NSColor.white.cgColor)
-        context.fill(bounds)
-        guard let out = context.makeImage() else { return nil }
-        let rep = NSBitmapImageRep(cgImage: out)
-        rep.size = size
-        return rep
-    }
-
-    /// A profile's alpha as a grey image for clipping: white where the profile is full.
-    private static func grey(_ image: CGImage) -> CGImage? {
-        let w = image.width, h = image.height
-        guard let data = image.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else { return nil }
-        var grey = [UInt8](repeating: 0, count: w * h)
-        for y in 0..<h {
-            for x in 0..<w { grey[y * w + x] = bytes[y * image.bytesPerRow + x * 4 + 3] }
+    /// An arrow pointer, its tip at `pointer` (the system's cursor image draws nothing offscreen).
+    private static func arrow(at pointer: CGPoint, in context: CGContext) {
+        let tip = [(0.0, 0.0), (0, -17), (4, -13), (7, -20), (10, -19), (7, -12.5), (12, -12.5)]
+        let arrow = NSBezierPath()
+        for (k, (x, y)) in tip.enumerated() {
+            let p = CGPoint(x: pointer.x + x, y: pointer.y + y)
+            if k == 0 { arrow.move(to: p) } else { arrow.line(to: p) }
         }
-        guard let provider = CGDataProvider(data: Data(grey) as CFData) else { return nil }
-        return CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 8, bytesPerRow: w,
-                       space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
-                       provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+        arrow.close()
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.4)
+        shadow.shadowBlurRadius = 2
+        shadow.shadowOffset = NSSize(width: 0, height: -1)
+        shadow.set()
+        NSColor.black.setFill()
+        arrow.fill()
+        NSColor.white.setStroke()
+        arrow.lineWidth = 1.2
+        arrow.stroke()
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     /// A Gaussian of radius 25 pt (50 px at 2x) over the desktop, its edges clamped.

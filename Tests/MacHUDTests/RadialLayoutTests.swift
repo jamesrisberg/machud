@@ -2,8 +2,7 @@ import AppKit
 import XCTest
 @testable import MacHUDCore
 
-/// The path-based wheel's words, upright, on one soft field: where each sits, which one the
-/// pointer selects, and the field behind what shows.
+/// The path-based wheel's words, upright: where each sits and which one the pointer selects.
 @MainActor
 final class RadialLayoutTests: XCTestCase {
     static let counts = [0, 1, 3, 6, 10, 14]
@@ -558,7 +557,7 @@ final class RadialLayoutTests: XCTestCase {
 
     // MARK: The hint
 
-    /// The hint sits under every word showing, inside the field, on up to two lines inside its zone.
+    /// The hint sits under every word showing, on up to two lines inside its zone.
     func testTheHintSitsUnderTheWheelAndIsNeverClipped() {
         everyLayout { layout, _, what in
             for (open, showing) in Self.states(layout) {
@@ -573,175 +572,6 @@ final class RadialLayoutTests: XCTestCase {
                     XCTAssertLessThanOrEqual(fit.lines.count, 2)
                     XCTAssertLessThanOrEqual(CGFloat(fit.lines.count) * layout.hintLineHeight(fit), zone.height + 0.01)
                 }
-            }
-        }
-    }
-
-    // MARK: The field
-
-    /// A few cases, every branch's field over the whole wheel's rectangle, built once.
-    private static let fieldCases: [(layout: RadialLayout, what: String)] = {
-        [(3, short), (10, long), (14, short)].map { count, names in
-            (RadialLayout(tree: tree(count, names, allScreens: true)), "\(count) loadouts")
-        } + [(RadialLayout(tree: tree(6, long), scale: 0.79), "6 loadouts at 0.79")]
-    }()
-
-    private static var fields: [String: (whole: RadialField, open: [[String]: RadialField])] = [:]
-
-    private static func fields(_ layout: RadialLayout, _ what: String, reduced: Bool) -> (whole: RadialField, open: [[String]: RadialField]) {
-        let key = "\(what)\(reduced ? ", reduced" : "")"
-        if let cached = fields[key] { return cached }
-        let whole = RadialField(layout: layout, reduced: reduced)
-        var open: [[String]: RadialField] = [:]
-        for branch in layout.branches {
-            open[branch] = RadialField(shape: RadialField.Shape(layout: layout, open: branch, reduced: reduced), over: whole.support)
-        }
-        fields[key] = (whole, open)
-        return (whole, open)
-    }
-
-    private static func samples(_ frame: CGRect) -> [CGPoint] {
-        stride(from: frame.minX, through: frame.maxX, by: max(1, frame.width / 8)).flatMap { x in
-            stride(from: frame.minY, through: frame.maxY, by: max(1, frame.height / 4)).map { CGPoint(x: x, y: $0) }
-        }
-    }
-
-    /// Under every word showing (grown, as it is under the pointer) and the hint the blur is
-    /// full, so no sharp desktop shows through there, and the tint is strong enough to read on.
-    func testUnderEveryWordShowingTheBlurIsFullAndTheTintReads() {
-        for (layout, what) in Self.fieldCases {
-            for reduced in [false, true] {
-                for (open, field) in Self.fields(layout, what, reduced: reduced).open {
-                    for frame in RadialField.places(layout, open: open) {
-                        for p in Self.samples(frame) {
-                            XCTAssertGreaterThanOrEqual(field.blur(at: p), 1 - 1 / 255, "\(what), open \(open)\(reduced ? ", reduced" : "")")
-                            XCTAssertGreaterThanOrEqual(field.tint(at: p), RadialField.readable, "\(what), open \(open)\(reduced ? ", reduced" : "")")
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// Every branch's field covers the same rectangle as the whole wheel's, and is 0 at its
-    /// edge; so the views keep their frames as branches open and nothing is cut off.
-    func testEveryBranchsFieldFitsTheWholeWheelsRectangle() {
-        for (layout, what) in Self.fieldCases {
-            let (whole, open) = Self.fields(layout, what, reduced: false)
-            XCTAssertTrue(whole.support.contains(RadialField.places(layout, open: nil).reduce(CGRect.null) { $0.union($1) }), what)
-            for (branch, field) in open {
-                XCTAssertEqual(field.support, whole.support, "\(what), open \(branch)")
-                XCTAssertEqual(field.blurImage.width, whole.blurImage.width, "\(what), open \(branch)")
-                let s = field.support
-                var edge: [CGPoint] = []
-                for x in stride(from: s.minX, through: s.maxX, by: 8) { edge += [CGPoint(x: x, y: s.minY), CGPoint(x: x, y: s.maxY)] }
-                for y in stride(from: s.minY, through: s.maxY, by: 8) { edge += [CGPoint(x: s.minX, y: y), CGPoint(x: s.maxX, y: y)] }
-                for p in edge where field.blur(at: p) != 0 {
-                    XCTFail("\(what), open \(branch): not 0 at the edge, \(p)")
-                    break
-                }
-            }
-        }
-    }
-
-    /// The blur's image, as the backdrop stretches it, is full (within one 8-bit step) over
-    /// every word showing, the pixels around it included, since a stretched image blends its
-    /// neighbouring pixels.
-    func testTheBlurImageIsFullOverEveryWordShowing() {
-        for (layout, what) in Self.fieldCases {
-            for (open, field) in Self.fields(layout, what, reduced: false).open {
-                let image = field.blurImage
-                guard let data = image.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else { return XCTFail(what) }
-                let step = field.support.width / CGFloat(image.width)
-                for frame in RadialField.places(layout, open: open) {
-                    let c0 = max(0, Int(((frame.minX - field.support.minX) / step).rounded(.down)) - 1)
-                    let c1 = min(image.width - 1, Int(((frame.maxX - field.support.minX) / step).rounded(.up)) + 1)
-                    let r0 = max(0, Int(((field.support.maxY - frame.maxY) / step).rounded(.down)) - 1)
-                    let r1 = min(image.height - 1, Int(((field.support.maxY - frame.minY) / step).rounded(.up)) + 1)
-                    var least: UInt8 = 255
-                    for row in r0...r1 {
-                        for column in c0...c1 { least = min(least, bytes[row * image.bytesPerRow + column * 4 + 3]) }
-                    }
-                    XCTAssertGreaterThanOrEqual(least, 254, "\(what), open \(open)")
-                }
-            }
-        }
-    }
-
-    /// Both profiles fade to nothing with no step anywhere along a line out from the centre; the
-    /// blur is full in the middle, and so is the tint, which is weaker toward the rim.
-    func testTheFieldFadesToNothingWithoutAnEdge() {
-        for (layout, what) in Self.fieldCases {
-            for reduced in [false, true] {
-                for (open, field) in Self.fields(layout, what, reduced: reduced).open {
-                    XCTAssertEqual(field.blur(at: .zero), 1, accuracy: 0.001, what)
-                    XCTAssertEqual(field.tint(at: .zero), 1, accuracy: 0.001, what)
-                    let s = field.support
-                    let reach = Double(hypot(max(-s.minX, s.maxX), max(-s.minY, s.maxY)))
-                    for a in stride(from: 0.0, to: 2 * .pi, by: .pi / 18) {
-                        let start = Double(field.shape.disc) * 0.5
-                        var previous = field.shape.profiles(at: CGPoint(x: start * sin(a), y: start * cos(a)))
-                        for r in stride(from: start + 2, through: reach, by: 2) {
-                            let next = field.shape.profiles(at: CGPoint(x: r * sin(a), y: r * cos(a)))
-                            if abs(next.blur - previous.blur) >= 0.08 || abs(next.tint - previous.tint) >= 0.08 {
-                                XCTFail("\(what), open \(open): a step at \(Int(a * 180 / .pi))° r \(Int(r))")
-                                break
-                            }
-                            previous = next
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// The wheel's field as it opens is small: it reaches little past the top petals.
-    func testTheFieldAsTheWheelOpensIsSmall() {
-        let layout = RadialLayout(tree: Self.tree(10, Self.long))
-        let shape = RadialField.Shape(layout: layout, open: [], reduced: false)
-        let whole = RadialField.Shape(layout: layout, open: nil, reduced: false)
-        XCTAssertLessThan(shape.extent.width, whole.extent.width * 0.75)
-        XCTAssertEqual(shape.blur(at: CGPoint(x: 0, y: 300)), 0)
-    }
-
-    /// With Reduce transparency on, the field is a plain soft disc: both profiles depend on the
-    /// distance from the centre only.
-    func testWithReduceTransparencyTheFieldIsASoftDisc() {
-        let layout = RadialLayout(tree: Self.tree(8, Self.long))
-        let field = RadialField(layout: layout, reduced: true)
-        for value in [field.blur, field.tint] as [(CGPoint) -> CGFloat] {
-            for r in stride(from: 0.0, through: Double(field.support.width / 2), by: 9) {
-                let values = stride(from: 0.0, to: 360, by: 15).map { degrees -> CGFloat in
-                    let a = degrees * .pi / 180
-                    return value(CGPoint(x: r * sin(a), y: r * cos(a)))
-                }
-                XCTAssertLessThan((values.max() ?? 0) - (values.min() ?? 0), 0.001, "radius \(r)")
-            }
-        }
-    }
-
-    /// The blur is full a little past a lit word's glow, and the light under a hovered petal
-    /// ends where the full blur around a lone word would: one reach decides all three.
-    func testTheGlowTheBlurAndTheLightAgree() {
-        XCTAssertGreaterThan(RadialField.pad, RadialWheelView.glowReach)
-        XCTAssertEqual(RadialWheelView.lightReach, RadialField.pad)
-    }
-
-    /// Each image is its profile in black: the blur's alpha is the blur profile, the tint's the
-    /// tint profile, whose strength is the tint view's darkness (`RadialField.darkness`).
-    func testTheImagesAreTheProfiles() throws {
-        let field = RadialField(layout: RadialLayout(tree: Self.tree(8, Self.long)), reduced: false)
-        for (image, value) in [(field.blurImage, field.blur), (field.tintImage, field.tint)] as [(CGImage, (CGPoint) -> CGFloat)] {
-            let rep = NSBitmapImageRep(cgImage: image)
-            let scale = CGFloat(rep.pixelsWide) / field.support.width
-            // (-250, -190) lies on the field's steepest fade, where the image's 4-point pixels
-            // average a slope of about 0.06 across their width: a looser match there.
-            for (p, accuracy) in [(CGPoint(x: 0, y: 0), 0.03), (CGPoint(x: 120, y: -80), 0.03), (CGPoint(x: -200, y: 150), 0.03),
-                                  (CGPoint(x: 0, y: -200), 0.03), (CGPoint(x: 230, y: 160), 0.03), (CGPoint(x: -250, y: -190), 0.07)]
-                where field.support.contains(p) {
-                let pixel = try XCTUnwrap(rep.colorAt(x: Int((p.x - field.support.minX) * scale), y: Int((field.support.maxY - p.y) * scale)))
-                XCTAssertEqual(pixel.alphaComponent, value(p), accuracy: CGFloat(accuracy), "\(p)")
-                XCTAssertEqual(pixel.redComponent + pixel.greenComponent + pixel.blueComponent, 0, accuracy: 0.01, "black")
             }
         }
     }
