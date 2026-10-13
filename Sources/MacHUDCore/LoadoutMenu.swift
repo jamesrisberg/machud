@@ -71,8 +71,10 @@ final class LoadoutMenu {
             return .init(focused: engine.focusedWindowLabel(), parked: engine.parking.parked.map(\.record.label))
         }
         radial.onCommit = { [weak self] outcome in
-            self?.handle(outcome)
-            self?.hud?.wheelClosed(outcome)
+            guard let self else { return }
+            // The summon puts the HUD back before the action or after it (`HUDSummon.actsFirst`).
+            guard let hud = self.hud else { self.handle(outcome); return }
+            hud.wheelClosed(outcome) { self.handle(outcome) }
         }
         radial.readParkTargets = { [weak self] answer in self?.readParkTargets(answer) }
         radial.onDismiss = { [weak self] in
@@ -137,11 +139,13 @@ final class LoadoutMenu {
     }
 
     /// Opens the wheel; `summoning` (a hold, or `radial show summon=1`) brings the HUD summon
-    /// up with it.
+    /// up with it. Over a summon left up any wheel carries it on, so Esc is the wheel's alone and
+    /// letting go on an action puts the HUD back.
     func showRadial(at point: CGPoint? = nil, summoning: Bool = false) {
         guard !radial.isVisible else { return }
         radial.show(tree: tree(), at: point)
-        if summoning, radial.isVisible { hud?.wheelOpened(at: radial.center) }
+        guard radial.isVisible, let hud, summoning || hud.isActive else { return }
+        hud.wheelOpened(at: radial.center)
     }
 
     func handle(_ outcome: RadialMenu.Outcome) {

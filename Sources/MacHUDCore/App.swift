@@ -110,7 +110,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let hk = store.hotkeys.dock {
                 HotKeyCenter.shared.register(hk, onPress: { [weak self] in
                     MainActor.assumeIsolated {
-                        // What is on screen: a summoned dock goes, leaving the setting as it was.
+                        // Flips what is on screen: a showing dock, summoned or not, is turned off
+                        // (`toolDock.enabled` false; an auto-hidden dock that was on too).
                         guard let dock = self?.toolDock else { return }
                         dock.setEnabled(!dock.isShowing)
                     }
@@ -337,6 +338,7 @@ extension AppDelegate {
         hud.widgets = widgets
         hud.onActiveChange = { [weak widgetUI] on in widgetUI?.escapeSuspended = on }
         menu.hud = hud
+        engine.onWillApply = { [weak hud] in hud?.loadoutWillApply() }
         hudSummon = hud
     }
 

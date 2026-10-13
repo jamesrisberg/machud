@@ -409,6 +409,27 @@ final class WidgetLayerTests: XCTestCase {
         XCTAssertTrue(widgetRequests.isEmpty, "nothing changed: nothing sent")
     }
 
+    /// What keeps a HUD summon up: only widgets above the windows, so a click where a lowered
+    /// widget sits under them is away; and the reveal is counted and reported, whoever changes it.
+    func testTheSummonKeepsOnlyWidgetsThatAreUp() {
+        startApp()
+        _ = call(["action": "add", "type": "clock"])
+        var told = 0
+        layer.onRevealChange = { told += 1 }
+        XCTAssertEqual(layer.summonKeepFrames, [], "on the desktop layer, under the windows")
+        XCTAssertEqual(layer.summonKeepApps, [])
+        layer.setRevealed(true)
+        XCTAssertEqual(layer.summonKeepFrames, [CGRect(x: 0, y: 705, width: 170, height: 170)])
+        XCTAssertEqual(layer.summonKeepApps, [appID])
+        layer.setRevealed(true)
+        layer.setRevealed(false)
+        XCTAssertEqual(layer.summonKeepFrames, [])
+        XCTAssertEqual(layer.revealChanges, 2)
+        XCTAssertEqual(told, 2, "only real changes")
+        _ = call(["action": "layer", "instance": "W1", "layer": "float"])
+        XCTAssertEqual(layer.summonKeepFrames.count, 1, "a floating widget is always up")
+    }
+
     func testFramesForShowVerification() {
         startApp()
         _ = call(["action": "add", "type": "clock"])

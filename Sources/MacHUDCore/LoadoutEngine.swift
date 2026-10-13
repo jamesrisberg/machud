@@ -260,6 +260,7 @@ final class LoadoutEngine {
             completion(report)
             return
         }
+        onWillApply?()
         applying = loadout.name
         activeLoadout = loadout.name
         let completion: (ApplyReport) -> Void = { [weak self] report in
@@ -316,6 +317,9 @@ final class LoadoutEngine {
     /// Called after every apply finishes, however it was started (wheel, menu, socket,
     /// startup, a display change): the onboarding's radial practice waits for it.
     var onApplied: ((ApplyReport) -> Void)?
+    /// Called as every apply that is not refused starts, before anything moves: a HUD summon
+    /// left up ends (`HUDSummon.loadoutWillApply`).
+    var onWillApply: (() -> Void)?
 
     /// Says what an automatic apply did: a toast, or a recorder in tests.
     var notify: (_ title: String, _ detail: String?, _ seconds: TimeInterval) -> Void = { title, detail, seconds in

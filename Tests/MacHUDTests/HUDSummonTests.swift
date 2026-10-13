@@ -8,13 +8,25 @@ final class HUDSummonTests: XCTestCase {
     final class Dock: HUDSummonDock {
         var summoned = false
         var point: CGPoint?
+        var hasButtons = true
         var hoverPaused = false
         var summonKeepFrames: [CGRect] = []
+        var summonKeepApps: Set<String> = []
+        var isMenuOpen = false
+        var onSummonEnded: (() -> Void)?
         var log: [String] = []
+        var showsForSummon: Bool { summoned && hasButtons }
         func setSummoned(_ on: Bool, at point: CGPoint?) {
             summoned = on
             self.point = point
             log.append(on ? "dock up" : "dock back")
+        }
+        /// What the dock does when it is turned on or off by hand.
+        func turnedOnOrOff() {
+            guard summoned else { return }
+            summoned = false
+            log.append("dock set")
+            onSummonEnded?()
         }
     }
 
@@ -23,20 +35,23 @@ final class HUDSummonTests: XCTestCase {
         var revealed = false
         var revealChanges = 0
         var summonKeepFrames: [CGRect] = []
+        var summonKeepApps: Set<String> = []
+        var onRevealChange: (() -> Void)?
         var log: [String] = []
         func setRevealed(_ on: Bool) {
             guard on != revealed else { return }
             revealed = on
             revealChanges += 1
             log.append(on ? "reveal" : "lower")
+            onRevealChange?()
         }
     }
 
     final class Watch: HUDSummonWatch {
         var escape: (@MainActor () -> Void)?
-        var click: (@MainActor (CGPoint) -> Void)?
+        var click: (@MainActor (HUDSummonClick) -> Void)?
         var watching: Bool { escape != nil }
-        func start(onEscape: @escaping @MainActor () -> Void, onClick: @escaping @MainActor (CGPoint) -> Void) {
+        func start(onEscape: @escaping @MainActor () -> Void, onClick: @escaping @MainActor (HUDSummonClick) -> Void) {
             escape = onEscape
             click = onClick
         }
@@ -60,6 +75,11 @@ final class HUDSummonTests: XCTestCase {
         summon.widgets = widgets
         summon.afterAction = { [unowned self] in self.later.append($0) }
         summon.onActiveChange = { [unowned self] in self.active.append($0) }
+        summon.ownApp = "com.jrisberg.machud"
+    }
+
+    private func click(_ x: CGFloat, _ y: CGFloat, app: String? = nil, menu: Bool = false) {
+        watch.click?(HUDSummonClick(point: CGPoint(x: x, y: y), app: app, inMenu: menu))
     }
 
     private func runLater() {
@@ -121,10 +141,10 @@ final class HUDSummonTests: XCTestCase {
         summon.wheelOpened(at: centre)
         summon.wheelClosed(.cancelled)
         for kept in [CGPoint(x: 20, y: 30), CGPoint(x: 200, y: 300), CGPoint(x: 1250, y: 650)] {
-            watch.click?(kept)
+            click(kept.x, kept.y)
             XCTAssertEqual(summon.phase, .held, "\(kept)")
         }
-        watch.click?(CGPoint(x: 900, y: 500))
+        click(900, 500)
         XCTAssertEqual(summon.phase, .idle)
         XCTAssertFalse(dock.summoned)
         XCTAssertFalse(widgets.revealed)
@@ -222,7 +242,7 @@ final class HUDSummonTests: XCTestCase {
 
     func testAPuttingBackDoesNotEndTheNextSummon() {
         summon.wheelOpened(at: centre)
-        summon.wheelClosed(.preview(loadout: nil))
+        summon.wheelClosed(.apply(loadout: "Work", clear: false))
         summon.dismiss()           // `radial dismiss` before the action's turn
         summon.wheelOpened(at: centre)
         runLater()                 // the first one's putting back
@@ -235,11 +255,159 @@ final class HUDSummonTests: XCTestCase {
         summon.wheelClosed(.cancelled)
         summon.wheelClosed(.apply(loadout: "Work", clear: false))
         runLater()
-        summon.clicked(at: .zero)
+        summon.clicked(HUDSummonClick(point: .zero))
+        summon.loadoutWillApply()
         summon.dismiss()
         XCTAssertEqual(summon.phase, .idle)
         XCTAssertEqual(dock.log, [])
         XCTAssertEqual(widgets.log, [])
         XCTAssertEqual(active, [])
+    }
+
+    // MARK: Review fixes
+
+    /// Nothing up (no button on the dock, no widgets served): a cancel ends the summon at once,
+    /// so Esc and the clicks are never taken for nothing.
+    func testAnEmptySummonEndsOnACancelAndTakesNoEsc() {
+        dock.hasButtons = false
+        widgets.servesWidgets = false
+        summon.wheelOpened(at: centre)
+        summon.wheelClosed(.cancelled)
+        XCTAssertEqual(summon.phase, .idle)
+        XCTAssertFalse(watch.watching)
+        XCTAssertEqual(active, [true, false])
+        XCTAssertFalse(dock.summoned)
+
+        // The widgets alone are enough to hold it.
+        widgets.servesWidgets = true
+        summon.wheelOpened(at: centre)
+        summon.wheelClosed(.cancelled)
+        XCTAssertEqual(summon.phase, .held)
+        XCTAssertTrue(watch.watching)
+    }
+
+    /// The dock turned on or off by hand while the summon is held: with nothing else up the
+    /// summon ends (Esc and the clicks go); with widgets it raised it holds, and Esc then lowers
+    /// them.
+    func testTheDockTurnedOnOrOffEndsAHeldSummonWithNothingElseUp() {
+        widgets.servesWidgets = false
+        summon.wheelOpened(at: centre)
+        summon.wheelClosed(.cancelled)
+        XCTAssertEqual(summon.phase, .held)
+        dock.turnedOnOrOff()
+        XCTAssertEqual(summon.phase, .idle)
+        XCTAssertFalse(watch.watching)
+        XCTAssertEqual(active, [true, false])
+
+        widgets.servesWidgets = true
+        summon.wheelOpened(at: centre)
+        summon.wheelClosed(.cancelled)
+        dock.turnedOnOrOff()
+        XCTAssertEqual(summon.phase, .held, "the widgets it raised are still up")
+        watch.escape?()
+        XCTAssertFalse(widgets.revealed)
+        XCTAssertEqual(summon.phase, .idle)
+    }
+
+    /// The widgets lowered by someone else while only they were up: the summon ends.
+    func testTheWidgetsLoweredBySomeoneElseEndAHeldSummonWithNoDock() {
+        dock.hasButtons = false
+        summon.wheelOpened(at: centre)
+        summon.wheelClosed(.cancelled)
+        XCTAssertEqual(summon.phase, .held)
+        widgets.setRevealed(false)   // ⌃⌥W
+        XCTAssertEqual(summon.phase, .idle)
+        XCTAssertFalse(watch.watching)
+    }
+
+    /// A click in a menu or popover of an app whose panel is open from the dock, in a raised
+    /// widget's app, while the dock's own menu is open, or in a MacHUD menu keeps the summon up;
+    /// a click in another window of MacHUD's, or another app's, ends it.
+    func testClicksInTheOpenPanelsAppsAndInMenusKeepTheSummon() {
+        dock.summonKeepApps = ["dev.test.stash"]
+        widgets.summonKeepApps = ["dev.test.widgets"]
+        summon.wheelOpened(at: centre)
+        summon.wheelClosed(.cancelled)
+        click(900, 500, app: "dev.test.stash", menu: true)
+        click(900, 500, app: "dev.test.stash")
+        click(900, 500, app: "dev.test.widgets", menu: true)
+        click(900, 500, app: "com.jrisberg.machud", menu: true)
+        dock.isMenuOpen = true
+        click(900, 500, app: "com.apple.Safari")
+        dock.isMenuOpen = false
+        XCTAssertEqual(summon.phase, .held)
+        click(900, 500, app: "com.jrisberg.machud")
+        XCTAssertEqual(summon.phase, .idle, "MacHUD's settings window is away")
+        summon.wheelOpened(at: centre)
+        summon.wheelClosed(.cancelled)
+        click(900, 500, app: "com.apple.Safari", menu: true)
+        XCTAssertEqual(summon.phase, .idle)
+    }
+
+    /// Capture, Draw layout, Preview and Park see the desktop as it is: the HUD goes back first.
+    /// Apply and the Widgets actions start first, the HUD going back on the next turn.
+    func testTheHUDGoesBackBeforeACaptureAndAfterAnApply() {
+        let first: [RadialMenu.Outcome] = [.capture(allScreens: false), .drawLayout, .preview(loadout: "Work"), .park(restore: false)]
+        let after: [RadialMenu.Outcome] = [.apply(loadout: "Work", clear: true), .widgets(edit: true, on: true)]
+        for outcome in first + after {
+            widgets.setRevealed(false)
+            summon.wheelOpened(at: centre)
+            var seen: (dock: Bool, widgets: Bool)?
+            summon.wheelClosed(outcome) { seen = (self.dock.summoned, self.widgets.revealed) }
+            let up = after.contains(outcome)
+            XCTAssertEqual(seen?.dock, up, "\(outcome)")
+            XCTAssertEqual(seen?.widgets, up, "\(outcome)")
+            runLater()
+            XCTAssertFalse(dock.summoned, "\(outcome)")
+            XCTAssertEqual(summon.phase, .idle, "\(outcome)")
+            XCTAssertEqual(HUDSummon.actsFirst(outcome), up)
+        }
+        // A cancel's action runs too (it logs), the summon held.
+        var ran = false
+        summon.wheelOpened(at: centre)
+        summon.wheelClosed(.cancelled) { ran = true }
+        XCTAssertTrue(ran)
+        // Without a summon under the wheel the action just runs.
+        summon.dismiss()
+        ran = false
+        summon.wheelClosed(.capture(allScreens: false)) { ran = true }
+        XCTAssertTrue(ran)
+    }
+
+    /// A loadout applied while the summon is held (a per-loadout hotkey, the menu, a script) ends
+    /// it first; the wheel's own Apply leaves it to the wheel's ordering.
+    func testApplyingALoadoutEndsAHeldSummon() {
+        summon.wheelOpened(at: centre)
+        summon.loadoutWillApply()
+        XCTAssertEqual(summon.phase, .wheel, "the wheel's Apply puts it back after starting")
+        summon.wheelClosed(.cancelled)
+        summon.loadoutWillApply()
+        XCTAssertEqual(summon.phase, .idle)
+        XCTAssertFalse(dock.summoned)
+        XCTAssertFalse(widgets.revealed)
+    }
+
+    /// Any wheel opened over a held summon carries it on: Esc is the wheel's alone (the watch
+    /// stops), and an action release ends the summon.
+    func testAWheelOpenedOverAHeldSummonCarriesItOn() {
+        summon.wheelOpened(at: centre)
+        summon.wheelClosed(.cancelled)
+        XCTAssertTrue(watch.watching)
+        summon.wheelOpened(at: centre)
+        XCTAssertFalse(watch.watching, "no second Esc beside the wheel's")
+        summon.wheelClosed(.park(restore: true))
+        XCTAssertEqual(summon.phase, .idle)
+    }
+
+    /// The widgets' own Esc stands aside before the summon raises them, never registering and
+    /// dropping in the same turn.
+    func testTheSummonClaimsEscBeforeRaisingTheWidgets() {
+        var order: [String] = []
+        summon.onActiveChange = { order.append($0 ? "claim Esc" : "give Esc back") }
+        widgets.onRevealChange = { order.append(self.widgets.revealed ? "raised" : "lowered") }
+        summon.wheelOpened(at: centre)
+        summon.wheelClosed(.apply(loadout: "Work", clear: false))
+        runLater()
+        XCTAssertEqual(order, ["claim Esc", "raised", "lowered", "give Esc back"])
     }
 }

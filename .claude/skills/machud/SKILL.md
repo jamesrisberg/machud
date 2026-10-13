@@ -201,7 +201,8 @@ machud orb show|hide                      # orbs are hidden while the tool dock 
   Edit or Done. `commit` on a petal with children cancels.
 - HUD summon: holding the wheel's hotkey also shows the tool dock (even when off or auto-hidden, on
   the wheel's display) and reveals the widgets, changing no setting. An action puts them back once it
-  has run; letting go on nothing leaves them up until Esc, a click away or the hotkey again.
+  has run (Capture, Preview, Draw layout and Park see them put back first); letting go on nothing
+  leaves them up until Esc, a click away, the hotkey again or a loadout being applied.
   `machud radial action=show summon=1` opens the wheel that way, `machud radial action=dismiss` ends a
   summon left up; `radial` replies carry `summon {active, phase}`, `tooldock` says `summoned`.
   To show the dock for good use `machud tooldock show`, not a summon.

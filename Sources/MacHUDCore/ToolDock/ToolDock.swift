@@ -122,20 +122,27 @@ final class ToolDock: NSObject, Panel {
 
     /// On screen now: turned on, or brought up by the summon (which needs a button to show).
     var isShowing: Bool { config().isEnabled || showsForSummon }
-    private var showsForSummon: Bool { summoned && !items.isEmpty }
+    var showsForSummon: Bool { summoned && !items.isEmpty }
+    /// See `HUDSummonDock.onSummonEnded`.
+    var onSummonEnded: (() -> Void)?
+    /// See `HUDSummonDock.isMenuOpen`.
+    var isMenuOpen: Bool { menuOpen }
 
-    /// Turns the dock on or off. A summon showing it ends here: the setting is what the user
-    /// asked for.
+    /// Turns the dock on or off. A summon showing it ends here, and the summon is told: the
+    /// setting is what the user asked for.
     func setEnabled(_ on: Bool) {
-        if summoned {
+        let endsSummon = summoned
+        if endsSummon {
             summoned = false
             summonPoint = nil
         }
         var c = config()
-        guard c.isEnabled != on else { refresh(); return }
-        c.enabled = on
-        saveConfig(c)
+        if c.isEnabled != on {
+            c.enabled = on
+            saveConfig(c)
+        }
         refresh()
+        if endsSummon { onSummonEnded?() }
     }
 
     // MARK: - Geometry
@@ -264,19 +271,35 @@ final class ToolDock: NSObject, Panel {
         guard isShowing, let g = geometry() else { return [] }
         var out = g.placement.segments.map { $0.insetBy(dx: -2, dy: -2) }
         out += hover.shown.compactMap { panelFrame(of: $0) }
-        for item in items where !item.isHover {
-            for id in item.panelIDs {
-                guard let panel = registry.panel(id: id), panel.isVisible else { continue }
-                if let external = panel as? ExternalPanel {
-                    if let f = externals.supervisor.record(external.app.id)?.frames[external.panelID] ?? external.currentFrame {
-                        out.append(f)
-                    }
-                } else if let f = panel.window?.frame {
+        for panel in openWindowedPanels() {
+            if let external = panel as? ExternalPanel {
+                if let f = externals.supervisor.record(external.app.id)?.frames[external.panelID] ?? external.currentFrame {
                     out.append(f)
                 }
+            } else if let f = panel.window?.frame {
+                out.append(f)
             }
         }
         return out
+    }
+
+    /// See `HUDSummonDock.summonKeepApps`: the apps of the hover panels showing and of the
+    /// windowed panels on screen.
+    var summonKeepApps: Set<String> {
+        guard isShowing else { return [] }
+        var out = Set<String>()
+        for item in items where hover.isShown(item.id) {
+            if case .app(let id) = item.source { out.insert(id) }
+        }
+        for panel in openWindowedPanels() {
+            if let external = panel as? ExternalPanel { out.insert(external.app.id) }
+        }
+        return out
+    }
+
+    /// The windowed (and menu) buttons' panels on screen.
+    private func openWindowedPanels() -> [Panel] {
+        items.filter { !$0.isHover }.flatMap(\.panelIDs).compactMap { registry.panel(id: $0) }.filter(\.isVisible)
     }
 
     // MARK: - Dock registry

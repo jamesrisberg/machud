@@ -723,6 +723,8 @@ final class ToolDockControllerTests: XCTestCase {
         XCTAssertTrue(dock.hover.isShown(stashID))
         XCTAssertTrue(dock.summonKeepFrames.contains { try! $0.contains(XCTUnwrap(dock.hoverFrames[stashID]).center) },
                       "its open panel keeps a summon up")
+        XCTAssertEqual(dock.summonKeepApps, [stashID], "and so does any window of its app, its menus and popovers")
+        XCTAssertFalse(dock.isMenuOpen)
     }
 
     func testTurningTheDockOnOrOffEndsItsSummonAndTheHotkeyHidesWhatShows() {
@@ -738,6 +740,41 @@ final class ToolDockControllerTests: XCTestCase {
         XCTAssertTrue(config.isEnabled)
         dock.setSummoned(false, at: nil)
         XCTAssertTrue(dock.isShowing, "turned on, it stays")
+    }
+
+    /// Each way of turning the dock on or off by hand ends a held summon that has nothing else
+    /// up, so Esc and the click watch go with it: ⌃⌥D (`setEnabled(!isShowing)`), `tooldock
+    /// hide|toggle|show` and the status menu's Show Tool Dock.
+    func testTurningTheDockOnOrOffByHandEndsAHeldSummon() throws {
+        let entries: [(String, () -> Void)] = [
+            ("⌃⌥D", { self.dock.setEnabled(!self.dock.isShowing) }),
+            ("tooldock hide", { _ = self.dock.handle(["_": "hide"]) }),
+            ("tooldock toggle", { _ = self.dock.handle(["_": "toggle"]) }),
+            ("tooldock show", { _ = self.dock.handle(["_": "show"]) }),
+            ("Show Tool Dock", {
+                let menu = self.dock.statusMenuItems().first?.submenu
+                let index = menu?.items.firstIndex { $0.title == "Show Tool Dock" }
+                XCTAssertNotNil(index)
+                if let menu, let index { menu.performActionForItem(at: index) }
+            }),
+        ]
+        for (name, entry) in entries {
+            for enabled in [false, true] {
+                config.enabled = enabled
+                dock.refresh()
+                let watch = HUDSummonTests.Watch()
+                let summon = HUDSummon(watch: watch)
+                summon.dock = dock
+                summon.afterAction = { _ in }
+                summon.wheelOpened(at: nil)
+                summon.wheelClosed(.cancelled)
+                XCTAssertEqual(summon.phase, .held, "\(name), on: \(enabled)")
+                entry()
+                XCTAssertFalse(dock.summoned, "\(name), on: \(enabled)")
+                XCTAssertEqual(summon.phase, .idle, "\(name), on: \(enabled): nothing left up")
+                XCTAssertFalse(watch.watching, "\(name), on: \(enabled): Esc given back")
+            }
+        }
     }
 
     func testPutBackTurnedOffTheHoverPanelsCloseWithTheDock() throws {

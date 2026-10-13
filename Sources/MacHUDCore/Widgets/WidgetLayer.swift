@@ -71,6 +71,8 @@ final class WidgetLayer {
     private(set) var revealed = false
     /// Counts the changes to `revealed` (see `HUDSummonWidgets.revealChanges`).
     private(set) var revealChanges = 0
+    /// Called after `revealed` changes (see `HUDSummonWidgets.onRevealChange`).
+    var onRevealChange: (() -> Void)?
     /// Why an app refused an instance (sync `rejected`, a failed create), by instance id.
     private(set) var problems: [String: String] = [:]
     /// Settings an app dropped from an instance during sync: instance → key → why.
@@ -348,6 +350,7 @@ final class WidgetLayer {
         revealed = on
         revealChanges += 1
         broadcast("reveal", on)
+        onRevealChange?()
     }
 
     private func broadcast(_ action: String, _ on: Bool) {
@@ -687,5 +690,15 @@ final class WidgetLayer {
 /// The HUD summon raises and lowers the widgets as the Widgets petal's Reveal and Lower do.
 extension WidgetLayer: HUDSummonWidgets {
     var servesWidgets: Bool { !servingApps.isEmpty }
-    var summonKeepFrames: [CGRect] { placements().values.map(\.frame) }
+    /// The widgets above the windows now: all of them while revealed or edited, else the
+    /// floating ones. Desktop-layer widgets under the windows are not where a click lands.
+    var summonKeepFrames: [CGRect] {
+        let placed = placements()
+        return raisedRecords().compactMap { placed[$0.instance]?.frame }
+    }
+    var summonKeepApps: Set<String> { Set(raisedRecords().map(\.app)) }
+
+    private func raisedRecords() -> [WidgetRecord] {
+        records.filter { !isMissingType($0) && (revealed || editing || $0.layer == .float) }
+    }
 }

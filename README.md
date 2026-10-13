@@ -83,7 +83,7 @@ permissions request=1` shows every missing prompt (Accessibility and Automation)
 | Shift while dragging a window | Snap it into the region under the cursor |
 | Tab / Esc mid-drag | Next layout / cancel the snap |
 | ⌃⌥Space (hold) | Radial wheel, in the middle of the screen with the pointer moved to its centre: four petals, Apply Loadout (up), Capture (right: this screen, or draw a new layout), Park (down: park the front window / restore parked) and, when an app serves widgets, Widgets (left: reveal / edit). Moving onto a petal unfolds what lies beyond it: Apply Loadout your loadouts, a loadout its Preview / Apply / Clear + Apply, just beside it on stems. Your loadouts fan out above Apply Loadout, between Widgets and Capture, five to a row (more go on rows further out), so Capture, Park and Widgets stay in reach. Let go on an action to do it; anywhere else, or Esc, cancels; back in the centre starts over. Digits pick among the petals showing, **P** previews the highlighted loadout. Holding it is also the **HUD summon**: the tool dock (even when it is off or auto-hidden, on the wheel's display) and the desktop widgets come up with the wheel, over its dimmed backdrop. Let go on an action and they go back as they were once it is done; let go on nothing and they stay up for you to use, until Esc, a click away from them, or the hotkey again. Your tool dock and widget settings never change. A quick tap (under 200 ms, a setting) opens the search bar instead. The hotkey is a setting |
-| ⌃⌥D | Show / hide the tool dock (hides a dock the wheel brought up, leaving it off) |
+| ⌃⌥D | Show / hide the tool dock (a dock on screen is turned off, even one the wheel brought up) |
 | ⌃⌥W | Raise the desktop widgets above your windows; again or Esc lowers them |
 | ⌃⌥B | Collapse / expand the menu bar (when menu bar management is on) |
 
@@ -132,8 +132,8 @@ then windowed apps**, with a thin divider between them.
   where they were.
 - **Summon**: hold **⌃⌥Space** and the dock comes up with the wheel, on the wheel's display,
   even while it is off or tucked away by auto-hide. Let go on nothing and it stays, so you can
-  use it; Esc, a click away from the dock, its panels and the widgets, or the hotkey again put it
-  back as it was.
+  use it; Esc, a click away from the dock, its panels and the widgets, the hotkey again or
+  applying a loadout put it back as it was.
 - **Files**: apps that take files (their manifest says `acceptsFileDrop`) take drops
   on their button; rest on it with the drag to open the panel first.
 - **Siblings' docks**: the dock publishes where it is to `docks.json`, so Sift's dock

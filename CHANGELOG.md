@@ -12,8 +12,9 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   they read clearly over the wheel's dimmed backdrop. Let go on an action and it runs, then the dock
   and widgets go back as they were (Widgets' Reveal, Lower and Edit set the widgets themselves). Let
   go on nothing (the centre, Esc) and they stay up so you can use the dock; Esc, a click away from the
-  dock, its panels and the widgets, or the hotkey again put them back. Your tool dock and widget
-  settings never change. ⌃⌥D hides a dock summoned this way. `machud radial action=show summon=1`
+  dock, its panels and the widgets, the hotkey again or applying a loadout put them back. A capture
+  or preview from the wheel puts them back first, so it sees your desktop as it is. Your tool dock and widget
+  settings never change. ⌃⌥D hides a dock summoned this way by turning the dock off. `machud radial action=show summon=1`
   does the same from a script, `machud radial action=dismiss` ends it, and `machud tooldock` reports
   `summoned`.
 - A **Multi-desktop loadouts** switch under Experimental in MacHUD's settings, off by default

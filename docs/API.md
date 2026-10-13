@@ -79,24 +79,30 @@ arrangement changes do not count), the active loadout is re-applied without
 
 Holding the wheel's hotkey (or `radial show summon=1`) summons the HUD (`HUDSummon`): as the wheel
 opens, the tool dock shows on the wheel's display even while `toolDock.enabled` is off or it is
-auto-hidden (`tooldock state` says `summoned: true`), and the desktop widgets are revealed as
-`widgets reveal` does, unless they already were. No setting changes, and the dock registry keeps
-the dock the settings place. While the wheel is open the dock's hover buttons open nothing.
+auto-hidden (`tooldock state` says `summoned: true`; a dock with no buttons shows nothing), and the
+desktop widgets are revealed as `widgets reveal` does, unless they already were. No setting
+changes, and the dock registry keeps the dock the settings place. While the wheel is open the
+dock's hover buttons open nothing.
 
-- Let go on an action: it runs, then (on the main queue's next turn, after the action has started)
-  the dock goes back to what its settings say (hidden, or tucked away again) and the widgets are
-  lowered if the summon raised them and nothing else changed them since. Widgets › Reveal and
-  Lower set the widgets themselves, so the summon leaves them; Widgets › Edit keeps them up while
-  editing, and Done lowers them.
-- Let go on nothing (the centre, Esc, a petal with children, `radial hide`): the wheel goes, the
-  dock and widgets stay (`phase: held`). Esc (a hotkey of its own while held, so it needs no
-  Accessibility and the app in front does not get it; never taken by an instance with
-  `MACHUD_NO_HOTKEYS`), a click anywhere but the dock, the panels open from it (hover panels and its
-  windowed apps' panels on screen) and the placed widgets, a tap of the wheel's hotkey (which then
-  opens the search bar) or `radial dismiss` put them back. Holding the hotkey again opens the wheel
-  over the same summon.
-- `tooldock show|hide|toggle`, ⌃⌥D and the menus' Show Tool Dock end the dock's part of a summon:
-  `toggle` and ⌃⌥D hide what is on screen, so a summoned dock goes and the setting stays off.
+- Let go on an action: the dock goes back to what its settings say (hidden, or tucked away again)
+  and the widgets are lowered if the summon raised them and nothing else changed them since. For
+  Capture, Draw layout, Preview and Park that happens first, so the action sees the desktop as it
+  is; Apply and the Widgets actions run first and the putting back follows on the main queue's
+  next turn. Widgets › Reveal and Lower set the widgets themselves, so the summon leaves them;
+  Widgets › Edit is on before the summon's raising is lowered, so they stay up while editing.
+- Let go on nothing (the centre, Esc, a petal with children, `radial hide`): the wheel goes and,
+  when something is up (the dock showing for the summon, or widgets it raised), the dock and
+  widgets stay (`phase: held`); with nothing up the summon ends. Esc (a hotkey of its own while
+  held, so it needs no Accessibility and the app in front does not get it; never taken by an
+  instance with `MACHUD_NO_HOTKEYS`), a click away, a tap of the wheel's hotkey (which then opens
+  the search bar), a loadout being applied (by any means) or `radial dismiss` put them back. A
+  click does not count as away on the dock, the panels open from it, any window of their apps
+  (their menus and popovers), the dock's own menus, a MacHUD menu, or a widget above the windows.
+  Any wheel opening over a held summon, by the hotkey or `radial show`, carries it on.
+- `tooldock show|hide|toggle`, ⌃⌥D and the menus' Show Tool Dock end the dock's part of a summon,
+  and the summon ends with it when it had not raised the widgets (or someone changed them since).
+  `toggle` and ⌃⌥D flip what is on screen: a summoned dock is hidden and `toolDock.enabled` set
+  off, which turns off a dock that was on and only summoned out of auto-hide.
 - Layers: the wheel's scrim dims the screen's visible frame at `.floating` − 1, under the dock
   (`.floating` + 1), the raised widgets and the siblings' panels (`.floating`), and the menu bar and
   system Dock at the wheel's level just under it; the wheel (`.screenSaver`) is above everything.
