@@ -4,114 +4,87 @@ import XCTest
 @testable import MacHUDCore
 
 final class RadialMenuWindowTests: XCTestCase {
-    /// The wheel's words are white, so its window is dark in a light system appearance too, and
-    /// so is the system's material the backdrop shows with Reduce transparency on. The backdrop
-    /// is HUDKit's soft backdrop, and nothing else in the window is on the window server's blur,
-    /// which would end in a line where the field fades out. Building the window shows nothing.
+    /// The wheel's words are white on dark glass, so its window is dark in a light system
+    /// appearance too, and so is the system's material the glass shows with Reduce transparency
+    /// on. The window holds the wheel's view alone: no soft backdrop or tint under it, and
+    /// nothing on the window server's blur but the bubbles' glass. Building the window shows
+    /// nothing.
     @MainActor
-    func testTheWheelsWindowIsDarkAndHasOnlyTheSoftBackdrop() throws {
+    func testTheWheelsWindowIsDarkAndHoldsOnlyTheWheel() throws {
         let menu = RadialMenu()
         let window = menu.makeWindow()
         defer { window.close() }
         XCTAssertEqual(window.appearance?.name, .darkAqua)
         XCTAssertFalse(window.isVisible)
+        let content = try XCTUnwrap(window.contentView)
+        XCTAssertEqual(content.subviews, [menu.wheel])
+        XCTAssertEqual(menu.wheel.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]), .darkAqua)
+        menu.warpPointer = { _ in }
+        menu.prepare(tree: RadialLayoutTests.tree(6, RadialLayoutTests.short), at: .zero,
+                     on: .init(frame: CGRect(x: 0, y: 0, width: 1440, height: 900), visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 875),
+                               primaryHeight: 900), movesPointer: false)
+        menu.select(path: ["loadouts", "Mail", "apply"])
         func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
-        let all = try views(XCTUnwrap(window.contentView))
-        let backdrop = try XCTUnwrap(all.first { $0 is HUDSoftBackdropView })
-        XCTAssertEqual(backdrop.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]), .darkAqua)
-        XCTAssertFalse(all.contains { $0 is HUDGlassView || $0 is HUDDockStripView }, "nothing on the window server's blur")
-        XCTAssertEqual(window.contentView?.subviews.first, backdrop, "the backdrop is under everything")
+        let all = views(content)
+        XCTAssertFalse(all.contains { $0 is HUDSoftBackdropView }, "no cloud")
+        let glass = all.compactMap { $0 as? HUDGlassView }
+        XCTAssertFalse(glass.isEmpty)
+        XCTAssertTrue(glass.allSatisfy { $0.superview is RadialBubble }, "the only glass is the bubbles'")
+        XCTAssertTrue(glass.allSatisfy { $0.style.material == .windowBlur })
     }
 
-    /// The wheel's view is the whole field's canvas: it holds every word that can show, every
-    /// hint zone and the field as it fades out, with or without Reduce transparency.
+    /// The wheel's view is the layout's canvas: it holds every bubble that can show, the hint's
+    /// and the centre's disc included, grown as far as a petal grows.
     @MainActor
-    func testTheWheelsViewHoldsTheWordsTheHintAndTheField() {
+    func testTheWheelsViewHoldsEveryBubble() {
         for count in [0, 3, 10, 14] {
-            let layout = RadialLayout(tree: RadialLayoutTests.tree(count, RadialLayoutTests.long))
-            for reduced in [false, true] {
-                let field = RadialField(layout: layout, reduced: reduced)
-                let canvas = field.canvas
-                let shown = RadialField.places(layout, open: nil).reduce(CGRect.null) { $0.union($1) }
-                XCTAssertTrue(field.support.contains(shown), "\(count) loadouts")
-                XCTAssertEqual(canvas.size, field.support.size)
-                XCTAssertEqual(canvas.center, CGPoint(x: -field.support.minX, y: -field.support.minY))
+            let tree = RadialLayoutTests.tree(count, RadialLayoutTests.long)
+            let layout = RadialLayout(tree: tree)
+            let canvas = RadialWheelView.canvas(for: layout)
+            let view = RadialWheelView(frame: CGRect(origin: .zero, size: canvas.size))
+            view.configure(layout: layout, canvas: canvas, tree: tree)
+            for branch in layout.branches {
+                view.settle(selection: branch)
+                for bubble in view.showingBubbles {
+                    let grown = RadialLayout.grown(bubble.frame, by: RadialWheelView.grow,
+                                                   about: CGPoint(x: bubble.frame.minX + bubble.pivot.x, y: bubble.frame.minY + bubble.pivot.y))
+                    XCTAssertTrue(view.bounds.contains(grown), "\(count) loadouts, open \(branch): \(bubble.role)")
+                }
             }
         }
     }
 
-    /// The words are drawn into their pictures once per layout, backing scale and appearance:
-    /// the same wheel opened again reuses them, new words or another appearance draw them anew.
+    /// The words are drawn into their pictures once per layout, tree and backing scale, as
+    /// their bubbles are first needed: the same wheel opened again reuses them; the same words
+    /// with a tree whose nodes differ (an icon) draw them again as they next show, and new words
+    /// make new bubbles.
     @MainActor
-    func testTheWordsAreDrawnOncePerLayoutScaleAndAppearance() throws {
+    func testTheWordsAreDrawnOncePerLayoutAndTree() {
         let tree = RadialLayoutTests.tree(8, RadialLayoutTests.short)
         let layout = RadialLayout(tree: tree)
-        let field = RadialField(layout: layout, reduced: false)
-        let view = RadialWheelView(frame: CGRect(origin: .zero, size: field.canvas.size))
-        let context = try XCTUnwrap(CGContext(data: nil, width: 64, height: 64, bitsPerComponent: 8, bytesPerRow: 0,
-                                              space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-        func open(_ layout: RadialLayout, _ tree: [RadialNode], appearance: NSAppearance.Name = .darkAqua) {
-            view.appearance = NSAppearance(named: appearance)
-            view.configure(layout: layout, canvas: field.canvas, tree: tree)
-            NSGraphicsContext.saveGraphicsState()
-            NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-            view.draw(view.bounds)
-            NSGraphicsContext.restoreGraphicsState()
-        }
-        open(layout, tree)
-        XCTAssertEqual(view.wordRenders, 1)
-        open(RadialLayout(tree: tree), RadialLayoutTests.tree(8, RadialLayoutTests.short))
-        XCTAssertEqual(view.wordRenders, 1, "the same words again")
-        let other = RadialLayoutTests.tree(8, RadialLayoutTests.long)
-        open(RadialLayout(tree: other), other)
-        XCTAssertEqual(view.wordRenders, 2, "new words")
-        open(RadialLayout(tree: other), other, appearance: .aqua)
-        XCTAssertEqual(view.wordRenders, 3, "another appearance")
-    }
-
-    /// The view redraws whenever what it shows changes (the selection, the tree, the
-    /// appearance) and while its springs move, and not once they have settled.
-    @MainActor
-    func testTheWheelRedrawsOnlyWhileSomethingChanges() {
-        let tree = RadialLayoutTests.tree(6, RadialLayoutTests.short)
-        let layout = RadialLayout(tree: tree)
-        let view = RadialWheelView(frame: CGRect(origin: .zero, size: RadialField(layout: layout, reduced: false).canvas.size))
-        // In a window, which keeps the view's requests to redraw; it is never ordered in.
-        let window = NSWindow(contentRect: view.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-        defer { window.close() }
-        window.isReleasedWhenClosed = false
-        window.contentView?.addSubview(view)
-        XCTAssertFalse(window.isVisible)
-        view.configure(layout: layout, canvas: RadialField(layout: layout, reduced: false).canvas, tree: tree)
-        view.resetSprings()
-        XCTAssertTrue(view.needsDisplay)
-
-        func settle() {
-            for _ in 0..<2000 where view.isMoving { view.tick() }
-            XCTAssertFalse(view.isMoving)
-            view.displayIfNeeded()
-            view.tick()
-            XCTAssertFalse(view.needsDisplay, "a settled wheel does not redraw")
-        }
-        settle()
-
+        let canvas = RadialWheelView.canvas(for: layout)
+        let view = RadialWheelView(frame: CGRect(origin: .zero, size: canvas.size))
+        view.configure(layout: layout, canvas: canvas, tree: tree)
+        view.open()
+        let first = view.wordRenders
+        XCTAssertGreaterThan(first, 0)
         view.selection = ["loadouts", "Mail"]
-        XCTAssertTrue(view.needsDisplay, "a selection change redraws at once")
-        view.displayIfNeeded()
-        view.tick()
-        XCTAssertTrue(view.needsDisplay, "and keeps redrawing while the word grows and the actions unfold")
-        settle()
-
-        let more = RadialLayoutTests.tree(9, RadialLayoutTests.short)
-        let bigger = RadialLayout(tree: more)
-        view.configure(layout: bigger, canvas: RadialField(layout: bigger, reduced: false).canvas, tree: more)
-        XCTAssertTrue(view.needsDisplay, "a new tree redraws")
-        view.displayIfNeeded()
-        view.selection = ["park", "restore"]
-        XCTAssertTrue(view.needsDisplay)
-        settle()
-
-        view.viewDidChangeEffectiveAppearance()
-        XCTAssertTrue(view.needsDisplay, "an appearance change redraws")
+        let unfolded = view.wordRenders
+        XCTAssertGreaterThan(unfolded, first, "the loadouts and Mail's actions, the first time they show")
+        view.close()
+        view.configure(layout: RadialLayout(tree: tree), canvas: canvas, tree: tree, selection: [])
+        view.open()
+        view.selection = ["loadouts", "Mail"]
+        XCTAssertEqual(view.wordRenders, unfolded, "the same tree again: drawn once")
+        view.close()
+        let icons = RadialLayoutTests.tree(8, RadialLayoutTests.short)
+        XCTAssertNotEqual(icons, tree, "other icon images")
+        view.configure(layout: RadialLayout(tree: icons), canvas: canvas, tree: icons, selection: [])
+        view.open()
+        XCTAssertGreaterThan(view.wordRenders, unfolded, "the same words with other icons: drawn again as they show")
+        let other = RadialLayoutTests.tree(8, RadialLayoutTests.long)
+        let before = view.wordRenders
+        view.configure(layout: RadialLayout(tree: other), canvas: RadialWheelView.canvas(for: RadialLayout(tree: other)), tree: other)
+        XCTAssertGreaterThan(view.wordRenders, before, "new words")
     }
 }

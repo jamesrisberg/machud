@@ -163,6 +163,8 @@ struct PreparedText {
     static func lineHeight(_ font: NSFont) -> CGFloat { font.ascender - font.descender }
     var lineHeight: CGFloat { Self.lineHeight(font) }
     var height: CGFloat { CGFloat(lines.count) * lineHeight }
+    /// The widest line's width.
+    var width: CGFloat { lines.map(\.width).max() ?? 0 }
 
     /// Draws the lines from the top of `frame` down, each placed across the frame by `align`
     /// (0 at its left edge, 1 at its right), with `ctx`'s fill colour and shadow.

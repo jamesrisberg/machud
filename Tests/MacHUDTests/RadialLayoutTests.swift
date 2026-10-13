@@ -2,8 +2,7 @@ import AppKit
 import XCTest
 @testable import MacHUDCore
 
-/// The path-based wheel's words, upright, on one soft field: where each sits, which one the
-/// pointer selects, and the field behind what shows.
+/// The path-based wheel's words, upright: where each sits and which one the pointer selects.
 @MainActor
 final class RadialLayoutTests: XCTestCase {
     static let counts = [0, 1, 3, 6, 10, 14]
@@ -189,6 +188,8 @@ final class RadialLayoutTests: XCTestCase {
         everyLayout { layout, tree, what in
             for word in layout.words {
                 guard let path = word.role.path, let node = RadialMenu.node(at: path, in: tree) else { continue }
+                // An action sits beside its branch instead (`testABranchsActionsSitAsLeavesJustBeyondIt`).
+                if node.isLeaf { continue }
                 let a = node.angle
                 XCTAssertEqual(RadialGeometry.angle(of: word.anchor), RadialGeometry.normalized(a), accuracy: 1e-6, "\(what): \(path)")
                 let f = word.frame, anchor = word.anchor
@@ -201,11 +202,41 @@ final class RadialLayoutTests: XCTestCase {
         }
     }
 
-    /// A branch's children sit on one circle per row, beyond the branch's own anchor, each row
-    /// further out than the one before and clear of the actions its loadouts unfold.
-    func testABranchsChildrenSitOnACirclePerRowBeyondIt() {
+    /// A branch's actions sit as leaves just beyond it: all past the same edge of its grown word
+    /// (above or below a loadout or Park, beside Capture or Widgets), the nearest a stem's length
+    /// and both bubbles from its word grown and no further than three of those, the others
+    /// packed close behind it.
+    func testABranchsActionsSitAsLeavesJustBeyondIt() {
         everyLayout { layout, tree, what in
             for branch in layout.branches where !branch.isEmpty {
+                guard let node = RadialMenu.node(at: branch, in: tree), let parent = layout.word(branch),
+                      node.children.allSatisfy(\.isLeaf) else { continue }
+                let s = layout.scale
+                let room = (2 * RadialGlass.padding.width + RadialLayout.stem) * s
+                let words = node.children.compactMap { layout.word(branch + [$0.id]) }
+                let g = parent.grownFrame
+                let edges: [(String, (CGRect) -> Bool)] = [("above", { $0.minY >= g.maxY }), ("below", { $0.maxY <= g.minY }),
+                                                          ("right", { $0.minX >= g.maxX }), ("left", { $0.maxX <= g.minX })]
+                XCTAssertTrue(edges.contains { _, beyond in words.allSatisfy { beyond($0.frame) } }, "\(what): \(branch) past one edge")
+                func apart(_ f: CGRect) -> CGFloat { max(f.minY - g.maxY, g.minY - f.maxY, f.minX - g.maxX, g.minX - f.maxX) }
+                for word in words {
+                    XCTAssertFalse(g.insetBy(dx: -room + 0.01, dy: -room + 0.01).intersects(word.frame), "\(what): \(word.role) keeps a stem's room")
+                }
+                let gaps = words.map { apart($0.frame) }
+                // Three rooms: a loadout at a row's edge has its neighbour's place above it.
+                XCTAssertLessThan(gaps.min() ?? 0, 3 * room, "\(what): \(branch)'s nearest action is near it")
+                let step = (words.map(\.frame.height).max() ?? 0) + 2 * RadialGlass.padding.height * s + RadialLayout.wordGap * s
+                XCTAssertLessThanOrEqual((gaps.max() ?? 0) - (gaps.min() ?? 0), CGFloat(words.count - 1) * step + 0.5,
+                                         "\(what): \(branch)'s actions packed close")
+            }
+        }
+    }
+
+    /// The loadouts sit on one circle per row, beyond Apply Loadout's anchor, each row further
+    /// out than the one before and clear of the actions the row inside it unfolds.
+    func testTheLoadoutsSitOnACirclePerRowBeyondApplyLoadout() {
+        everyLayout { layout, tree, what in
+            for branch in layout.branches where branch == [RadialMenu.loadoutsID] {
                 guard let node = RadialMenu.node(at: branch, in: tree), let parent = layout.word(branch) else { continue }
                 var previous = RadialGeometry.radius(of: parent.anchor)
                 for row in Set(node.children.map(\.row)).sorted() {
@@ -215,14 +246,12 @@ final class RadialLayoutTests: XCTestCase {
                     XCTAssertGreaterThan(radii.min() ?? 0, previous, "\(what): \(branch) row \(row)")
                     previous = radii.max() ?? previous
                 }
-                // An inner row's actions lie inside the next row.
+                // An inner row's actions keep clear of the next row's places.
                 for child in node.children where node.children.contains(where: { $0.row > child.row }) {
                     let next = node.children.filter { $0.row == child.row + 1 }.compactMap { layout.word(branch + [$0.id]) }
-                    let innerEdge = next.map { RadialLayout.distance(to: $0.frame) }.min() ?? .infinity
                     for action in child.children {
                         let frame = layout.word(branch + [child.id, action.id])?.grownFrame ?? .null
                         XCTAssertFalse(next.contains { $0.frame.intersects(frame) }, "\(what): \(child.id)/\(action.id)")
-                        XCTAssertLessThan(RadialLayout.distance(to: frame), innerEdge, "\(what): \(child.id)/\(action.id)")
                     }
                 }
             }
@@ -390,7 +419,8 @@ final class RadialLayoutTests: XCTestCase {
                 }
                 let rows = CGFloat(petal?.rows.count ?? 1)
                 for branch in layout.branches {
-                    XCTAssertLessThanOrEqual(reach(layout, open: branch), 400 + (rows - 1) * 210, "\(what), \(branch)")
+                    // A loadout at the sector's edge has its actions beside it, further round.
+                    XCTAssertLessThanOrEqual(reach(layout, open: branch), 410 + (rows - 1) * 210, "\(what), \(branch)")
                 }
             }
         }
@@ -466,20 +496,17 @@ final class RadialLayoutTests: XCTestCase {
     }
 
     /// Any loadout's actions are reached the way the wheel unfolds them: onto Apply Loadout,
-    /// out past where the loadouts start and round to the loadout, onto it, out past where its
-    /// actions start and round to the action, onto it. Nothing on the way is previewed or
-    /// applied: only the release does that.
+    /// out past where the loadouts start and round to the loadout, onto it, and on to the action
+    /// along its branch. Nothing on the way is previewed or applied: only the release does that.
     func testEveryActionIsReachedAlongItsPath() {
         everyLayout { layout, tree, what in
             guard let ring = layout.petal(["loadouts"])?.start, ring.isFinite else { return }
             for loadout in tree[0].children {
-                guard let out = layout.petal(["loadouts", loadout.id])?.start else { return XCTFail(what) }
                 for action in loadout.children {
                     let path = ["loadouts", loadout.id, action.id]
                     var points = [Self.middle(layout, ["loadouts"])]
                     points += Self.arc(from: 0, to: loadout.angle, radius: ring + 2)
                     points.append(Self.middle(layout, ["loadouts", loadout.id]))
-                    points += Self.arc(from: loadout.angle, to: action.angle, radius: out + 2)
                     points.append(Self.middle(layout, path))
                     XCTAssertEqual(Self.walk(layout, points), path, what)
                 }
@@ -558,7 +585,7 @@ final class RadialLayoutTests: XCTestCase {
 
     // MARK: The hint
 
-    /// The hint sits under every word showing, inside the field, on up to two lines inside its zone.
+    /// The hint sits under every word showing, on up to two lines inside its zone.
     func testTheHintSitsUnderTheWheelAndIsNeverClipped() {
         everyLayout { layout, _, what in
             for (open, showing) in Self.states(layout) {
@@ -573,175 +600,6 @@ final class RadialLayoutTests: XCTestCase {
                     XCTAssertLessThanOrEqual(fit.lines.count, 2)
                     XCTAssertLessThanOrEqual(CGFloat(fit.lines.count) * layout.hintLineHeight(fit), zone.height + 0.01)
                 }
-            }
-        }
-    }
-
-    // MARK: The field
-
-    /// A few cases, every branch's field over the whole wheel's rectangle, built once.
-    private static let fieldCases: [(layout: RadialLayout, what: String)] = {
-        [(3, short), (10, long), (14, short)].map { count, names in
-            (RadialLayout(tree: tree(count, names, allScreens: true)), "\(count) loadouts")
-        } + [(RadialLayout(tree: tree(6, long), scale: 0.79), "6 loadouts at 0.79")]
-    }()
-
-    private static var fields: [String: (whole: RadialField, open: [[String]: RadialField])] = [:]
-
-    private static func fields(_ layout: RadialLayout, _ what: String, reduced: Bool) -> (whole: RadialField, open: [[String]: RadialField]) {
-        let key = "\(what)\(reduced ? ", reduced" : "")"
-        if let cached = fields[key] { return cached }
-        let whole = RadialField(layout: layout, reduced: reduced)
-        var open: [[String]: RadialField] = [:]
-        for branch in layout.branches {
-            open[branch] = RadialField(shape: RadialField.Shape(layout: layout, open: branch, reduced: reduced), over: whole.support)
-        }
-        fields[key] = (whole, open)
-        return (whole, open)
-    }
-
-    private static func samples(_ frame: CGRect) -> [CGPoint] {
-        stride(from: frame.minX, through: frame.maxX, by: max(1, frame.width / 8)).flatMap { x in
-            stride(from: frame.minY, through: frame.maxY, by: max(1, frame.height / 4)).map { CGPoint(x: x, y: $0) }
-        }
-    }
-
-    /// Under every word showing (grown, as it is under the pointer) and the hint the blur is
-    /// full, so no sharp desktop shows through there, and the tint is strong enough to read on.
-    func testUnderEveryWordShowingTheBlurIsFullAndTheTintReads() {
-        for (layout, what) in Self.fieldCases {
-            for reduced in [false, true] {
-                for (open, field) in Self.fields(layout, what, reduced: reduced).open {
-                    for frame in RadialField.places(layout, open: open) {
-                        for p in Self.samples(frame) {
-                            XCTAssertGreaterThanOrEqual(field.blur(at: p), 1 - 1 / 255, "\(what), open \(open)\(reduced ? ", reduced" : "")")
-                            XCTAssertGreaterThanOrEqual(field.tint(at: p), RadialField.readable, "\(what), open \(open)\(reduced ? ", reduced" : "")")
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// Every branch's field covers the same rectangle as the whole wheel's, and is 0 at its
-    /// edge; so the views keep their frames as branches open and nothing is cut off.
-    func testEveryBranchsFieldFitsTheWholeWheelsRectangle() {
-        for (layout, what) in Self.fieldCases {
-            let (whole, open) = Self.fields(layout, what, reduced: false)
-            XCTAssertTrue(whole.support.contains(RadialField.places(layout, open: nil).reduce(CGRect.null) { $0.union($1) }), what)
-            for (branch, field) in open {
-                XCTAssertEqual(field.support, whole.support, "\(what), open \(branch)")
-                XCTAssertEqual(field.blurImage.width, whole.blurImage.width, "\(what), open \(branch)")
-                let s = field.support
-                var edge: [CGPoint] = []
-                for x in stride(from: s.minX, through: s.maxX, by: 8) { edge += [CGPoint(x: x, y: s.minY), CGPoint(x: x, y: s.maxY)] }
-                for y in stride(from: s.minY, through: s.maxY, by: 8) { edge += [CGPoint(x: s.minX, y: y), CGPoint(x: s.maxX, y: y)] }
-                for p in edge where field.blur(at: p) != 0 {
-                    XCTFail("\(what), open \(branch): not 0 at the edge, \(p)")
-                    break
-                }
-            }
-        }
-    }
-
-    /// The blur's image, as the backdrop stretches it, is full (within one 8-bit step) over
-    /// every word showing, the pixels around it included, since a stretched image blends its
-    /// neighbouring pixels.
-    func testTheBlurImageIsFullOverEveryWordShowing() {
-        for (layout, what) in Self.fieldCases {
-            for (open, field) in Self.fields(layout, what, reduced: false).open {
-                let image = field.blurImage
-                guard let data = image.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else { return XCTFail(what) }
-                let step = field.support.width / CGFloat(image.width)
-                for frame in RadialField.places(layout, open: open) {
-                    let c0 = max(0, Int(((frame.minX - field.support.minX) / step).rounded(.down)) - 1)
-                    let c1 = min(image.width - 1, Int(((frame.maxX - field.support.minX) / step).rounded(.up)) + 1)
-                    let r0 = max(0, Int(((field.support.maxY - frame.maxY) / step).rounded(.down)) - 1)
-                    let r1 = min(image.height - 1, Int(((field.support.maxY - frame.minY) / step).rounded(.up)) + 1)
-                    var least: UInt8 = 255
-                    for row in r0...r1 {
-                        for column in c0...c1 { least = min(least, bytes[row * image.bytesPerRow + column * 4 + 3]) }
-                    }
-                    XCTAssertGreaterThanOrEqual(least, 254, "\(what), open \(open)")
-                }
-            }
-        }
-    }
-
-    /// Both profiles fade to nothing with no step anywhere along a line out from the centre; the
-    /// blur is full in the middle, and so is the tint, which is weaker toward the rim.
-    func testTheFieldFadesToNothingWithoutAnEdge() {
-        for (layout, what) in Self.fieldCases {
-            for reduced in [false, true] {
-                for (open, field) in Self.fields(layout, what, reduced: reduced).open {
-                    XCTAssertEqual(field.blur(at: .zero), 1, accuracy: 0.001, what)
-                    XCTAssertEqual(field.tint(at: .zero), 1, accuracy: 0.001, what)
-                    let s = field.support
-                    let reach = Double(hypot(max(-s.minX, s.maxX), max(-s.minY, s.maxY)))
-                    for a in stride(from: 0.0, to: 2 * .pi, by: .pi / 18) {
-                        let start = Double(field.shape.disc) * 0.5
-                        var previous = field.shape.profiles(at: CGPoint(x: start * sin(a), y: start * cos(a)))
-                        for r in stride(from: start + 2, through: reach, by: 2) {
-                            let next = field.shape.profiles(at: CGPoint(x: r * sin(a), y: r * cos(a)))
-                            if abs(next.blur - previous.blur) >= 0.08 || abs(next.tint - previous.tint) >= 0.08 {
-                                XCTFail("\(what), open \(open): a step at \(Int(a * 180 / .pi))° r \(Int(r))")
-                                break
-                            }
-                            previous = next
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// The wheel's field as it opens is small: it reaches little past the top petals.
-    func testTheFieldAsTheWheelOpensIsSmall() {
-        let layout = RadialLayout(tree: Self.tree(10, Self.long))
-        let shape = RadialField.Shape(layout: layout, open: [], reduced: false)
-        let whole = RadialField.Shape(layout: layout, open: nil, reduced: false)
-        XCTAssertLessThan(shape.extent.width, whole.extent.width * 0.75)
-        XCTAssertEqual(shape.blur(at: CGPoint(x: 0, y: 300)), 0)
-    }
-
-    /// With Reduce transparency on, the field is a plain soft disc: both profiles depend on the
-    /// distance from the centre only.
-    func testWithReduceTransparencyTheFieldIsASoftDisc() {
-        let layout = RadialLayout(tree: Self.tree(8, Self.long))
-        let field = RadialField(layout: layout, reduced: true)
-        for value in [field.blur, field.tint] as [(CGPoint) -> CGFloat] {
-            for r in stride(from: 0.0, through: Double(field.support.width / 2), by: 9) {
-                let values = stride(from: 0.0, to: 360, by: 15).map { degrees -> CGFloat in
-                    let a = degrees * .pi / 180
-                    return value(CGPoint(x: r * sin(a), y: r * cos(a)))
-                }
-                XCTAssertLessThan((values.max() ?? 0) - (values.min() ?? 0), 0.001, "radius \(r)")
-            }
-        }
-    }
-
-    /// The blur is full a little past a lit word's glow, and the light under a hovered petal
-    /// ends where the full blur around a lone word would: one reach decides all three.
-    func testTheGlowTheBlurAndTheLightAgree() {
-        XCTAssertGreaterThan(RadialField.pad, RadialWheelView.glowReach)
-        XCTAssertEqual(RadialWheelView.lightReach, RadialField.pad)
-    }
-
-    /// Each image is its profile in black: the blur's alpha is the blur profile, the tint's the
-    /// tint profile, whose strength is the tint view's darkness (`RadialField.darkness`).
-    func testTheImagesAreTheProfiles() throws {
-        let field = RadialField(layout: RadialLayout(tree: Self.tree(8, Self.long)), reduced: false)
-        for (image, value) in [(field.blurImage, field.blur), (field.tintImage, field.tint)] as [(CGImage, (CGPoint) -> CGFloat)] {
-            let rep = NSBitmapImageRep(cgImage: image)
-            let scale = CGFloat(rep.pixelsWide) / field.support.width
-            // (-250, -190) lies on the field's steepest fade, where the image's 4-point pixels
-            // average a slope of about 0.06 across their width: a looser match there.
-            for (p, accuracy) in [(CGPoint(x: 0, y: 0), 0.03), (CGPoint(x: 120, y: -80), 0.03), (CGPoint(x: -200, y: 150), 0.03),
-                                  (CGPoint(x: 0, y: -200), 0.03), (CGPoint(x: 230, y: 160), 0.03), (CGPoint(x: -250, y: -190), 0.07)]
-                where field.support.contains(p) {
-                let pixel = try XCTUnwrap(rep.colorAt(x: Int((p.x - field.support.minX) * scale), y: Int((field.support.maxY - p.y) * scale)))
-                XCTAssertEqual(pixel.alphaComponent, value(p), accuracy: CGFloat(accuracy), "\(p)")
-                XCTAssertEqual(pixel.redComponent + pixel.greenComponent + pixel.blueComponent, 0, accuracy: 0.01, "black")
             }
         }
     }

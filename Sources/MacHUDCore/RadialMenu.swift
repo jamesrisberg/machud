@@ -44,7 +44,9 @@ struct RadialNode: Equatable {
     /// The line under the wheel while it is highlighted: what releasing does, or where to go on.
     var hint: String
     /// Its direction from the centre, clockwise from straight up, in radians: the same every
-    /// time the wheel opens with the same petals (`RadialMenu.tree`).
+    /// time the wheel opens with the same petals (`RadialMenu.tree`). An action's only orders it
+    /// among its siblings: `RadialLayout` places it as a leaf beside its branch, and the
+    /// direction the centre sees it in is its petal's (`RadialLayout.petal(_:)`).
     var angle: Double
     var icons: [NSImage] = []
     var hotkey: HotKey? = nil
@@ -58,11 +60,11 @@ struct RadialNode: Equatable {
 
 // MARK: - Controller
 
-/// The loadout wheel: held open by its hotkey, centred on the cursor, click-through, its words
-/// upright on one soft dark blur. It opens small, on four top petals (Apply Loadout, Capture,
-/// Park and, while an app serves widgets, Widgets); the pointer's path unfolds what lies beyond
-/// the petal it reaches (the loadouts beyond Apply Loadout, a loadout's actions beyond it).
-/// Releasing on an action does it; anywhere else it cancels.
+/// The loadout wheel: held open by its hotkey, centred on the cursor, click-through, each of its
+/// words upright in its own glass bubble (`RadialWheelView`). It opens small, on four top petals
+/// (Apply Loadout, Capture, Park and, while an app serves widgets, Widgets); the pointer's path
+/// unfolds what lies beyond the petal it reaches (the loadouts beyond Apply Loadout, a loadout's
+/// actions beyond it). Releasing on an action does it; anywhere else it cancels.
 @MainActor
 final class RadialMenu {
     /// What the park petal's actions act on, read as the wheel opens and again whenever the
@@ -129,9 +131,8 @@ final class RadialMenu {
     /// (15° and 45° each side), alternating outward. Five labels side by side across the top are
     /// as many as the sector holds without pushing the row far out.
     nonisolated static let loadoutRows: [[Double]] = [[0, 1, -1, 2, -2], [0.5, -0.5, 1.5, -1.5]]
-    /// Between neighbouring actions beyond Capture, Park or Widgets.
-    nonisolated static let toolStep = 30.0 * .pi / 180
-    /// Between a loadout's actions.
+    /// Between neighbouring actions of a branch (a loadout's, Capture's, Park's or Widgets'), in
+    /// the tree: it orders them clockwise about the branch's direction.
     nonisolated static let actionStep = 22.0 * .pi / 180
 
     /// Where each of `count` loadouts goes: its row (0 the innermost) and its angle from Apply
@@ -188,12 +189,13 @@ final class RadialMenu {
         ]
         return RadialNode(id: name, name: name, kind: .loadout(name), hint: "Move out to preview or apply \(name)",
                           angle: angle, icons: entry.icons, hotkey: entry.hotkey,
-                          children: leaves(actions, around: angle, step: actionStep), row: row)
+                          children: leaves(actions, around: angle), row: row)
     }
 
+    /// `actions` as leaves fanning out about `angle`, their branch's direction.
     nonisolated private static func leaves(_ actions: [(id: String, name: String, hint: String, outcome: Outcome)],
-                                           around angle: Double, step: Double) -> [RadialNode] {
-        zip(actions, spread(actions.count, step: step)).map { action, offset in
+                                           around angle: Double) -> [RadialNode] {
+        zip(actions, spread(actions.count, step: actionStep)).map { action, offset in
             RadialNode(id: action.id, name: action.name, kind: .action(action.outcome), hint: action.hint,
                        angle: RadialGeometry.normalized(angle + offset))
         }
@@ -206,7 +208,7 @@ final class RadialMenu {
         actions.append(("draw", "Draw layout", "Draw a new layout", .drawLayout))
         return RadialNode(id: captureID, name: "Capture", kind: .capture(offersAllScreens: offersAllScreens),
                           hint: "Move out to capture", angle: angle, icons: symbol("camera.viewfinder"),
-                          children: leaves(actions, around: angle, step: toolStep))
+                          children: leaves(actions, around: angle))
     }
 
     nonisolated static func parkNode(_ targets: ParkTargets) -> RadialNode {
@@ -221,7 +223,7 @@ final class RadialMenu {
         return RadialNode(id: parkID, name: "Park", kind: .park(targets), hint: "Move out to park or restore", angle: angle,
                           icons: symbol("rectangle.portrait.and.arrow.right"),
                           children: leaves([("park", "Park", park, .park(restore: false)), ("restore", "Restore", restore, .park(restore: true))],
-                                           around: angle, step: toolStep))
+                                           around: angle))
     }
 
     nonisolated static func widgetsNode(_ state: WidgetsState) -> RadialNode {
@@ -233,7 +235,7 @@ final class RadialMenu {
                           angle: angle, icons: symbol("square.grid.2x2"),
                           children: leaves([("reveal", reveal.0, reveal.1, .widgets(edit: false, on: !state.revealed)),
                                             ("edit", edit.0, edit.1, .widgets(edit: true, on: !state.editing))],
-                                           around: angle, step: toolStep))
+                                           around: angle))
     }
 
     // MARK: Reading the tree
@@ -338,8 +340,10 @@ final class RadialMenu {
     static func json(tree: [RadialNode], layout: RadialLayout, selection: [String]? = nil) -> [String: Any] {
         func describe(_ node: RadialNode, parent: [String], digit: Int) -> [String: Any] {
             let path = parent + [node.id]
+            // Where the centre sees it: an action sits beside its branch, wherever its place among
+            // its siblings puts it.
             var d: [String: Any] = ["id": node.id, "path": path.joined(separator: "/"), "name": node.name,
-                                    "kind": node.kind.label, "hint": node.hint, "angle": node.angle]
+                                    "kind": node.kind.label, "hint": node.hint, "angle": layout.petal(path)?.angle ?? node.angle]
             if let word = layout.word(path) { d["radius"] = Double(RadialGeometry.radius(of: word.anchor)) }
             if case .loadout = node.kind { d["row"] = node.row + 1 }
             if digit <= 9 { d["digit"] = digit }
@@ -395,16 +399,11 @@ final class RadialMenu {
 
     private var window: NSWindow?
     let wheel = RadialWheelView()
-    private let tint = RadialTintView(frame: .zero)
-    private let backdrop = RadialBackdrop()
+    /// The dark veil over the screen under the wheel, in a window of its own.
+    let scrim = RadialScrim()
     private var monitors: [Any] = []
     private var keyTap: CFMachPort?
     private var keyMonitor: Any?
-    private var timer: Timer?
-    private var transparencyObserver: NSObjectProtocol?
-    /// The fields of the last layout, built as its branches open: every one covers `whole`'s
-    /// rectangle.
-    private var fields: (layout: RadialLayout, reduced: Bool, whole: RadialField, open: [[String]: RadialField])?
     /// The last layout made, and the extent it is placed by: a wheel with the same words in the
     /// same room opens with them.
     private var laidOut: (key: LayoutKey, layout: RadialLayout, extent: CGRect)?
@@ -474,13 +473,18 @@ final class RadialMenu {
         // Opened by the hotkey, the wheel moves the pointer to its centre; opened by a script, on
         // the screen holding the point it gave, it leaves the pointer alone.
         prepare(tree: tree, at: NSEvent.mouseLocation, on: display, movesPointer: point == nil)
+        present()
+        startTracking()
+        wheel.open()
+    }
 
+    /// Orders the wheel's window in over its screen, with the scrim fading in just under it.
+    /// Nothing is watched and nothing pops out (`wheel.open()`).
+    func present() {
         let w = window ?? makeWindow()
         if w.frame != screenFrame { w.setFrame(screenFrame, display: false) }
         w.orderFrontRegardless()
-
-        startTracking()
-        startAnimation()
+        scrim.show(on: screenFrame, below: w)
     }
 
     /// Sets the wheel up to open on `display`, in the middle of it as far as its rows of loadouts
@@ -514,8 +518,9 @@ final class RadialMenu {
     func hide() {
         let wasVisible = isVisible
         stopTracking()
-        stopAnimation()
+        wheel.close()
         window?.orderOut(nil)
+        scrim.hide()
         if wasVisible { onDismiss?() }
     }
 
@@ -582,53 +587,23 @@ final class RadialMenu {
                        y: axis(room.minY, room.maxY, extent.minY, extent.maxY).rounded())
     }
 
-    /// The wheel's views on the canvas of every word's field, which follows Reduce transparency,
-    /// and the words of the layout.
+    /// The wheel's view on the canvas of the layout's words, centred where the wheel's centre is.
     private func applyLayout() {
-        let reduced = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
-        if fields?.layout != layout || fields?.reduced != reduced {
-            fields = (layout, reduced, RadialField(layout: layout, reduced: reduced), [:])
-        }
-        let canvas = fields!.whole.canvas
-        let local = CGRect(x: center.x - screenFrame.minX - canvas.center.x, y: center.y - screenFrame.minY - canvas.center.y,
-                           width: canvas.size.width, height: canvas.size.height)
-        backdrop.view.frame = local
-        tint.frame = local
-        wheel.frame = local
-        wheel.configure(layout: layout, canvas: canvas, tree: tree)
-        wheel.selection = selection
-        applyField()
-    }
-
-    /// The field of the branch open now, over the whole field's rectangle.
-    func field(open: [String]) -> RadialField? {
-        guard var fields else { return nil }
-        let branch = layout.openBranch(open)
-        if let field = fields.open[branch] { return field }
-        let field = RadialField(shape: RadialField.Shape(layout: layout, open: branch, reduced: fields.reduced),
-                                over: fields.whole.support)
-        fields.open[branch] = field
-        self.fields = fields
-        return field
-    }
-
-    /// Shows the field of the branch open now under the words.
-    private func applyField() {
-        guard let field = field(open: selection) else { return }
-        backdrop.show(field: field.blurImage)
-        tint.image = field.tintImage
+        let canvas = RadialWheelView.canvas(for: layout)
+        wheel.frame = CGRect(x: center.x - screenFrame.minX - canvas.center.x, y: center.y - screenFrame.minY - canvas.center.y,
+                             width: canvas.size.width, height: canvas.size.height)
+        wheel.configure(layout: layout, canvas: canvas, tree: tree, selection: selection)
     }
 
     // MARK: Selection
 
-    /// Highlights `path`: the branches along it open (their field with them) and the park petal,
-    /// newly reached, asks for its targets again.
+    /// Highlights `path`: the branches along it open and the park petal, newly reached, asks for
+    /// its targets again. The wheel's bubbles follow; nothing here waits for them.
     private func highlight(_ path: [String]) {
         guard path != selection else { return }
         let previous = selection
         selection = path
         wheel.selection = path
-        if layout.openBranch(path) != layout.openBranch(previous) { applyField() }
         noteHighlight(from: previous)
     }
 
@@ -702,11 +677,6 @@ final class RadialMenu {
         if let local { monitors.append(local) }
         installKeys()
         if let tap = keyTap { CGEvent.tapEnable(tap: tap, enable: true) }
-        transparencyObserver = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { if self?.isVisible == true { self?.applyLayout() } }
-        }
     }
 
     private func handle(_ event: NSEvent) {
@@ -717,8 +687,6 @@ final class RadialMenu {
         for m in monitors { NSEvent.removeMonitor(m) }
         monitors.removeAll()
         if let tap = keyTap { CGEvent.tapEnable(tap: tap, enable: false) }
-        if let observer = transparencyObserver { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
-        transparencyObserver = nil
     }
 
     private func installKeys() {
@@ -779,40 +747,25 @@ final class RadialMenu {
         return false
     }
 
-    // MARK: Animation
-
-    private func startAnimation() {
-        wheel.resetSprings()
-        guard timer == nil else { return }
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 120.0, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.wheel.tick() }
-        }
-    }
-
-    private func stopAnimation() {
-        timer?.invalidate()
-        timer = nil
-    }
-
     // MARK: Window
 
     func makeWindow() -> NSWindow {
         let w = NSWindow(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
         w.isOpaque = false
         w.backgroundColor = .clear
-        // The words are white on a dark field: dark in a light system appearance too, so the
-        // system's material the backdrop shows with Reduce transparency on is the dark one.
+        // The words are white on dark glass: dark in a light system appearance too, so the
+        // glass's tint, and the system's material it shows with Reduce transparency on, are the
+        // dark ones.
         w.appearance = NSAppearance(named: .darkAqua)
         w.hasShadow = false
         w.ignoresMouseEvents = true
         w.level = .screenSaver
         w.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
         w.isReleasedWhenClosed = false
+        // Made without defer, so the window server's blur under the bubbles (`HUDGlassView`) is
+        // set on it before it first shows.
         let content = NSView(frame: .zero)
-        content.addSubview(backdrop.view)
-        content.addSubview(tint)
         content.addSubview(wheel)
-        wheel.onShown = { [weak tint] shown in tint?.shown = shown }
         w.contentView = content
         window = w
         return w
@@ -844,461 +797,5 @@ final class RadialMenu {
 
     static func icons(for loadout: Loadout, panels: PanelRegistry?) -> [NSImage] {
         loadout.slots.prefix(RadialLayout.maxIcons).compactMap { icon(for: $0.occupant, panels: panels) }
-    }
-}
-
-// MARK: - Backdrop
-
-/// What the wheel's tint and words sit on: HUDKit's soft backdrop (`HUDSoftBackdropView`), a
-/// blur of what is behind the window shown through the field, so its edge fades out instead of
-/// ending in a line. With a field it always draws: the blur, or the system's material (opaque
-/// and dark with Reduce transparency on; AppKit's own translucent material where the blur
-/// cannot be made). It draws no tint of its own: the wheel's tint is its own view
-/// (`RadialTintView`), the same over either. Nothing else in the wheel's window may be on the
-/// window server's blur (`HUDGlassView` with the window blur): that blur covers everything the
-/// window draws and would end in a line.
-@MainActor
-final class RadialBackdrop {
-    let view: HUDSoftBackdropView
-    private var shown: CGImage?
-
-    /// `view` stands in for the backdrop (tests); nil makes the family's.
-    init(view: HUDSoftBackdropView? = nil) {
-        self.view = view ?? HUDSoftBackdropView(frame: .zero)
-        self.view.tint = nil
-        // HUDKit's log lines about the backdrop name it by this.
-        self.view.identifier = NSUserInterfaceItemIdentifier("loadout wheel")
-    }
-
-    var path: HUDSoftBackdropView.Path { view.path }
-
-    /// Shows the blur through `field`'s alpha, stretched over the view, and says how the
-    /// backdrop draws now. The same field again is left as it is: a new one has the backdrop
-    /// build its material again.
-    @discardableResult
-    func show(field: CGImage) -> HUDSoftBackdropView.Path {
-        if field !== shown {
-            shown = field
-            view.field = NSImage(cgImage: field, size: CGSize(width: field.width, height: field.height))
-        }
-        return view.path
-    }
-}
-
-// MARK: - Drawing
-
-/// The wheel's tint: the field's tint profile (black, its alpha the profile) stretched over the
-/// canvas, composited by the GPU and drawn once per configuration, under the words. Its opacity
-/// is `RadialField.darkness` times how far the wheel has faded in (`shown`).
-final class RadialTintView: NSView {
-    var image: CGImage? { didSet { layer?.contents = image } }
-    var shown: CGFloat = 1 { didSet { alphaValue = RadialField.darkness * shown } }
-
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        wantsLayer = true
-        layer?.contentsGravity = .resize
-        layer?.magnificationFilter = .linear
-        alphaValue = RadialField.darkness * shown
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
-
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-}
-
-/// The wheel's words, over its tint (`RadialTintView`). Each word is rendered once per
-/// configuration and backing scale, white with its soft dark shadow, and once more lit (with its
-/// glow, at its grown size); a frame draws those pictures at the springs' strengths, and the
-/// hint again only when it changes. A branch's children fade in sliding out from the centre as
-/// it opens, and fade out as it closes.
-final class RadialWheelView: NSView {
-    /// A word drawn once: its picture and where it goes, in wheel coordinates.
-    private struct Still {
-        var image: CGImage
-        var rect: CGRect
-        /// How many times its word's rest size the picture shows it.
-        var grown: CGFloat = 1
-    }
-
-    private static let empty: CGImage = {
-        let ctx = CGContext(data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 0,
-                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-        return ctx.makeImage()!
-    }()
-
-    private struct Drawn {
-        var role: RadialLayout.Word.Role
-        var rest: Still
-        var lit: Still?
-        /// How many times its size it grows lit (`RadialLayout.Word.grow`), from `anchor`.
-        var grow: CGFloat = 1
-        var anchor: CGPoint
-    }
-
-    /// The most a petal grows under the pointer, from its anchor; each grows as far as the
-    /// words showing with it allow (`RadialLayout.Word.grow`).
-    nonisolated static let grow: CGFloat = 1.25
-    /// How far a lit word's glow reaches past its box, at full size. The field's blur is full a
-    /// little further out (`RadialField.pad`).
-    nonisolated static let glowReach: CGFloat = 14
-    /// How far the light under a hovered petal reaches past most of its box, at full size: as
-    /// far as the full blur around a lone word.
-    nonisolated static let lightReach: CGFloat = RadialField.pad
-    /// How far a branch's children slide out as they unfold, at full size.
-    static let unfold: CGFloat = 14
-
-    /// Called with how far the wheel has faded in (0...1), for the tint under it.
-    var onShown: ((CGFloat) -> Void)?
-
-    private var layout = RadialLayout(tree: [])
-    private var tree: [RadialNode] = []
-    private var origin: CGPoint = .zero
-    /// The words drawn, at `drawnScale` pixels per point (0: not yet).
-    private var drawn: [Drawn] = []
-    private var drawnScale: CGFloat = 0
-    private var drawnAppearance: NSAppearance.Name?
-    /// How many times the words have been drawn into their pictures (tests).
-    private(set) var wordRenders = 0
-    /// Each petal's icons in a row, by path, drawn once per configuration (the icons are the
-    /// tree's, which a new configuration brings anew); nil until drawn.
-    private var iconRows: [[String]: Still]?
-    private var hint: (text: String, zone: CGRect, still: Still)?
-
-    /// Every petal's path, in the layout's order, and its place in the springs.
-    private var paths: [[String]] = []
-    private var slot: [[String]: Int] = [:]
-    /// The petals under each branch, by the branch's path.
-    private var family: [[String]: [[String]]] = [:]
-    /// Per petal: showing (its branch is open), on the highlighted path, the one highlighted.
-    private var shown: [Spring] = []
-    private var onPath: [Spring] = []
-    private var lit: [Spring] = []
-    private var cancelLit = Spring(1)
-    private var appear = Spring(1)
-
-    var selection: [String] = [] {
-        didSet { guard selection != oldValue else { return }; retarget(); needsDisplay = true }
-    }
-
-    override var isFlipped: Bool { false }
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-    func configure(layout: RadialLayout, canvas: RadialMenu.Canvas, tree: [RadialNode]) {
-        // The words are drawn again only for a new layout: they depend on it, the backing scale
-        // and the appearance alone.
-        if layout != self.layout {
-            drawn = []
-            drawnScale = 0
-        }
-        self.layout = layout
-        self.tree = tree
-        origin = canvas.center
-        iconRows = nil
-        hint = nil
-        let paths = layout.words.compactMap(\.role.path)
-        if paths != self.paths {
-            self.paths = paths
-            slot = Dictionary(uniqueKeysWithValues: paths.enumerated().map { ($1, $0) })
-            family = Dictionary(grouping: paths) { Array($0.dropLast()) }
-            shown = paths.map { _ in Spring(0) }
-            onPath = paths.map { _ in Spring(0) }
-            lit = paths.map { _ in Spring(0) }
-        }
-        retarget()
-        needsDisplay = true
-    }
-
-    /// The same wheel with nodes whose kinds changed but whose words did not (the park petal's
-    /// targets): only the hint changes.
-    func update(tree: [RadialNode]) {
-        self.tree = tree
-        needsDisplay = true
-    }
-
-    func resetSprings() {
-        shown = paths.map { _ in Spring(0) }
-        onPath = paths.map { _ in Spring(0) }
-        lit = paths.map { _ in Spring(0) }
-        cancelLit = Spring(selection.isEmpty ? 1 : 0)
-        appear = Spring(0)
-        appear.target = 1
-        onShown?(0)
-        retarget()
-        // The top petals are there as the wheel fades in; only what unfolds later slides out.
-        for (k, path) in paths.enumerated() where path.count == 1 { shown[k].jump(to: shown[k].target) }
-        needsDisplay = true
-    }
-
-    /// At rest with `selection` highlighted, as if the springs had settled (snapshots).
-    func settle(selection: [String]) {
-        self.selection = selection
-        retarget()
-        for springs in [\RadialWheelView.shown, \.onPath, \.lit] as [ReferenceWritableKeyPath<RadialWheelView, [Spring]>] {
-            for i in self[keyPath: springs].indices { self[keyPath: springs][i].jump(to: self[keyPath: springs][i].target) }
-        }
-        cancelLit.jump(to: cancelLit.target)
-        appear.jump(to: 1)
-        onShown?(1)
-        needsDisplay = true
-    }
-
-    private func retarget() {
-        let showing = Set(layout.showing(open: layout.openBranch(selection)))
-        for (k, path) in paths.enumerated() {
-            shown[k].target = showing.contains(path) ? 1 : 0
-            onPath[k].target = !selection.isEmpty && selection.starts(with: path) ? 1 : 0
-            lit[k].target = path == selection ? 1 : 0
-        }
-        cancelLit.target = selection.isEmpty ? 1 : 0
-    }
-
-    private var springs: [Spring] { shown + onPath + lit + [cancelLit, appear] }
-
-    /// Whether a spring is still moving.
-    var isMoving: Bool { springs.contains { $0.value != $0.target || $0.velocity != 0 } }
-
-    /// Steps the springs; redraws only while something moves.
-    func tick() {
-        let dt = 1.0 / 120.0
-        let before = springs
-        _ = appear.step(dt: dt, stiffness: 320, damping: 0.62, epsilon: 0.002)
-        _ = cancelLit.step(dt: dt, stiffness: 420, damping: 0.7, epsilon: 0.002)
-        for i in shown.indices { _ = shown[i].step(dt: dt, stiffness: 520, damping: 0.8, epsilon: 0.002) }
-        for i in onPath.indices { _ = onPath[i].step(dt: dt, stiffness: 420, damping: 0.66, epsilon: 0.002) }
-        for i in lit.indices { _ = lit[i].step(dt: dt, stiffness: 380, damping: 0.55, epsilon: 0.002) }
-        if appear.value != before[before.count - 1].value { onShown?(faded) }
-        if springs != before { needsDisplay = true }
-    }
-
-    private var faded: CGFloat { max(0, min(1, CGFloat(appear.value) * 1.4)) }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        needsDisplay = true
-    }
-
-    override func viewDidChangeBackingProperties() {
-        super.viewDidChangeBackingProperties()
-        needsDisplay = true
-    }
-
-    // MARK: Pictures
-
-    private var backingScale: CGFloat { window?.backingScaleFactor ?? 2 }
-
-    /// Draws each word once, at `scale` pixels per point.
-    private func prepare(scale: CGFloat) {
-        let s = layout.scale
-        drawn = layout.words.map { word -> Drawn in
-            let text = PreparedText(word.fit, style: word.style)
-            switch word.role {
-            case .node:
-                return Drawn(role: word.role,
-                             rest: Self.still(text, frame: word.frame, align: word.align, anchor: word.anchor, scale: scale, size: s),
-                             lit: Self.still(text, frame: word.frame, align: word.align, anchor: word.anchor, scale: scale, size: s,
-                                             glow: true, grow: word.grow),
-                             grow: word.grow, anchor: word.anchor)
-            case .digit:
-                return Drawn(role: word.role, rest: Self.still(text, frame: word.frame, align: 0.5, anchor: word.anchor, scale: scale, size: s),
-                             lit: nil, anchor: word.anchor)
-            case .centre:
-                let escape = PreparedText(TextFit(lines: ["Esc"], size: word.style.preferred - 1.5 * s, truncated: false), style: word.style)
-                return Drawn(role: word.role, rest: Self.still(escape, frame: word.frame, align: 0.5, anchor: word.anchor, scale: scale, size: s),
-                             lit: Self.still(text, frame: word.frame, align: 0.5, anchor: word.anchor, scale: scale, size: s, glow: true),
-                             anchor: word.anchor)
-            }
-        }
-        drawnScale = scale
-        drawnAppearance = effectiveAppearance.name
-        wordRenders += 1
-        iconRows = nil
-        hint = nil
-    }
-
-    /// Each petal's icons in a row under its lines, with the words' soft dark shadow.
-    private func prepareIcons(scale: CGFloat) {
-        var rows: [[String]: Still] = [:]
-        for word in layout.words {
-            guard let path = word.role.path, word.icons > 0, let node = RadialMenu.node(at: path, in: tree) else { continue }
-            rows[path] = Self.still(nil, frame: word.frame, align: word.align, anchor: word.anchor, scale: scale, size: layout.scale,
-                                    icons: Array(node.icons.prefix(word.icons)))
-        }
-        iconRows = rows
-    }
-
-    /// `text` in white inside `frame` (its lines from the top, placed across by `align`), or a
-    /// petal's `icons` in a row at the frame's foot, with a soft dark shadow and, when `glow`, a
-    /// white glow, `grow` times its size from `anchor`: rendered at `scale` pixels per point,
-    /// the shadows sized for wheel scale `size`.
-    private static func still(_ text: PreparedText?, frame: CGRect, align: CGFloat, anchor: CGPoint, scale: CGFloat, size s: CGFloat,
-                              icons: [NSImage] = [], glow: Bool = false, grow: CGFloat = 1) -> Still {
-        let margin = (glow ? glowReach : 6) * s
-        let grown = RadialLayout.grown(frame, by: grow, about: anchor)
-        let rect = grown.insetBy(dx: -margin, dy: -margin).integral
-        let space = CGColorSpace(name: CGColorSpace.sRGB)!
-        guard let ctx = CGContext(data: nil, width: max(1, Int(rect.width * scale)), height: max(1, Int(rect.height * scale)),
-                                  bitsPerComponent: 8, bytesPerRow: 0, space: space,
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
-            return Still(image: empty, rect: rect, grown: grow)
-        }
-        ctx.scaleBy(x: scale, y: scale)
-        ctx.translateBy(x: -rect.minX, y: -rect.minY)
-        if grow != 1 {
-            ctx.translateBy(x: anchor.x, y: anchor.y)
-            ctx.scaleBy(x: grow, y: grow)
-            ctx.translateBy(x: -anchor.x, y: -anchor.y)
-        }
-        // Shadows are in the bitmap's pixels, whatever the transform.
-        let px = scale * grow
-        func words() {
-            if let text {
-                text.draw(in: CGRect(x: frame.minX, y: frame.maxY - text.height, width: frame.width, height: text.height),
-                          align: align, in: ctx)
-            }
-            guard !icons.isEmpty else { return }
-            let side = RadialLayout.iconSize * s, spacing = RadialLayout.iconSpacing * s
-            let row = CGFloat(icons.count) * side + CGFloat(icons.count - 1) * spacing
-            let x = frame.minX + (frame.width - row) * align
-            NSGraphicsContext.saveGraphicsState()
-            NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
-            for (k, icon) in icons.enumerated() {
-                (icon.isTemplate ? white(icon) : icon).draw(in: CGRect(x: x + CGFloat(k) * (side + spacing), y: frame.minY,
-                                                                        width: side, height: side))
-            }
-            NSGraphicsContext.restoreGraphicsState()
-        }
-        ctx.setFillColor(NSColor.white.cgColor)
-        if glow {
-            ctx.setShadow(offset: .zero, blur: 10 * s * px, color: NSColor.white.withAlphaComponent(0.8).cgColor)
-            words()
-        }
-        ctx.setShadow(offset: CGSize(width: 0, height: -1 * s * px), blur: 4 * s * px, color: NSColor.black.withAlphaComponent(0.7).cgColor)
-        words()
-        return Still(image: ctx.makeImage() ?? empty, rect: rect, grown: grow)
-    }
-
-    /// A template symbol in white.
-    private static func white(_ icon: NSImage) -> NSImage {
-        NSImage(size: icon.size, flipped: false) { rect in
-            icon.draw(in: rect)
-            NSColor.white.set()
-            rect.fill(using: .sourceAtop)
-            return true
-        }
-    }
-
-    // MARK: Frames
-
-    private func value(_ springs: [Spring], _ path: [String]) -> CGFloat {
-        guard let k = slot[path], springs.indices.contains(k) else { return 0 }
-        return CGFloat(springs[k].value)
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        guard let ctx = NSGraphicsContext.current?.cgContext, !tree.isEmpty else { return }
-        if drawnScale != backingScale || drawnAppearance != effectiveAppearance.name { prepare(scale: backingScale) }
-        if iconRows == nil { prepareIcons(scale: backingScale) }
-        let faded = self.faded
-        ctx.saveGState()
-        ctx.translateBy(x: origin.x, y: origin.y)
-        ctx.interpolationQuality = .high
-        let grow = 0.9 + 0.1 * CGFloat(appear.value)
-        ctx.scaleBy(x: grow, y: grow)
-        drawLight(in: ctx, faded: faded)
-        // How deep the path reaches, eased with the springs.
-        let depth = paths.reduce(CGFloat(0)) { max($0, CGFloat($1.count) * value(onPath, $1)) }
-        for word in drawn {
-            switch word.role {
-            case .node(let path):
-                let unfolded = max(0, min(1, value(shown, path)))
-                guard unfolded > 0.004 else { continue }
-                let h = value(onPath, path), l = value(lit, path)
-                // Siblings of the petal on the path step back, the more so once the path has
-                // gone on past them.
-                let siblings = family[Array(path.dropLast())] ?? []
-                let recede = max(0, (siblings.map { value(onPath, $0) }.max() ?? 0) - h)
-                let beyond = recede * CGFloat(max(0, min(1, depth - CGFloat(path.count))))
-                let alpha = (0.86 + 0.14 * h - 0.3 * recede - 0.22 * beyond) * faded * unfolded
-                // Sliding out from the centre as it unfolds.
-                let a = RadialGeometry.angle(of: word.anchor)
-                let slide = RadialGeometry.point(-Self.unfold * layout.scale * (1 - unfolded), a)
-                ctx.saveGState()
-                ctx.translateBy(x: slide.x, y: slide.y)
-                draw(word, alpha: alpha, lit: max(l, 0.5 * h), grow: 1 + (word.grow - 1) * l, in: ctx)
-                if let row = iconRows?[path], alpha > 0.004 {
-                    let g = 1 + (word.grow - 1) * l
-                    ctx.saveGState()
-                    ctx.setAlpha(min(1, alpha + 0.1 * faded * unfolded))
-                    ctx.draw(row.image, in: RadialLayout.grown(row.rect, by: g, about: word.anchor))
-                    ctx.restoreGState()
-                }
-                ctx.restoreGState()
-            case .digit(let i):
-                guard tree.indices.contains(i) else { continue }
-                let path = [tree[i].id]
-                let h = value(onPath, path)
-                let others = tree.map { value(onPath, [$0.id]) }.max() ?? 0
-                draw(word, alpha: (0.32 + 0.4 * h - 0.12 * max(0, others - h)) * faded, lit: 0, in: ctx)
-            case .centre:
-                let c = CGFloat(cancelLit.value)
-                draw(word, alpha: 0.5 * faded, lit: c, litAlpha: faded, in: ctx)
-            }
-        }
-        drawHint(in: ctx, alpha: 0.95 * faded)
-        ctx.restoreGState()
-    }
-
-    /// Draws `word` at `alpha`, crossfading to its lit picture by `lit`, `grow` times its rest
-    /// size from its anchor.
-    private func draw(_ word: Drawn, alpha: CGFloat, lit l: CGFloat, litAlpha: CGFloat? = nil, grow: CGFloat = 1,
-                      in ctx: CGContext) {
-        let l = max(0, min(1, l))
-        func put(_ still: Still, _ a: CGFloat, scale: CGFloat) {
-            guard a > 0.004 else { return }
-            ctx.saveGState()
-            ctx.setAlpha(min(1, a))
-            ctx.draw(still.image, in: RadialLayout.grown(still.rect, by: scale, about: word.anchor))
-            ctx.restoreGState()
-        }
-        guard let lit = word.lit, l > 0.004 else {
-            put(word.rest, alpha, scale: grow)
-            return
-        }
-        put(word.rest, alpha * (1 - l), scale: grow)
-        put(lit, (litAlpha ?? alpha) * l, scale: grow / lit.grown)
-    }
-
-    /// A very soft light under the petal highlighted, with no edge.
-    private func drawLight(in ctx: CGContext, faded: CGFloat) {
-        for (k, path) in paths.enumerated() {
-            let l = CGFloat(lit[k].value) * faded
-            guard l > 0.01, let word = layout.word(path) else { continue }
-            let frame = word.frame
-            let radius = max(frame.width, frame.height) * 0.8 + Self.lightReach * layout.scale
-            let colors = [NSColor.white.withAlphaComponent(0.13 * l).cgColor, NSColor.white.withAlphaComponent(0.05 * l).cgColor,
-                          NSColor.white.withAlphaComponent(0).cgColor] as CFArray
-            guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 0.45, 1]) else { continue }
-            let c = CGPoint(x: frame.midX, y: frame.midY)
-            ctx.drawRadialGradient(gradient, startCenter: c, startRadius: 0, endCenter: c, endRadius: radius, options: [])
-        }
-    }
-
-    /// What releasing does, in plain words under the words showing, fitted to the hint's zone.
-    private func drawHint(in ctx: CGContext, alpha: CGFloat) {
-        let text = RadialMenu.hint(for: selection, in: tree)
-        let zone = layout.hintZone(open: selection)
-        if hint?.text != text || hint?.zone != zone {
-            let fit = TextFit.fit(text, style: layout.hintStyle, width: zone.width)
-            let prepared = PreparedText(fit, style: layout.hintStyle)
-            let frame = CGRect(x: zone.minX, y: zone.maxY - prepared.height, width: zone.width, height: prepared.height)
-            hint = (text, zone, Self.still(prepared, frame: frame, align: 0.5, anchor: CGPoint(x: frame.midX, y: frame.maxY),
-                                           scale: drawnScale, size: layout.scale))
-        }
-        guard let hint, alpha > 0.004 else { return }
-        ctx.saveGState()
-        ctx.setAlpha(alpha)
-        ctx.draw(hint.still.image, in: hint.still.rect)
-        ctx.restoreGState()
     }
 }

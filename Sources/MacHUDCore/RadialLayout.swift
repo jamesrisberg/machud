@@ -16,7 +16,8 @@ import AppKit
 ///   every action the inner row's places unfold. A loadout's direction, row and distance never
 ///   change as loadouts are added, whatever the names.
 ///   Under the pointer a petal grows from its anchor (away from the centre), as far as
-///   `RadialWheelView.grow` without touching a word that shows with it.
+///   `RadialWheelView.grow` without touching a word that shows with it, and without its glass
+///   bubble (`RadialGlass.padding` round its box) covering theirs.
 /// - A name is fitted to its width (wrap to two lines, then shrink, then cut after a whole word;
 ///   a loadout's name keeps to one line);
 ///   a top petal or a loadout shows up to `maxIcons` icons in a row under its name.
@@ -44,8 +45,6 @@ struct RadialLayout: Equatable {
         var style: TextFit.Style
         /// The word's box, icons included.
         var frame: CGRect
-        /// Where each line sits across the frame: 0 at its left edge, 1 at its right.
-        var align: CGFloat
         /// Icons in a row under the lines.
         var icons: Int
         /// The point the word is anchored at, on its direction; it grows from here.
@@ -77,6 +76,10 @@ struct RadialLayout: Equatable {
         /// it, and inside the next one's start, the pointer picks among that row.
         var rows: [[String]] = []
         var rowStarts: [CGFloat] = []
+        /// Where its actions are, each from the middle of its word out to the action with a word's
+        /// gap round it: there it keeps the pointer whatever the radius (an inner row's loadout,
+        /// whose actions may reach past where the next row starts).
+        var leaves: [CGRect] = []
 
         /// The children the pointer picks among at radius `r`: the row it is out at.
         func row(at r: CGFloat) -> [String] {
@@ -115,6 +118,14 @@ struct RadialLayout: Equatable {
     static let maxIcons = 4
     /// How much further out a branch's children move each time they would touch a word.
     static let push: CGFloat = 2
+    /// The least length of the stem between a branch's bubble and its actions' (`RadialGlass`).
+    static let stem: CGFloat = 10
+    /// How much further out a branch's outer actions sit, per point they sit to the side: the
+    /// leaves spread like a crown, so the middle one sits close.
+    static let branchBend: CGFloat = 0.2
+    /// The widths of name the room between rows is kept for, at full size: one as narrow as a
+    /// loadout's icons, half its place and its whole place.
+    static let reservedWidths: [CGFloat] = [24, loadoutWidth / 2, loadoutWidth]
 
     let scale: CGFloat
     let deadZone: CGFloat
@@ -227,7 +238,11 @@ struct RadialLayout: Equatable {
         let branch = openBranch(open)
         for depth in stride(from: branch.count, through: 1, by: -1) {
             let held = Array(branch.prefix(depth))
-            guard let petal = petals[held], petal.hasChildren, petal.covers(a), r < petal.end else { continue }
+            guard let petal = petals[held], petal.hasChildren, petal.covers(a) else { continue }
+            if r >= petal.end {
+                let p = RadialGeometry.point(r, a)
+                guard petal.leaves.contains(where: { $0.contains(p) }) else { continue }
+            }
             if r >= petal.start { return .beyond(held) }
             let circle = depth == 1 ? deadZone : word(held).map { RadialGeometry.radius(of: $0.anchor) } ?? .infinity
             if r >= circle { return .at(held) }
@@ -238,14 +253,24 @@ struct RadialLayout: Equatable {
     /// From the branch at `path` out: its child nearest `a` on the row `r` is out at, then, while
     /// `r` is past where that one's children start (and inside the next row) and within their
     /// arc, its child nearest `a`, and so on.
+    /// Among a branch's actions (leaves round its word), the one nearest the pointer; among
+    /// other children, the one whose direction is nearest the pointer's.
     private func outward(from path: [String], radius r: CGFloat, angle a: Double) -> [String] {
         var path = path
         var ids = path.isEmpty ? top : petals[path]?.row(at: r) ?? []
+        let p = RadialGeometry.point(r, a)
         while !ids.isEmpty {
             let parent = path
-            func distance(_ id: String) -> Double { abs(RadialGeometry.difference(a, petals[parent + [id]]?.angle ?? 0)) }
+            let leaves = !(petals[parent]?.leaves.isEmpty ?? true)
+            func distance(_ id: String) -> Double {
+                if leaves, let frame = word(parent + [id])?.frame {
+                    return Double(hypot(max(frame.minX - p.x, 0, p.x - frame.maxX), max(frame.minY - p.y, 0, p.y - frame.maxY)))
+                }
+                return abs(RadialGeometry.difference(a, petals[parent + [id]]?.angle ?? 0))
+            }
             path.append(ids.min { distance($0) < distance($1) }!)
-            guard let petal = petals[path], petal.hasChildren, r >= petal.start, r < petal.end, petal.covers(a) else { break }
+            guard let petal = petals[path], petal.hasChildren, r >= petal.start, petal.covers(a),
+                  r < petal.end || petal.leaves.contains(where: { $0.contains(p) }) else { break }
             ids = petal.row(at: r)
         }
         return path
@@ -260,7 +285,10 @@ struct RadialLayout: Equatable {
         deadZone = dead
         let gap = Self.wordGap * s
         let clearance = Self.levelGap * s
+        // A branch's word and its actions' keep room for both bubbles and a stem between them.
+        let branchClearance = (2 * RadialGlass.padding.width + Self.stem) * s
         let maxGrow = RadialWheelView.grow
+        let padding = CGSize(width: RadialGlass.padding.width * s, height: RadialGlass.padding.height * s)
         let nameStyle = TextFit.Style.name.scaled(s)
         let labelStyle = TextFit.Style.label.scaled(s)
         top = tree.map(\.id)
@@ -292,11 +320,11 @@ struct RadialLayout: Equatable {
             }
         }
 
-        /// `node`'s word, anchored at `radius` on its direction.
-        func petalWord(_ node: RadialNode, path: [String], radius: CGFloat) -> Word {
+        /// `node`'s word, anchored at `radius` on its direction (or `angle`) from `origin`.
+        func petalWord(_ node: RadialNode, path: [String], radius: CGFloat, origin: CGPoint = .zero, angle: Double? = nil) -> Word {
             let (style, width, icons) = style(node)
             return Self.petal(node.name, path: path, fit: TextFit.fit(node.name, style: style, width: width), style: style,
-                              icons: icons, angle: node.angle, radius: radius, scale: s)
+                              icons: icons, angle: angle ?? node.angle, radius: radius, origin: origin, scale: s)
         }
 
         /// Places `nodes` (the children of the branch at `parent`) on one circle from `from` out,
@@ -305,47 +333,139 @@ struct RadialLayout: Equatable {
             place(from: from, context: context) { radius in nodes.map { petalWord($0, path: parent + [$0.id], radius: radius) } }
         }
 
+        /// Places a branch's actions (`nodes`, the children of the branch at `parent`, whose word
+        /// is `word` and direction `direction`) as leaves just beyond it, as near its grown word
+        /// as a stem allows (`branchClearance`) and clear of `context` and each other, in their
+        /// order as the centre sees them (which is how the pointer picks among them):
+        /// - within 30° of straight up or down (Park, the loadouts nearer the top): side by side
+        ///   past its top or bottom edge, centred on it, the outer ones a little further out
+        ///   (`branchBend`);
+        /// - near the horizontal (Capture, Widgets): one above the other past its outer side;
+        /// - between (the loadouts nearer the sector's edges, whose neighbours sit beside them):
+        ///   one above the other past its top or bottom edge, flush with its outer side, so they
+        ///   never widen the wheel.
+        func fan(_ nodes: [RadialNode], parent: [String], around word: Word, direction a: Double, context: [CGRect]) -> [Word] {
+            let box = word.grownFrame
+            let up = cos(a) >= 0, right = sin(a) >= 0
+            let upright = abs(cos(a)) >= abs(sin(a)) * 3.0.squareRoot() - 1e-9
+            let level = abs(sin(a)) >= sin(75 * Double.pi / 180)
+            let n = nodes.count
+            // Each leaf's word, made once, upright the way it lies (a column's flush with the
+            // branch's outer side: on the right it ends at its anchor, on the left starts there).
+            let sixth = Double.pi / 6
+            let facing: Double
+            if upright {
+                facing = up ? 0 : 6 * sixth
+            } else if level {
+                facing = right ? 3 * sixth : 9 * sixth
+            } else if up {
+                facing = right ? 11 * sixth : sixth
+            } else {
+                facing = right ? 7 * sixth : 5 * sixth
+            }
+            let made = nodes.map { petalWord($0, path: parent + [$0.id], radius: 0, angle: facing) }
+            func at(_ i: Int, _ anchor: CGPoint) -> Word {
+                var word = made[i]
+                word.frame = word.frame.offsetBy(dx: anchor.x - word.anchor.x, dy: anchor.y - word.anchor.y)
+                word.anchor = anchor
+                return word
+            }
+            // Each leaf's anchor: along the way they lie (`spacing` apart), `d` out from the edge.
+            func leaves(spacing: CGFloat, beyond d: CGFloat) -> [Word] {
+                (0..<n).map { i in
+                    if upright {
+                        let t = (CGFloat(i) - CGFloat(n - 1) / 2) * spacing * (up ? 1 : -1)
+                        let lift = d + Self.branchBend * abs(t)
+                        return at(i, CGPoint(x: box.midX + t, y: up ? box.maxY + lift : box.minY - lift))
+                    }
+                    if level {
+                        let t = (CGFloat(i) - CGFloat(n - 1) / 2) * spacing * (right ? -1 : 1)
+                        return at(i, CGPoint(x: right ? box.maxX + d : box.minX - d, y: box.midY + t))
+                    }
+                    let k = CGFloat((right != up) ? i : n - 1 - i)
+                    let y = up ? box.maxY + d + k * spacing : box.minY - d - k * spacing
+                    return at(i, CGPoint(x: right ? box.maxX : box.minX, y: y))
+                }
+            }
+            // The least room between them that keeps their bubbles apart; then out until clear.
+            var spacing: CGFloat = 0
+            let apartBy = CGSize(width: 2 * padding.width + gap / 2, height: 2 * padding.height + gap / 2)
+            for _ in 0..<400 {
+                let row = leaves(spacing: spacing, beyond: 0)
+                let apart = !row.indices.contains { i in
+                    row.indices.contains { k in k > i && row[i].frame.insetBy(dx: -apartBy.width, dy: -apartBy.height).intersects(row[k].frame) }
+                }
+                if apart { break }
+                spacing += Self.push * s
+            }
+            return place(from: 0, context: context, branch: box, bubbles: true) { d in leaves(spacing: spacing, beyond: d) }
+        }
+
         /// The words `make` lays out at a radius, on the smallest circle from `from` out where they
-        /// clear `context` and each other, each grown as far as it can clear them.
-        func place(from: CGFloat, context: [CGRect], _ make: (CGFloat) -> [Word]) -> [Word] {
+        /// clear `context` (and `branch`, their branch's grown word, by a stem) and each other,
+        /// each grown as far as it can clear them. With `bubbles`, the room kept between them and
+        /// from `context` holds both bubbles (`RadialGlass.padding`) and a little more.
+        func place(from: CGFloat, context: [CGRect], branch: CGRect? = nil, bubbles: Bool = false,
+                   _ make: (CGFloat) -> [Word]) -> [Word] {
             var radius = from
             var placed: [Word] = []
+            let context = context + (branch.map { [$0] } ?? [])
+            let near = bubbles ? max(clearance, 2 * padding.width + gap / 2) : clearance
+            let apartBy = bubbles ? CGSize(width: 2 * padding.width + gap / 2, height: 2 * padding.height + gap / 2) : CGSize(width: gap, height: gap)
             for _ in 0..<600 {
                 placed = make(radius)
                 let clear = placed.allSatisfy { word in
-                    let padded = word.frame.insetBy(dx: -clearance, dy: -clearance)
+                    let padded = word.frame.insetBy(dx: -near, dy: -near)
+                    let stem = word.frame.insetBy(dx: -branchClearance, dy: -branchClearance)
                     return Self.distance(to: word.frame) >= dead + gap && !context.contains { $0.intersects(padded) }
+                        && branch?.intersects(stem) != true
                 }
                 let apart = !placed.indices.contains { a in
-                    placed.indices.contains { b in b > a && placed[a].frame.insetBy(dx: -gap, dy: -gap).intersects(placed[b].frame) }
+                    placed.indices.contains { b in
+                        b > a && placed[a].frame.insetBy(dx: -apartBy.width, dy: -apartBy.height).intersects(placed[b].frame)
+                    }
                 }
                 if clear && apart { break }
                 radius += Self.push * s
             }
             for k in placed.indices {
                 let others = context + placed.indices.filter { $0 != k }.map { placed[$0].frame }
-                placed[k].grow = Self.largestGrowth(placed[k], upTo: maxGrow, avoiding: others, gap: gap)
+                placed[k].grow = Self.largestGrowth(placed[k], upTo: maxGrow, avoiding: others, gap: gap, padding: padding)
             }
             return placed
+        }
+
+        /// The word at `path` grows no further than keeps its bubble off the bubbles of `frames`,
+        /// its children's: they show whenever it is highlighted, placed clear of its grown box.
+        func keepClear(_ path: [String], of frames: [CGRect]) {
+            guard let k = words.lastIndex(where: { $0.role == .node(path) }) else { return }
+            words[k].grow = Self.largestGrowth(words[k], upTo: words[k].grow, avoiding: frames, gap: gap, padding: padding)
         }
 
         /// Lays out the children of `node` (at `path`) and everything under them, on one circle
         /// beyond it; `context` is what shows beside them, the branch's own word grown. Apply
         /// Loadout's children go in rows of fixed places instead (`openLoadouts`).
-        func open(_ node: RadialNode, path: [String], word: Word, context: [CGRect]) {
+        func open(_ node: RadialNode, path: [String], word: Word, context: [CGRect], direction: Double? = nil) {
             if case .loadouts = node.kind { return openLoadouts(node, path: path, word: word, context: context) }
-            var petal = Petal(angle: node.angle, children: node.children.map(\.id))
+            var petal = Petal(angle: direction ?? node.angle, children: node.children.map(\.id))
             guard !node.children.isEmpty else { petals[path] = petal; return }
-            let children = place(node.children, parent: path, from: RadialGeometry.radius(of: word.anchor) + gap,
-                                 context: context + [word.grownFrame])
+            let children = fan(node.children, parent: path, around: word, direction: node.angle, context: context)
             words += children
+            keepClear(path, of: children.map(\.frame))
+            if node.children.allSatisfy(\.isLeaf) {
+                let middle = CGRect(x: word.frame.midX, y: word.frame.midY, width: 0, height: 0)
+                petal.leaves = children.map { $0.grownFrame.union(middle).insetBy(dx: -gap, dy: -gap) }
+            }
+            // Seen from the centre, which is how the pointer picks among them.
+            let directions = children.map { RadialGeometry.angle(of: CGPoint(x: $0.frame.midX, y: $0.frame.midY)) }
             petal.start = children.map { Self.distance(to: $0.frame) }.min().map { $0 - gap / 2 } ?? .infinity
-            petal.arc = Self.arc(of: node.children.map { $0.angle }, around: node.angle)
+            // From its own direction to its actions', so the way out to them is held too.
+            petal.arc = Self.arc(of: directions + [node.angle], around: node.angle)
             petals[path] = petal
             let siblings = children.map(\.frame)
-            for (child, childWord) in zip(node.children, children) {
+            for (k, (child, childWord)) in zip(node.children, children).enumerated() {
                 open(child, path: path + [child.id], word: childWord,
-                     context: context + [word.frame] + siblings.filter { $0 != childWord.frame })
+                     context: context + [word.frame] + siblings.filter { $0 != childWord.frame }, direction: directions[k])
             }
         }
 
@@ -384,11 +504,18 @@ struct RadialLayout: Equatable {
                 slots.append(row)
                 starts.append(row.map { Self.distance(to: $0.frame) }.min().map { $0 - gap / 2 } ?? .infinity)
                 shown += row.map(\.frame)
-                // What every place of the row unfolds, as a loadout there would.
+                // What every place of the row unfolds, as a loadout there would, for a name as
+                // narrow as its icons, half the place and the whole place: the fan sits about the
+                // name's middle.
                 for (i, slot) in row.enumerated() {
                     let actions = RadialMenu.loadoutNode(.init(name: "\u{1}"), angle: angles[i], row: k).children
-                    let beside = context + [word.frame] + shown.filter { $0 != slot.frame } + [slot.grownFrame]
-                    inside += place(actions, parent: [], from: RadialGeometry.radius(of: slot.anchor) + gap, context: beside).map(\.grownFrame)
+                    let beside = context + [word.frame] + shown.filter { $0 != slot.frame }
+                    for width in Self.reservedWidths {
+                        var name = Self.slot(slot.role.path ?? [], size: CGSize(width: width * s, height: slotSize.height), angle: angles[i],
+                                             radius: RadialGeometry.radius(of: slot.anchor))
+                        name.grow = slot.grow
+                        inside += fan(actions, parent: [], around: name, direction: angles[i], context: beside).map(\.grownFrame)
+                    }
                 }
                 inside += row.map(\.grownFrame)
                 from = (row.map { RadialGeometry.radius(of: $0.anchor) }.max() ?? from) + gap
@@ -403,13 +530,13 @@ struct RadialLayout: Equatable {
                 var childWord = petalWord(child, path: childPath, radius: RadialGeometry.radius(of: slot.anchor))
                 childWord.grow = slot.grow
                 words.append(childWord)
-                var stand = slot
-                stand.role = .node(childPath)
                 let inner = slots.prefix(child.row + 1).flatMap { $0 }.map(\.frame).filter { $0 != slot.frame }
-                open(child, path: childPath, word: stand, context: context + [word.frame] + inner)
-                // An inner row's loadouts pick among their actions only inside the next row.
+                open(child, path: childPath, word: childWord, context: context + [word.frame] + inner)
+                // An inner row's loadouts pick among their actions inside the next row, and beyond
+                // it only on them.
                 if child.row + 1 < rowCount { petals[childPath]?.end = starts[child.row + 1] }
             }
+            keepClear(path, of: words.filter { $0.role.path.map { $0.count == path.count + 1 && $0.starts(with: path) } ?? false }.map(\.frame))
             petal.start = starts.first ?? .infinity
             petal.rows = (0..<rowCount).map { k in node.children.filter { $0.row == k }.map(\.id) }
             petal.rowStarts = starts
@@ -514,15 +641,14 @@ struct RadialLayout: Equatable {
         let fit = TextFit(lines: ["\(index + 1)"], size: style.preferred, truncated: false)
         let p = RadialGeometry.point(deadZone - digitInset * s, angle)
         return Word(role: .digit(index), fit: fit, style: style, frame: box(fit, style: style, centredAt: p),
-                    align: 0.5, icons: 0, anchor: p)
+                    icons: 0, anchor: p)
     }
 
     /// The centre's word, as wide as the wider of "Esc" and "Cancel".
     private static func centre(scale s: CGFloat) -> Word {
         let style = TextFit.Style.centre.scaled(s)
         let fit = TextFit(lines: ["Cancel"], size: style.preferred, truncated: false)
-        return Word(role: .centre, fit: fit, style: style, frame: box(fit, style: style, centredAt: .zero), align: 0.5,
-                    icons: 0, anchor: .zero)
+        return Word(role: .centre, fit: fit, style: style, frame: box(fit, style: style, centredAt: .zero), icons: 0, anchor: .zero)
     }
 
     /// 0 for `x` at or below `-0.5`, 1 at or above `0.5`, smoothly between.
@@ -538,22 +664,23 @@ struct RadialLayout: Equatable {
         let align = 1 - blend(sin(a)), lift = 1 - blend(cos(a))
         return Word(role: .node(path), fit: TextFit(lines: [], size: 0, truncated: false), style: .name,
                     frame: CGRect(x: anchor.x - align * size.width, y: anchor.y - lift * size.height, width: size.width, height: size.height),
-                    align: align, icons: 0, anchor: anchor)
+                    icons: 0, anchor: anchor)
     }
 
-    /// A petal anchored at `radius` on direction `a`, growing away from the centre.
+    /// A petal anchored at `radius` on direction `a` from `origin`, growing away from it.
     private static func petal(_ name: String, path: [String], fit: TextFit, style: TextFit.Style, icons: Int, angle a: Double,
-                              radius: CGFloat, scale s: CGFloat) -> Word {
+                              radius: CGFloat, origin: CGPoint = .zero, scale s: CGFloat) -> Word {
         let font = style.font(fit.size)
         let row = icons > 0 ? CGFloat(icons) * iconSize * s + CGFloat(icons - 1) * iconSpacing * s : 0
         let w = max(fit.lines.map { TextFit.width($0, font: font) }.max() ?? 0, row)
         let h = CGFloat(fit.lines.count) * PreparedText.lineHeight(font) + (icons > 0 ? (iconGap + iconSize) * s : 0)
-        let anchor = RadialGeometry.point(radius, a)
+        let p = RadialGeometry.point(radius, a)
+        let anchor = CGPoint(x: origin.x + p.x, y: origin.y + p.y)
         let align = 1 - blend(sin(a))
         let lift = 1 - blend(cos(a))
         return Word(role: .node(path), fit: fit, style: style,
                     frame: CGRect(x: anchor.x - align * w, y: anchor.y - lift * h, width: w, height: h),
-                    align: align, icons: icons, anchor: anchor)
+                    icons: icons, anchor: anchor)
     }
 
     /// The arc covering `angles` around `centre`, half a step past the outermost on each side;
@@ -565,6 +692,12 @@ struct RadialLayout: Equatable {
         let half = (steps.min() ?? RadialGeometry.fullTurn / 4) / 2
         guard high - low + 2 * half < RadialGeometry.fullTurn - 1e-6 else { return nil }
         return (centre + low - half)...(centre + high + half)
+    }
+
+    /// `a` and `b` share some area (touching edges do not).
+    private static func overlaps(_ a: CGRect, _ b: CGRect) -> Bool {
+        let common = a.intersection(b)
+        return !common.isNull && common.width > 0.001 && common.height > 0.001
     }
 
     /// The distance from the centre to the nearest point of `rect`.
@@ -579,11 +712,16 @@ struct RadialLayout: Equatable {
     }
 
     /// The most `word` can grow from its anchor, up to `limit`, without coming within `gap` of
-    /// any of `others`.
-    private static func largestGrowth(_ word: Word, upTo limit: CGFloat, avoiding others: [CGRect], gap: CGFloat) -> CGFloat {
+    /// any of `others`, and without its bubble (its box with `padding` round it, grown with it)
+    /// covering any of theirs.
+    private static func largestGrowth(_ word: Word, upTo limit: CGFloat, avoiding others: [CGRect], gap: CGFloat,
+                                      padding: CGSize) -> CGFloat {
+        let bubbles = others.map { $0.insetBy(dx: -padding.width, dy: -padding.height) }
         func fits(_ factor: CGFloat) -> Bool {
-            let big = grown(word.frame, by: factor, about: word.anchor).insetBy(dx: -gap / 2, dy: -gap / 2)
-            return !others.contains { $0.intersects(big) }
+            let box = grown(word.frame, by: factor, about: word.anchor)
+            let big = box.insetBy(dx: -gap / 2, dy: -gap / 2)
+            let bubble = grown(word.frame.insetBy(dx: -padding.width, dy: -padding.height), by: factor, about: word.anchor)
+            return !others.contains { $0.intersects(big) } && !bubbles.contains { overlaps($0, bubble) }
         }
         if fits(limit) { return limit }
         var (low, high) = (CGFloat(1), limit)
@@ -625,198 +763,5 @@ enum RadialGeometry {
     static func normalized(_ a: Double) -> Double {
         let d = a.truncatingRemainder(dividingBy: fullTurn)
         return d < 0 ? d + fullTurn : d
-    }
-}
-
-// MARK: - The field
-
-/// The one soft region the wheel's words sit on, fading to nothing with no edge, as two
-/// profiles over the same shape. Pure functions from the words showing to an alpha in 0...1:
-/// - `blur`: what the backdrop's blur shows through (`blurImage`). It is full wherever a word
-///   showing can be, so no sharp desktop shows through there (an alpha is a cross-fade between
-///   the blurred desktop and the sharp one), and fades only outside that.
-/// - `tint`: the profile of the tint the wheel draws (`tintImage`): the same, a little weaker
-///   toward the rim (`rim`), so the middle is darkest. Its strength is the tint view's darkness.
-/// The snapshots show the blurred desktop through `blur` and the tint through `tint`.
-///
-/// The shape is a disc a little past the top petals united with a rounded box around each word
-/// showing that reaches outside it (grown under the pointer) and the hint's two-line zone, joined
-/// smoothly, full inside and fading over `fade` outside. With Reduce transparency on it is a
-/// plain soft disc around every word showing. Each open branch has its own field; every field of
-/// a layout covers the same rectangle (`support`, the one around every word), so the wheel's views
-/// keep their frames as branches open.
-struct RadialField {
-    /// What the field is made from: two layouts and branches with the same shape have the same field.
-    struct Shape: Equatable {
-        var disc: CGFloat
-        var boxes: [CGRect]
-        var reach: CGFloat
-        var fade: CGFloat
-        var pad: CGFloat
-        var smoothing: CGFloat
-        var reduced: Bool
-
-        /// The shape of the words showing while `open` is the open branch; nil: every word.
-        init(layout: RadialLayout, open: [String]?, reduced: Bool) {
-            let s = layout.scale
-            pad = RadialField.pad * s
-            fade = RadialField.fade * s
-            smoothing = RadialField.smoothing * s
-            let frames = RadialField.places(layout, open: open)
-            let farthest = { (r: CGRect) in hypot(max(abs(r.minX), abs(r.maxX)), max(abs(r.minY), abs(r.maxY))) }
-            reach = max(1, frames.map(farthest).max() ?? 1)
-            let topReach = layout.top.compactMap { layout.word([$0])?.grownFrame }.map(farthest).max() ?? layout.deadZone
-            disc = reduced ? reach + pad : topReach + RadialField.discReach * s
-            let (disc, pad) = (disc, pad)
-            boxes = reduced ? [] : frames.filter { farthest($0) + pad > disc }
-            self.reduced = reduced
-        }
-
-        /// Full inside the shape, falling smoothly to 0 over `fade` outside it.
-        func blur(at p: CGPoint) -> CGFloat { profiles(at: p).blur }
-
-        /// `blur`, weaker by up to `rim` toward the farthest word.
-        func tint(at p: CGPoint) -> CGFloat { profiles(at: p).tint }
-
-        /// Both profiles at `p`, the shape measured once.
-        func profiles(at p: CGPoint) -> (blur: CGFloat, tint: CGFloat) {
-            let r = hypot(p.x, p.y)
-            let u = min(1, r / reach)
-            let rim = 1 - RadialField.rim * u * u * (3 - 2 * u)
-            var d = r - disc
-            // Inside the disc the union only lies deeper: the blur is full there.
-            guard d > 0 else { return (1, rim) }
-            for box in boxes { d = RadialField.smoothMin(d, RadialField.distance(p, to: box) - pad, smoothing) }
-            guard d < fade else { return (0, 0) }
-            let t = max(0, d / fade)
-            let blur = 1 - t * t * t * (t * (t * 6 - 15) + 10)
-            return (blur, blur * rim)
-        }
-
-        /// The rectangle the profiles are not 0 inside of.
-        var extent: CGRect {
-            let disc = CGRect(x: -self.disc, y: -self.disc, width: 2 * self.disc, height: 2 * self.disc)
-            let all = boxes.reduce(disc) { $0.union($1.insetBy(dx: -pad, dy: -pad)) }
-            // A smooth union reaches past its parts by a fraction of the smoothing.
-            let margin = fade + smoothing / 2
-            return all.insetBy(dx: -margin, dy: -margin).integral
-        }
-    }
-
-    /// The darkness of the wheel's tint over the backdrop where its profile is full: black at
-    /// this alpha. Where a word sits (the profile at least `readable`) a white word on a white
-    /// desktop reads at better than 4.5 to 1.
-    static let darkness: CGFloat = 0.7
-    /// The least strength of the tint's profile under any word.
-    static let readable: CGFloat = 0.84
-    /// How much weaker the tint's profile is at the farthest word than in the middle.
-    static let rim: CGFloat = 0.14
-    /// How far past each word's box the blur stays full: a little past a lit word's glow
-    /// (`RadialWheelView.glowReach`).
-    nonisolated static let pad: CGFloat = RadialWheelView.glowReach + 12
-    static let fade: CGFloat = 60
-    static let smoothing: CGFloat = 90
-    /// How far past the top petals the field's disc reaches.
-    static let discReach: CGFloat = 16
-    /// Points per pixel of the blur's and the tint's images: the field is smooth enough to be
-    /// stretched.
-    static let step: CGFloat = 4
-
-    /// Every place a word showing while `open` is the open branch can be (nil: every word): each
-    /// petal's box grown under the pointer (a name's with its icons), the digits, the centre and
-    /// the hint's two-line zone.
-    static func places(_ layout: RadialLayout, open: [String]?) -> [CGRect] {
-        let fixed = layout.words.filter { $0.role.path == nil }.map(\.frame)
-        guard let open else {
-            return layout.words.map(\.grownFrame) + layout.hintZones.values.sorted { $0.minY < $1.minY }.prefix(1)
-        }
-        let showing = layout.showing(open: layout.openBranch(open)).compactMap { layout.word($0)?.grownFrame }
-        return fixed + showing + [layout.hintZone(open: open)]
-    }
-
-    let shape: Shape
-    var reduced: Bool { shape.reduced }
-    /// Both profiles are 0 on and outside this rectangle's edge (whole points).
-    let support: CGRect
-    let blurImage: CGImage
-    let tintImage: CGImage
-
-    var canvas: RadialMenu.Canvas {
-        RadialMenu.Canvas(size: support.size, center: CGPoint(x: -support.minX, y: -support.minY))
-    }
-
-    /// The field of every word of `layout`, over the smallest rectangle that holds it.
-    init(layout: RadialLayout, reduced: Bool) {
-        self.init(shape: Shape(layout: layout, open: nil, reduced: reduced))
-    }
-
-    /// The field of `shape` over `support` (its own extent, cropped to where it is not 0, when nil).
-    init(shape: Shape, over support: CGRect? = nil) {
-        self.shape = shape
-        if let support {
-            (self.support, blurImage, tintImage) = Self.images(over: support, crop: false, profiles: shape.profiles)
-        } else {
-            (self.support, blurImage, tintImage) = Self.images(over: shape.extent, crop: true, profiles: shape.profiles)
-        }
-    }
-
-    func blur(at p: CGPoint) -> CGFloat { shape.blur(at: p) }
-    func tint(at p: CGPoint) -> CGFloat { shape.tint(at: p) }
-
-    /// Signed distance from `p` to `box`: negative inside.
-    static func distance(_ p: CGPoint, to box: CGRect) -> CGFloat {
-        let dx = abs(p.x - box.midX) - box.width / 2
-        let dy = abs(p.y - box.midY) - box.height / 2
-        return hypot(max(dx, 0), max(dy, 0)) + min(max(dx, dy), 0)
-    }
-
-    static func smoothMin(_ a: CGFloat, _ b: CGFloat, _ k: CGFloat) -> CGFloat {
-        let h = max(k - abs(a - b), 0) / k
-        return min(a, b) - h * h * k / 4
-    }
-
-    /// The blur's and the tint's images (black, alpha the profile), one pixel per `step` points,
-    /// top row first, and the rectangle they cover: `room`, or with `crop` the part of it where
-    /// the blur is not 0 with two empty pixels around it. The tint is nowhere stronger than the blur.
-    static func images(over room: CGRect, crop: Bool,
-                       profiles: (CGPoint) -> (blur: CGFloat, tint: CGFloat)) -> (CGRect, CGImage, CGImage) {
-        let width = max(1, Int((room.width / step).rounded(.up)))
-        let height = max(1, Int((room.height / step).rounded(.up)))
-        var values = [(blur: CGFloat, tint: CGFloat)](repeating: (0, 0), count: width * height)
-        var (left, right, top, bottom) = (width, -1, height, -1)
-        for row in 0..<height {
-            let y = room.maxY - (CGFloat(row) + 0.5) * step
-            for column in 0..<width {
-                let v = profiles(CGPoint(x: room.minX + (CGFloat(column) + 0.5) * step, y: y))
-                guard v.blur > 0.5 / 255 else { continue }
-                values[row * width + column] = v
-                (left, right, top, bottom) = (min(left, column), max(right, column), min(top, row), max(bottom, row))
-            }
-        }
-        if right < left { (left, right, top, bottom) = (width / 2, width / 2, height / 2, height / 2) }
-        let margin = 2
-        let (x0, x1, y0, y1) = crop ? (left - margin, right + margin, top - margin, bottom + margin) : (0, width - 1, 0, height - 1)
-        let w = x1 - x0 + 1, h = y1 - y0 + 1
-        var blurBytes = [UInt8](repeating: 0, count: w * h * 4)
-        var tintBytes = blurBytes
-        for row in max(0, y0)...min(height - 1, y1) {
-            for column in max(0, x0)...min(width - 1, x1) {
-                let v = values[row * width + column]
-                guard v.blur > 0 else { continue }
-                let i = ((row - y0) * w + (column - x0)) * 4 + 3
-                blurBytes[i] = UInt8((v.blur * 255).rounded())
-                tintBytes[i] = UInt8((v.tint * 255).rounded())
-            }
-        }
-        let support = CGRect(x: room.minX + CGFloat(x0) * step, y: room.maxY - CGFloat(y1 + 1) * step,
-                             width: CGFloat(w) * step, height: CGFloat(h) * step)
-        return (support, image(blurBytes, width: w, height: h), image(tintBytes, width: w, height: h))
-    }
-
-    private static func image(_ bytes: [UInt8], width: Int, height: Int) -> CGImage {
-        let provider = CGDataProvider(data: Data(bytes) as CFData)!
-        return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
-                       space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
-                       provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)!
     }
 }
