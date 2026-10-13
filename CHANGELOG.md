@@ -6,6 +6,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-13
+
 ### Added
 - **Holding ⌃⌥Space now summons your HUD.** The tool dock and the desktop widgets come up with the
   radial wheel, on the wheel's display, even when the dock is off or tucked away by auto-hide, and
