@@ -23,8 +23,10 @@ final class RadialScrimTests: XCTestCase {
     override func tearDown() {
         for menu in menus {
             menu.hide()
-            menu.scrim.window?.orderOut(nil)
-            menu.scrim.window?.close()
+            for w in [menu.scrim.window, menu.scrim.band] {
+                w?.orderOut(nil)
+                w?.close()
+            }
         }
         menus = []
         super.tearDown()
@@ -32,28 +34,51 @@ final class RadialScrimTests: XCTestCase {
 
     private func wait(_ seconds: TimeInterval) { RunLoop.current.run(until: Date().addingTimeInterval(seconds)) }
 
-    /// As the wheel shows, the veil covers its whole screen just under the wheel's window, in a
-    /// window of its own that is never key or main, takes no mouse and has no glass (so the
-    /// window server's blur stays on the bubbles).
-    func testTheScrimCoversTheScreenUnderTheWheelAndNeverTakesFocus() throws {
+    /// As the wheel shows, the veil covers its whole screen in two windows of its own that are
+    /// never key or main, take no mouse and have no glass (so the window server's blur stays on
+    /// the bubbles): the visible frame just under `.floating`, so the windows are dimmed and the
+    /// HUD (the tool dock, raised widgets, the siblings' panels) is not; the menu bar and the
+    /// system Dock, the rest of the screen, at the wheel's level just under it.
+    func testTheScrimCoversTheScreenUnderTheHUDAndTheWheelAndNeverTakesFocus() throws {
         let menu = menu()
         menu.present()
         let scrim = try XCTUnwrap(menu.scrim.window)
+        let band = try XCTUnwrap(menu.scrim.band)
         XCTAssertTrue(menu.scrim.isShowing)
         XCTAssertTrue(scrim.isVisible)
+        XCTAssertTrue(band.isVisible)
         XCTAssertTrue(menu.isVisible)
-        XCTAssertEqual(scrim.frame, display.frame, "the whole screen the wheel opens on")
+        XCTAssertEqual(scrim.frame, display.visibleFrame, "the windows' part of the screen")
+        XCTAssertEqual(band.frame, display.frame, "the whole screen the wheel opens on")
         let wheel = try XCTUnwrap(NSApp.windows.first { $0.contentView?.subviews.contains(menu.wheel) == true })
         XCTAssertFalse(scrim === wheel)
-        XCTAssertGreaterThan(scrim.orderedIndex, wheel.orderedIndex, "just under the wheel")
-        XCTAssertEqual(scrim.level, wheel.level)
-        XCTAssertEqual(scrim.collectionBehavior, wheel.collectionBehavior, "on every Space the wheel is")
-        XCTAssertFalse(scrim.canBecomeKey)
-        XCTAssertFalse(scrim.canBecomeMain)
-        XCTAssertFalse(scrim.isKeyWindow)
-        XCTAssertTrue(scrim.ignoresMouseEvents)
-        func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
-        XCTAssertFalse(try views(XCTUnwrap(scrim.contentView)).contains { $0 is HUDGlassView || $0 is HUDSoftBackdropView })
+        XCTAssertFalse(band === wheel)
+
+        // Above app windows, under every floating layer of the HUD; the wheel above all of it.
+        XCTAssertGreaterThan(scrim.level, .normal)
+        XCTAssertLessThan(scrim.level, .floating, "raised widgets and siblings' panels float over it")
+        XCTAssertLessThan(scrim.level, ToolDockWindow.make().level, "the tool dock is over it")
+        XCTAssertGreaterThan(wheel.level, NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow))),
+                             "the wheel is over the menu bar")
+        XCTAssertEqual(band.level, wheel.level)
+        XCTAssertGreaterThan(band.orderedIndex, wheel.orderedIndex, "the band just under the wheel")
+
+        // The band leaves out the visible frame, which the other window veils: no part twice.
+        let hole = display.visibleFrame.offsetBy(dx: -display.frame.minX, dy: -display.frame.minY)
+        XCTAssertEqual((band.contentView as? RadialScrimBand)?.hole, hole)
+        let path = RadialScrimBand.path(bounds: CGRect(origin: .zero, size: display.frame.size), hole: hole)
+        XCTAssertTrue(path.contains(CGPoint(x: 700, y: 890), using: .evenOdd), "the menu bar")
+        XCTAssertFalse(path.contains(CGPoint(x: 700, y: 450), using: .evenOdd), "the visible frame")
+
+        for w in [scrim, band] {
+            XCTAssertEqual(w.collectionBehavior, wheel.collectionBehavior, "on every Space the wheel is")
+            XCTAssertFalse(w.canBecomeKey)
+            XCTAssertFalse(w.canBecomeMain)
+            XCTAssertFalse(w.isKeyWindow)
+            XCTAssertTrue(w.ignoresMouseEvents)
+            func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+            XCTAssertFalse(try views(XCTUnwrap(w.contentView)).contains { $0 is HUDGlassView || $0 is HUDSoftBackdropView })
+        }
         let veil = try XCTUnwrap(scrim.contentView?.layer?.backgroundColor.flatMap { NSColor(cgColor: $0) })
         XCTAssertEqual(veil.alphaComponent, RadialScrim.darkness, accuracy: 0.001)
         XCTAssertEqual(veil.usingColorSpace(.sRGB)?.brightnessComponent ?? 1, 0, accuracy: 0.001, "black")
@@ -66,9 +91,12 @@ final class RadialScrimTests: XCTestCase {
             let menu = menu()
             menu.present()
             let scrim = try XCTUnwrap(menu.scrim.window)
+            let band = try XCTUnwrap(menu.scrim.band)
             XCTAssertLessThan(scrim.alphaValue, 0.5, "\(end): it fades in")
+            XCTAssertLessThan(band.alphaValue, 0.5, "\(end): it fades in")
             wait(RadialScrim.fadeIn + 0.15)
             XCTAssertEqual(scrim.alphaValue, 1, accuracy: 0.01, end)
+            XCTAssertEqual(band.alphaValue, 1, accuracy: 0.01, end)
             switch end {
             case "hide": menu.hide()
             case "cancel": menu.cancel()
@@ -77,6 +105,7 @@ final class RadialScrimTests: XCTestCase {
             XCTAssertFalse(menu.scrim.isShowing, end)
             wait(RadialScrim.fadeOut + 0.15)
             XCTAssertFalse(scrim.isVisible, "\(end): gone")
+            XCTAssertFalse(band.isVisible, "\(end): gone")
         }
     }
 

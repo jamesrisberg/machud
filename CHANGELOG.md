@@ -57,6 +57,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   can ask for results with `machud search query text=<words>`.
 
 ### Changed
+- The wheel's dimmed backdrop now darkens your windows, the menu bar and the Dock, but not the HUD:
+  the tool dock, raised widgets and the apps' panels stay bright under the wheel.
 - A loadout is the screen you are looking at. **Capture This Screen as Loadout…** (the Loadouts
   menu, the wheel and the Loadouts settings tab alike) captures the display under the pointer,
   on the desktop showing, even when other displays have windows; the capture sheet no longer
