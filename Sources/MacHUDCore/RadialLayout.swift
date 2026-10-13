@@ -462,26 +462,24 @@ struct RadialLayout: Equatable {
         return out
     }
 
-    /// The layout of `tree` at full size, or smaller where that would not fit in `room`.
     /// How many rows of loadouts the wheel's size on a screen is chosen for: up to this many,
     /// adding a loadout never changes the size, so none of the others moves on any screen.
     static let fittedRows = 4
 
     /// The layout of `tree` for a screen with `room`, at the screen's size (`screenFit`), and the
-    /// extent the wheel is placed by: the same for every tree of up to `fittedRows` rows.
+    /// extent the wheel is placed by: that of `tree`'s rows of loadouts filled, Widgets and All
+    /// screens included, at that size. It depends on the screen and the rows alone.
     static func fitting(_ tree: [RadialNode], in room: CGSize) -> (layout: RadialLayout, extent: CGRect) {
         let rows = tree.first { $0.kind == .loadouts }.map { Set($0.children.map(\.row)).count } ?? 0
-        let fit = screenFit(in: room, rows: max(rows, fittedRows))
-        return (RadialLayout(tree: tree, scale: fit.scale), fit.extent)
+        let scale = screenFit(in: room, rows: max(rows, fittedRows)).scale
+        return (RadialLayout(tree: tree, scale: scale), RadialLayout(tree: fullRows(rows), scale: scale).bounds)
     }
 
     /// The wheel's size on a screen with `room`: full size, or smaller where a wheel with `rows`
     /// full rows of loadouts, Widgets and All screens would not fit; and that wheel's extent at
     /// that size. It depends on the screen and the rows alone, never on the names.
     static func screenFit(in room: CGSize, rows: Int) -> (scale: CGFloat, extent: CGRect) {
-        let count = RadialMenu.loadoutPlaces(rows * 5).filter { $0.row < rows }.count
-        let tree = RadialMenu.tree(loadouts: (0..<count).map { .init(name: "\($0)") }, offersAllScreens: true,
-                                   park: .init(), widgets: .init())
+        let tree = fullRows(rows)
         var layout = RadialLayout(tree: tree)
         var scale: CGFloat = 1
         for _ in 0..<12 {
@@ -491,6 +489,14 @@ struct RadialLayout: Equatable {
             layout = RadialLayout(tree: tree, scale: scale)
         }
         return (layout.scale, layout.bounds)
+    }
+
+    /// A wheel with `rows` full rows of loadouts, Widgets and All screens: the most any wheel
+    /// with that many rows takes up.
+    private static func fullRows(_ rows: Int) -> [RadialNode] {
+        let count = RadialMenu.loadoutPlaces(rows * 5).filter { $0.row < rows }.count
+        return RadialMenu.tree(loadouts: (0..<count).map { .init(name: "\($0)") }, offersAllScreens: true,
+                               park: .init(), widgets: .init())
     }
 
     // MARK: Words

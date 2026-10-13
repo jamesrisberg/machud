@@ -36,16 +36,18 @@ final class RadialOpeningTests: XCTestCase {
         return points
     }
 
-    /// Wherever the pointer is when the wheel opens, the wheel opens in the middle of that screen,
-    /// at the same place however many loadouts there are, and the pointer is moved to its
-    /// centre, once (left alone only where it already was there). Nothing is lit and releasing
+    /// Wherever the pointer is when the wheel opens, the wheel opens in the middle of that screen
+    /// (dead centre with a row of loadouts, lower only as further rows need the room), and the
+    /// pointer is moved to its centre, once (left alone only where it already was there). Nothing is lit and releasing
     /// cancels, and a pointer event that did not move changes nothing either.
     func testItOpensInTheMiddleOfTheScreenAndMovesThePointerThere() {
         for display in Self.displays {
-            let middle = RadialMenu.place(tree: RadialLayoutTests.tree(0, RadialLayoutTests.long), visibleFrame: display.visibleFrame).center
-            XCTAssertTrue(display.visibleFrame.contains(middle))
+            let room = display.visibleFrame.insetBy(dx: RadialMenu.screenMargin, dy: RadialMenu.screenMargin)
             for count in [3, 10, 14] {
                 let tree = RadialLayoutTests.tree(count, RadialLayoutTests.long)
+                let middle = RadialMenu.place(tree: tree, visibleFrame: display.visibleFrame).center
+                XCTAssertTrue(display.visibleFrame.contains(middle))
+                if count == 3 { XCTAssertEqual(middle, CGPoint(x: room.midX.rounded(), y: room.midY.rounded())) }
                 var warps: [CGPoint] = []
                 let menu = menu(warps: { warps.append($0) })
                 for pointer in Self.grid(display.frame) + [middle] {

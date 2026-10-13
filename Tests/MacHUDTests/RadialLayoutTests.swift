@@ -308,7 +308,8 @@ final class RadialLayoutTests: XCTestCase {
     /// On a laptop's screen too, adding a loadout moves none of the others: the wheel's size on a
     /// screen is chosen for the screen alone (fitting `RadialLayout.fittedRows` full rows, Widgets
     /// and All screens included), never for how many loadouts there are, so up to that many rows
-    /// every loadout keeps its direction, row and distance, and the wheel opens at the same place.
+    /// every loadout keeps its direction, row and distance. The wheel opens at the same place while
+    /// the loadouts fill the rows they are on, and moves only down, as a new row needs the room.
     func testAddingALoadoutMovesNoneOfTheOthersOnALaptopScreen() {
         let most = RadialMenu.loadoutPlaces(1000).filter { $0.row < RadialLayout.fittedRows }.count
         XCTAssertGreaterThanOrEqual(most, 14, "room for at least three rows")
@@ -322,7 +323,11 @@ final class RadialLayoutTests: XCTestCase {
                     let after = RadialMenu.place(tree: tree, visibleFrame: screen)
                     let what = "\(screen.size), \(label) names, \(count - 1) → \(count) loadouts"
                     XCTAssertEqual(after.layout.scale, before.layout.scale, accuracy: 1e-9, "\(what): the size")
-                    XCTAssertEqual(after.center, before.center, "\(what): where it opens")
+                    if tree[0].children.last?.row == beforeTree[0].children.last?.row {
+                        XCTAssertEqual(after.center, before.center, "\(what): where it opens")
+                    } else {
+                        XCTAssertLessThanOrEqual(after.center.y, before.center.y, "\(what): a new row moves it only down")
+                    }
                     for (old, new) in zip(beforeTree[0].children, tree[0].children) {
                         XCTAssertEqual(old.angle, new.angle, accuracy: 1e-12, "\(what): \(old.id)'s direction")
                         XCTAssertEqual(old.row, new.row, "\(what): \(old.id)'s row")
@@ -741,6 +746,40 @@ final class RadialLayoutTests: XCTestCase {
     }
 
     // MARK: The screen
+
+    /// The wheel's own centre is the middle of the screen while the rows of loadouts in use fit
+    /// around it there (one row always does), and otherwise sits only as far below as their room
+    /// needs: the top of that room is then the top of the screen (and, where the rows fill the
+    /// screen's width, a side of it). Names never move it.
+    func testTheWheelsCentreIsTheMiddleOfTheScreenUnlessItsRowsNeedRoom() {
+        let screens = [CGRect(x: 0, y: 0, width: 1024, height: 616), CGRect(x: 0, y: 70, width: 1024, height: 546),
+                       CGRect(x: 1024, y: -200, width: 1440, height: 875), CGRect(x: 0, y: 0, width: 1424, height: 851)]
+        for visible in screens {
+            let room = visible.insetBy(dx: RadialMenu.screenMargin, dy: RadialMenu.screenMargin)
+            let middle = CGPoint(x: room.midX.rounded(), y: room.midY.rounded())
+            for count in [0, 1, 3, 5] {
+                let placed = RadialMenu.place(tree: Self.tree(count, Self.long, allScreens: true), visibleFrame: visible)
+                XCTAssertEqual(placed.center, middle, "\(count) loadouts in \(visible): dead centre")
+            }
+            var shifted = false
+            for count in 1...RadialMenu.loadoutPlaces(1000).filter({ $0.row < RadialLayout.fittedRows }).count {
+                let short = RadialMenu.place(tree: Self.tree(count, Self.short, allScreens: true), visibleFrame: visible)
+                let long = RadialMenu.place(tree: Self.tree(count, Self.long, allScreens: true), visibleFrame: visible)
+                XCTAssertEqual(short.center, long.center, "\(count) loadouts in \(visible): names never move it")
+                let rows = RadialLayout.fitting(Self.tree(count, Self.long, allScreens: true), in: room.size).extent
+                if long.center.y < middle.y {
+                    shifted = true
+                    XCTAssertEqual(long.center.y + rows.maxY, room.maxY, accuracy: 1,
+                                   "\(count) loadouts in \(visible): only as far down as the rows need")
+                }
+                if long.center.x != middle.x {
+                    let edge = min(abs(long.center.x + rows.minX - room.minX), abs(long.center.x + rows.maxX - room.maxX))
+                    XCTAssertLessThanOrEqual(edge, 1, "\(count) loadouts in \(visible): across, only as far as the rows need")
+                }
+            }
+            XCTAssertTrue(shifted, "\(visible): four rows do not fit around the middle, so the wheel moves down for them")
+        }
+    }
 
     /// The wheel never outgrows the screen it opens on: on a 1024 by 640 display (a 13-inch at
     /// Larger Text, less the menu bar) or with a Dock at the bottom, with many loadouts and long

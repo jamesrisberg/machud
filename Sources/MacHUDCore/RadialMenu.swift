@@ -567,11 +567,17 @@ final class RadialMenu {
         return (fitted.layout, centre(of: fitted.extent, in: room))
     }
 
-    /// Where the wheel's centre goes so that `extent` (the wheel's, about its centre) sits in the
-    /// middle of `room`. The extent is the same for every wheel of up to `RadialLayout.fittedRows`
-    /// rows, so the wheel opens at the same place however many loadouts there are.
+    /// Where the wheel's centre goes: the middle of `room`, moved only as far as keeps `extent`
+    /// (the wheel's, about its centre) inside it. The extent is that of the rows of loadouts in
+    /// use, so the wheel moves, down, only when a new row needs the room; an extent too big for
+    /// `room` is centred on it.
     static func centre(of extent: CGRect, in room: CGRect) -> CGPoint {
-        CGPoint(x: (room.midX - extent.midX).rounded(), y: (room.midY - extent.midY).rounded())
+        func axis(_ low: CGFloat, _ high: CGFloat, _ near: CGFloat, _ far: CGFloat) -> CGFloat {
+            guard far - near <= high - low else { return (low + high - near - far) / 2 }
+            return min(max((low + high) / 2, low - near), high - far)
+        }
+        return CGPoint(x: axis(room.minX, room.maxX, extent.minX, extent.maxX).rounded(),
+                       y: axis(room.minY, room.maxY, extent.minY, extent.maxY).rounded())
     }
 
     /// The wheel's views on the canvas of every word's field, which follows Reduce transparency,
