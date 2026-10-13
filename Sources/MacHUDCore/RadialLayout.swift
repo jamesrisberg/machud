@@ -4,13 +4,15 @@ import AppKit
 /// Pure: it measures with CoreText and draws nothing. Coordinates are the wheel's: its centre at
 /// the origin, y up.
 ///
-/// - Petals. Every node of the tree (`RadialNode`) is a word anchored on its direction
-///   (`RadialNode.angle`) and growing away from the centre: on the right half it starts at its
-///   anchor, on the left half it ends there, at the top and the bottom it is centred on it,
-///   blending between; above the centre it stands on its anchor, below it hangs from it. The top
-///   petals sit at `topRadius`; a branch's children sit together on one circle beyond it, as near
-///   as they can be without touching any word that shows while that branch is open (its
-///   ancestors, their siblings, the top petals, the centre and the digits). The loadouts sit in
+/// - Petals. A top petal or a loadout is a word anchored on its direction (`RadialNode.angle`)
+///   and growing away from the centre: on the right half it starts at its anchor, on the left
+///   half it ends there, at the top and the bottom it is centred on it, blending between; above
+///   the centre it stands on its anchor, below it hangs from it. The top petals sit together on
+///   one circle from `topRadius` out. A branch's actions sit as leaves just beyond its word, a
+///   stem's length away (`fan` in `init`: side by side above or below it, or stacked beside it or
+///   above it flush with its outer side), as near as they can be without touching any word that
+///   shows while that branch is open (its ancestors, their siblings, the top petals, the centre
+///   and the digits). The loadouts sit in
 ///   rows of fixed places in the top sector (`RadialMenu.loadoutPlaces`, `openLoadouts`): each
 ///   row on its own circle, sized for the widest name a place takes, the next one out clear of
 ///   every action the inner row's places unfold. A loadout's direction, row and distance never
@@ -264,11 +266,11 @@ struct RadialLayout: Equatable {
         return nil
     }
 
-    /// From the branch at `path` out: its child nearest `a` on the row `r` is out at, then, while
-    /// `r` is past where that one's children start (and inside the next row) and within their
-    /// arc, its child nearest `a`, and so on.
-    /// Among a branch's actions (leaves round its word), the one nearest the pointer; among
-    /// other children, the one whose direction is nearest the pointer's.
+    /// From the branch at `path` out, toward the pointer at radius `r` and angle `a`: the child
+    /// nearest it (among a branch's actions the one nearest the pointer, among other children
+    /// the one whose direction is nearest the pointer's, on the row it is out at), then, on to
+    /// that one's children: its actions where the pointer is on their way (`Petal.leaves`), the
+    /// loadouts past where they start and within their arc; and so on.
     private func outward(from path: [String], radius r: CGFloat, angle a: Double) -> [String] {
         var path = path
         var ids = path.isEmpty ? top : petals[path]?.row(at: r) ?? []
@@ -462,9 +464,9 @@ struct RadialLayout: Equatable {
             words[k].grow = Self.largestGrowth(words[k], upTo: words[k].grow, avoiding: frames, gap: gap, padding: padding)
         }
 
-        /// Lays out the children of `node` (at `path`) and everything under them, on one circle
-        /// beyond it; `context` is what shows beside them, the branch's own word grown. Apply
-        /// Loadout's children go in rows of fixed places instead (`openLoadouts`).
+        /// Lays out the children of `node` (at `path`): its actions as leaves just beyond its word
+        /// (`fan`), clear of `context`, what shows beside them. Apply Loadout's children go in
+        /// rows of fixed places instead (`openLoadouts`).
         func open(_ node: RadialNode, path: [String], word: Word, context: [CGRect], direction: Double? = nil) {
             if case .loadouts = node.kind { return openLoadouts(node, path: path, word: word, context: context) }
             var petal = Petal(angle: direction ?? node.angle, children: node.children.map(\.id))
