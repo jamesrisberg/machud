@@ -408,7 +408,7 @@ final class RadialMenu {
 
     private var window: NSWindow?
     let wheel = RadialWheelView()
-    /// The dark veil over the screen under the wheel, in a window of its own.
+    /// The dark veil over the screen under the wheel (and under the HUD), in windows of its own.
     let scrim = RadialScrim()
     private var monitors: [Any] = []
     private var keyTap: CFMachPort?
@@ -438,6 +438,7 @@ final class RadialMenu {
     /// The wheel's centre, in screen coordinates.
     private(set) var center: CGPoint = .zero
     private var screenFrame: CGRect = .zero
+    private var visibleFrame: CGRect = .zero
     private var pointerOffset: CGPoint = .zero   // relative to the wheel's centre
     /// A path picked by a digit or the socket: it holds until the pointer leaves the dead zone.
     private var keyboardPath: [String]?
@@ -487,13 +488,13 @@ final class RadialMenu {
         wheel.open()
     }
 
-    /// Orders the wheel's window in over its screen, with the scrim fading in just under it.
-    /// Nothing is watched and nothing pops out (`wheel.open()`).
+    /// Orders the wheel's window in over its screen, with the scrim fading in under it (and
+    /// under the HUD; see `RadialScrim`). Nothing is watched and nothing pops out (`wheel.open()`).
     func present() {
         let w = window ?? makeWindow()
         if w.frame != screenFrame { w.setFrame(screenFrame, display: false) }
         w.orderFrontRegardless()
-        scrim.show(on: screenFrame, below: w)
+        scrim.show(on: screenFrame, visible: visibleFrame, below: w)
     }
 
     /// Sets the wheel up to open on `display`, in the middle of it as far as its rows of loadouts
@@ -510,6 +511,7 @@ final class RadialMenu {
         self.layout = fitted.0
         center = Self.centre(of: fitted.1, in: room)
         screenFrame = display.frame
+        visibleFrame = display.visibleFrame
         pointerOffset = .zero
         pointerHasMoved = false
         firstReport = nil

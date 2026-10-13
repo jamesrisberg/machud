@@ -144,6 +144,24 @@ final class LoadoutMenuTests: XCTestCase {
         XCTAssertEqual(calls.map(\.on), [false, true])
     }
 
+    /// A tap of the wheel's hotkey ends a HUD summon left up, before the search bar opens.
+    func testATapOfTheWheelsHotkeyEndsTheSummonBeforeTheSearchBarOpens() throws {
+        let (menu, _, _) = try make(multiDesktop: false)
+        let dock = HUDSummonTests.Dock()
+        let hud = HUDSummon(watch: HUDSummonTests.Watch())
+        hud.dock = dock
+        menu.hud = hud
+        hud.wheelOpened(at: .zero)
+        hud.wheelClosed(.cancelled)
+        XCTAssertEqual(hud.phase, .held)
+        var seen: [HUDSummon.Phase] = []
+        menu.onTap = { seen.append(hud.phase) }
+        menu.summon.press()
+        menu.summon.release()
+        XCTAssertEqual(seen, [.idle])
+        XCTAssertFalse(dock.summoned)
+    }
+
     // MARK: - Hotkeys and the default loadout
 
     func testOnlyOfferedLoadoutsGetTheirHotkeys() throws {

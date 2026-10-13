@@ -23,7 +23,10 @@ final class LoadoutMenu {
     let summon: TapOrHold
     /// A tap of the wheel's hotkey (`hotkeys.loadoutMenu`): released within
     /// `hotkeys.tapMilliseconds`, before the wheel shows. The app opens the search bar on it.
+    /// A HUD summon left up ends first.
     var onTap: () -> Void = {}
+    /// The HUD summon a hold brings up with the wheel (the tool dock and the widgets).
+    var hud: HUDSummon?
     private var hotkeyIDs: [UInt32] = []
     private var registered: (menu: HotKey?, loadouts: [String: HotKey])?
     private var registrationDeferred = false
@@ -67,7 +70,12 @@ final class LoadoutMenu {
             guard let engine else { return .init() }
             return .init(focused: engine.focusedWindowLabel(), parked: engine.parking.parked.map(\.record.label))
         }
-        radial.onCommit = { [weak self] outcome in self?.handle(outcome) }
+        radial.onCommit = { [weak self] outcome in
+            guard let self else { return }
+            // The summon puts the HUD back before the action or after it (`HUDSummon.actsFirst`).
+            guard let hud = self.hud else { self.handle(outcome); return }
+            hud.wheelClosed(outcome) { self.handle(outcome) }
+        }
         radial.readParkTargets = { [weak self] answer in self?.readParkTargets(answer) }
         radial.onDismiss = { [weak self] in
             guard let self, self.registrationDeferred else { return }
@@ -75,9 +83,12 @@ final class LoadoutMenu {
             self.registerHotkeys()
         }
         summon.isShowing = { [weak self] in self?.radial.isVisible ?? false }
-        summon.onHold = { [weak self] in self?.showRadial() }
+        summon.onHold = { [weak self] in self?.showRadial(summoning: true) }
         summon.onRelease = { [weak self] in self?.radial.commit() }
-        summon.onTap = { [weak self] in self?.onTap() }
+        summon.onTap = { [weak self] in
+            self?.hud?.dismiss()
+            self?.onTap()
+        }
         summon.onIdle = { [weak self] in
             guard let self, self.registrationDeferred, !self.radial.isVisible else { return }
             self.registrationDeferred = false
@@ -127,9 +138,14 @@ final class LoadoutMenu {
                         offersAllScreens: store.config.multiDesktopLoadouts, park: parkTargets(), widgets: widgetsState?())
     }
 
-    func showRadial(at point: CGPoint? = nil) {
+    /// Opens the wheel; `summoning` (a hold, or `radial show summon=1`) brings the HUD summon
+    /// up with it. Over a summon left up any wheel carries it on, so Esc is the wheel's alone and
+    /// letting go on an action puts the HUD back.
+    func showRadial(at point: CGPoint? = nil, summoning: Bool = false) {
         guard !radial.isVisible else { return }
         radial.show(tree: tree(), at: point)
+        guard radial.isVisible, let hud, summoning || hud.isActive else { return }
+        hud.wheelOpened(at: radial.center)
     }
 
     func handle(_ outcome: RadialMenu.Outcome) {
@@ -782,9 +798,12 @@ final class LoadoutMenu {
                 } else {
                     point = nil
                 }
-                self.showRadial(at: point)
+                self.showRadial(at: point, summoning: ToolDock.flag(args["summon"], default: false) ?? false)
             case "hide":
                 self.radial.hide()
+                self.hud?.wheelClosed(.cancelled)
+            case "dismiss":
+                self.hud?.dismiss()
             case "cancel":
                 self.radial.cancel()
             case "select":
@@ -803,6 +822,7 @@ final class LoadoutMenu {
             var response: [String: Any] = ["ok": true]
             response.merge(self.radial.json) { a, _ in a }
             if let last = self.lastApply { response["lastApply"] = last }
+            if let hud = self.hud { response["summon"] = hud.json }
             done(response)
         }
     }

@@ -653,6 +653,159 @@ final class ToolDockControllerTests: XCTestCase {
         XCTAssertEqual(config.position, .topLeft)
     }
 
+    // MARK: The HUD summon
+
+    func testTheSummonShowsATurnedOffDockOnTheWheelsDisplayWithoutChangingTheSettings() throws {
+        let side = ToolDockScreen(name: "Side", frame: CGRect(x: 1920, y: 0, width: 1440, height: 900),
+                                  visible: CGRect(x: 1920, y: 0, width: 1440, height: 875))
+        dock.screens = { [unowned self] in [self.screen, side] }
+        _ = dock.handle(["_": "hide"])
+        let before = config
+        XCTAssertFalse(dock.isShowing)
+        dock.setSummoned(true, at: CGPoint(x: 2600, y: 450))
+        XCTAssertTrue(dock.isShowing)
+        XCTAssertEqual(config, before, "no setting changes")
+        XCTAssertEqual(dock.geometry()?.screen.name, "Side", "on the wheel's display")
+        XCTAssertEqual(dock.geometry(summoned: false)?.screen.name, "Main", "its own display is still the main one")
+        let state = dock.handle(["_": "state"])
+        XCTAssertEqual(state["summoned"] as? Bool, true)
+        XCTAssertEqual(state["enabled"] as? Bool, false)
+        XCTAssertEqual(state["screenName"] as? String, "Side")
+        XCTAssertNil(dock.dockRegistry?.entry(for: "test.machud"), "sibling strips do not follow a summoned dock")
+        XCTAssertFalse(dock.summonKeepFrames.isEmpty)
+        XCTAssertTrue(dock.summonKeepFrames.contains { $0.contains(CGPoint(x: dock.geometry()!.frame.midX, y: dock.geometry()!.frame.midY)) })
+
+        dock.setSummoned(false, at: nil)
+        XCTAssertFalse(dock.isShowing)
+        XCTAssertEqual(config, before)
+        XCTAssertEqual(dock.handle(["_": "state"])["summoned"] as? Bool, false)
+        XCTAssertEqual(dock.summonKeepFrames, [], "nothing to keep once it is gone")
+    }
+
+    func testTheSummonUntucksAnAutoHiddenDockAndTucksItBackAfter() throws {
+        _ = dock.handle(["autohide": "on"])
+        XCTAssertTrue(dock.tucked, "auto-hide starts hidden")
+        dock.setSummoned(true, at: nil)
+        XCTAssertFalse(dock.tucked, "out of its edge")
+        // Left alone with the pointer far away, it stays out while summoned.
+        dock.step(mouse: CGPoint(x: 1500, y: 600), now: 1)
+        dock.step(mouse: CGPoint(x: 1500, y: 600), now: 5)
+        XCTAssertFalse(dock.tucked)
+        dock.setSummoned(false, at: nil)
+        XCTAssertTrue(dock.tucked, "tucked away again")
+        XCTAssertTrue(config.isAutoHide)
+        XCTAssertTrue(config.isEnabled)
+        // The edge reveals it as before: a point in one of its strips, inside the screen.
+        let g = dock.geometry()!
+        let zones = g.layout.revealZones(g.frame, screen: g.screen.frame)
+        let edge = try XCTUnwrap(zones.lazy.map { $0.intersection(g.screen.frame) }.first { !$0.isEmpty }
+            .map { CGPoint(x: $0.midX, y: $0.midY) })
+        XCTAssertTrue(zones.contains { $0.contains(edge) })
+        dock.step(mouse: edge, now: 10)
+        dock.step(mouse: edge, now: 10.2)
+        XCTAssertFalse(dock.tucked)
+    }
+
+    func testWhileTheWheelIsOpenTheHoverButtonsOpenNothing() throws {
+        let on = try centre(scratchID)
+        dock.step(mouse: on, now: 10)
+        dock.step(mouse: on, now: 10.06)
+        XCTAssertTrue(dock.hover.isShown(scratchID))
+        dock.hoverPaused = true
+        XCTAssertFalse(dock.hover.isShown(scratchID), "a panel shown by hovering closes")
+        let stash = try centre(stashID)
+        dock.step(mouse: stash, now: 11)
+        dock.step(mouse: stash, now: 11.2)
+        XCTAssertFalse(dock.hover.isShown(stashID))
+        dock.hoverPaused = false
+        dock.step(mouse: stash, now: 12)
+        dock.step(mouse: stash, now: 12.1)
+        XCTAssertTrue(dock.hover.isShown(stashID))
+        XCTAssertTrue(dock.summonKeepFrames.contains { try! $0.contains(XCTUnwrap(dock.hoverFrames[stashID]).center) },
+                      "its open panel keeps a summon up")
+        XCTAssertEqual(dock.summonKeepApps, [stashID], "and so does any window of its app, its menus and popovers")
+        XCTAssertFalse(dock.isMenuOpen)
+    }
+
+    func testTurningTheDockOnOrOffEndsItsSummonAndTheHotkeyHidesWhatShows() {
+        _ = dock.handle(["_": "hide"])
+        dock.setSummoned(true, at: nil)
+        _ = dock.handle(["_": "toggle"])
+        XCTAssertFalse(dock.summoned)
+        XCTAssertFalse(config.isEnabled, "toggling a summoned dock hides it and leaves the setting off")
+        XCTAssertFalse(dock.isShowing)
+        dock.setSummoned(true, at: nil)
+        _ = dock.handle(["_": "show"])
+        XCTAssertFalse(dock.summoned)
+        XCTAssertTrue(config.isEnabled)
+        dock.setSummoned(false, at: nil)
+        XCTAssertTrue(dock.isShowing, "turned on, it stays")
+    }
+
+    /// Each way of turning the dock on or off by hand ends a held summon that has nothing else
+    /// up, so Esc and the click watch go with it: ⌃⌥D (`setEnabled(!isShowing)`), `tooldock
+    /// hide|toggle|show` and the status menu's Show Tool Dock.
+    func testTurningTheDockOnOrOffByHandEndsAHeldSummon() throws {
+        let entries: [(String, () -> Void)] = [
+            ("⌃⌥D", { self.dock.setEnabled(!self.dock.isShowing) }),
+            ("tooldock hide", { _ = self.dock.handle(["_": "hide"]) }),
+            ("tooldock toggle", { _ = self.dock.handle(["_": "toggle"]) }),
+            ("tooldock show", { _ = self.dock.handle(["_": "show"]) }),
+            ("Show Tool Dock", {
+                let menu = self.dock.statusMenuItems().first?.submenu
+                let index = menu?.items.firstIndex { $0.title == "Show Tool Dock" }
+                XCTAssertNotNil(index)
+                if let menu, let index { menu.performActionForItem(at: index) }
+            }),
+        ]
+        for (name, entry) in entries {
+            for enabled in [false, true] {
+                config.enabled = enabled
+                dock.refresh()
+                let watch = HUDSummonTests.Watch()
+                let summon = HUDSummon(watch: watch)
+                summon.dock = dock
+                summon.afterAction = { _ in }
+                summon.wheelOpened(at: nil)
+                summon.wheelClosed(.cancelled)
+                XCTAssertEqual(summon.phase, .held, "\(name), on: \(enabled)")
+                entry()
+                XCTAssertFalse(dock.summoned, "\(name), on: \(enabled)")
+                XCTAssertEqual(summon.phase, .idle, "\(name), on: \(enabled): nothing left up")
+                XCTAssertFalse(watch.watching, "\(name), on: \(enabled): Esc given back")
+            }
+        }
+    }
+
+    /// The last sibling going (the dock losing every button) while a summon with nothing else
+    /// up is held ends the summon, so Esc is given back.
+    func testTheDockLosingItsButtonsEndsAHeldSummonWithNothingElseUp() {
+        _ = dock.handle(["_": "hide"])
+        let watch = HUDSummonTests.Watch()
+        let summon = HUDSummon(watch: watch)
+        summon.dock = dock
+        summon.wheelOpened(at: nil)
+        summon.wheelClosed(.cancelled)
+        XCTAssertEqual(summon.phase, .held)
+        externals.install([], autoLaunch: [])
+        dock.refresh()
+        XCTAssertTrue(dock.items.isEmpty)
+        XCTAssertEqual(summon.phase, .idle)
+        XCTAssertFalse(watch.watching)
+        XCTAssertFalse(dock.summoned)
+    }
+
+    func testPutBackTurnedOffTheHoverPanelsCloseWithTheDock() throws {
+        _ = dock.handle(["_": "hide"])
+        dock.setSummoned(true, at: nil)
+        dock.click(try XCTUnwrap(dock.items.first { $0.id == scratchID }), anchor: nil)
+        XCTAssertTrue(dock.hover.isPinned(scratchID))
+        connector.requests = []
+        dock.setSummoned(false, at: nil)
+        XCTAssertFalse(dock.hover.isShown(scratchID))
+        XCTAssertEqual(panelRequests(scratchSock).map { $0["action"] }, ["hide"])
+    }
+
     func testOrbsHiddenByDefaultWhileTheDockIsOn() {
         let parking = ParkingController(panels: registry, stateURL: dir.appendingPathComponent("parking.json"))
         dock.parking = parking
@@ -664,4 +817,8 @@ final class ToolDockControllerTests: XCTestCase {
         parking.setOrbsHidden(true)
         XCTAssertTrue(parking.orbsHidden, "an explicit choice wins over the default")
     }
+}
+
+private extension CGRect {
+    var center: CGPoint { CGPoint(x: midX, y: midY) }
 }

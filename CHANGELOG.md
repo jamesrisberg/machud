@@ -7,6 +7,16 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 ## [Unreleased]
 
 ### Added
+- **Holding ⌃⌥Space now summons your HUD.** The tool dock and the desktop widgets come up with the
+  radial wheel, on the wheel's display, even when the dock is off or tucked away by auto-hide, and
+  they read clearly over the wheel's dimmed backdrop. Let go on an action and it runs, then the dock
+  and widgets go back as they were (Widgets' Reveal, Lower and Edit set the widgets themselves). Let
+  go on nothing (the centre, Esc) and they stay up so you can use the dock; Esc, a click away from the
+  dock, its panels and the widgets, the hotkey again or applying a loadout put them back. A capture
+  or preview from the wheel puts them back first, so it sees your desktop as it is. Your tool dock and widget
+  settings never change. ⌃⌥D hides a dock summoned this way by turning the dock off. `machud radial action=show summon=1`
+  does the same from a script, `machud radial action=dismiss` ends it, and `machud tooldock` reports
+  `summoned`.
 - A **Multi-desktop loadouts** switch under Experimental in MacHUD's settings, off by default
   (`machud settings set experimental.multiDesktopLoadouts=true` from a script). It takes effect at once.
 - **Save Diagnostics** in the MacHUD menu's Advanced submenu, and `machud diagnose` for scripts and agents (the MCP tool
@@ -57,6 +67,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   can ask for results with `machud search query text=<words>`.
 
 ### Changed
+- The wheel's dimmed backdrop now darkens your windows, the menu bar and the Dock, but not the HUD:
+  the tool dock, raised widgets and the apps' panels stay bright under the wheel.
 - A loadout is the screen you are looking at. **Capture This Screen as Loadout…** (the Loadouts
   menu, the wheel and the Loadouts settings tab alike) captures the display under the pointer,
   on the desktop showing, even when other displays have windows; the capture sheet no longer

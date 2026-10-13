@@ -29,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var startup: StartupLoadout?
     private var library: LoadoutLibrary!
     private var search: SearchServices!
+    private var hudSummon: HUDSummon!
     private var trustTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -109,8 +110,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let hk = store.hotkeys.dock {
                 HotKeyCenter.shared.register(hk, onPress: { [weak self] in
                     MainActor.assumeIsolated {
+                        // Flips what is on screen: a showing dock, summoned or not, is turned off
+                        // (`toolDock.enabled` false; an auto-hidden dock that was on too).
                         guard let dock = self?.toolDock else { return }
-                        dock.setEnabled(!dock.config().isEnabled)
+                        dock.setEnabled(!dock.isShowing)
                     }
                 })
             }
@@ -162,9 +165,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.editor.open(loadout: name)
         }
         loadoutMenu.library = library
-        loadoutMenu.widgetsState = { [weak widgets] in
+        installHUDSummon(loadoutMenu)
+        loadoutMenu.widgetsState = { [weak widgets, weak hudSummon] in
             guard let widgets, !widgets.servingApps.isEmpty else { return nil }
-            return .init(revealed: widgets.revealed, editing: widgets.editing)
+            // As the user left them: the summon's own raising is not theirs to lower.
+            let revealed = hudSummon?.userRevealed(widgets.revealed) ?? widgets.revealed
+            return .init(revealed: revealed, editing: widgets.editing)
         }
         loadoutMenu.onWidgets = { [weak widgets] edit, on in
             guard let widgets else { return }
@@ -322,6 +328,18 @@ extension AppDelegate {
             MainActor.assumeIsolated { manager?.configure(store.menuBar, hotkeys: store.config.hotkeys) }
         }
         menuBar = manager
+    }
+
+    /// Holding the wheel's hotkey brings the tool dock and the desktop widgets up with the wheel
+    /// (`HUDSummon`); while it is up, Esc is the summon's rather than the widgets'.
+    fileprivate func installHUDSummon(_ menu: LoadoutMenu) {
+        let hud = HUDSummon(watch: HUDSummonEvents())
+        hud.dock = toolDock
+        hud.widgets = widgets
+        hud.onActiveChange = { [weak widgetUI] on in widgetUI?.escapeSuspended = on }
+        menu.hud = hud
+        engine.onWillApply = { [weak hud] in hud?.loadoutWillApply() }
+        hudSummon = hud
     }
 
     /// The settings window's Loadouts tab: reads the store, edits through the library, and

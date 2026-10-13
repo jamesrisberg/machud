@@ -18,6 +18,11 @@ final class WidgetUI {
     private var escapeID: UInt32?
     /// Off in an isolated instance (`MACHUD_NO_HOTKEYS`).
     var hotkeysEnabled = !Env.noHotkeys
+    /// While the HUD summon is up, Esc is the summon's (`HUDSummon`): it puts the widgets back
+    /// as they were rather than lowering them.
+    var escapeSuspended = false {
+        didSet { if escapeSuspended != oldValue { updateEscape() } }
+    }
     /// The active layout's regions on a display (Cocoa coordinates), drawn faintly under the
     /// grid while editing so widgets can be lined up with them.
     var regions: (WidgetScreen) -> [CGRect] = { _ in [] }
@@ -53,7 +58,7 @@ final class WidgetUI {
 
     /// Esc lowers revealed widgets and leaves edit mode; it is taken only while one is on.
     private func updateEscape() {
-        let wanted = hotkeysEnabled && (layer.revealed || layer.editing)
+        let wanted = hotkeysEnabled && !escapeSuspended && (layer.revealed || layer.editing)
         if wanted, escapeID == nil {
             escapeID = HotKeyCenter.shared.register(HotKey(key: "escape", modifiers: []), onPress: { [weak self] in
                 MainActor.assumeIsolated {
