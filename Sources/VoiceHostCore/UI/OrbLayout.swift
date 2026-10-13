@@ -28,6 +28,10 @@ enum OrbLayout {
     static let waveformMinWidth: CGFloat = 150
     static let waveformBottomRadius: CGFloat = 14
     static let waveformTopRadius: CGFloat = 8
+    /// How far the flush waveform body reaches up into the camera housing, so the housing's
+    /// rounded bottom corners leave no gap above the body's square top corners. The housing
+    /// hides it; it is under the housing's height on every notched Mac.
+    static let notchTuck: CGFloat = 10
 
     static let barCount = 16
     static let barWidth: CGFloat = 2
@@ -59,19 +63,38 @@ enum OrbLayout {
                         topRadius: top, bottomRadius: bottom)
     }
 
+    /// How far the shape reaches up past the anchor edge into the camera housing at `stretch`:
+    /// `notchTuck` for the flush waveform body, growing with the morph (the shape is no wider
+    /// than the housing all the way), and none for a body wider than the housing or on a
+    /// screen without one, where it would show above the anchor.
+    static func tuck(stretch: CGFloat, geometry: HUDNotchGeometry) -> CGFloat {
+        let bodyWidth = waveformWidth(geometry: geometry)
+        guard geometry.hasNotch, bodyWidth <= (geometry.notchWidth ?? 0) + 1 else { return 0 }
+        return min(notchTuck, geometry.safeAreaInsetTop) * min(max(stretch, 0), 1)
+    }
+
     /// Room the pulse needs beyond the shape; fades out as the orb stretches.
     static func pulseRoom(stretch: CGFloat) -> CGFloat {
         orbDiameter * pulseMax * (1 - min(max(stretch, 0), 1))
     }
 
     /// The orb window's size: the shape plus room for the pulse, which scales about the
-    /// shape's center, and for the resting float below it. The window follows the shape so the
-    /// empty space beside a resting orb never takes clicks meant for the window underneath.
+    /// shape's center, for the resting float below it and for the tuck above it. The window
+    /// follows the shape so the empty space beside a resting orb never takes clicks meant for
+    /// the window underneath.
     static func windowSize(stretch: CGFloat, geometry: HUDNotchGeometry) -> CGSize {
         let s = shape(stretch: stretch, geometry: geometry)
         let room = pulseRoom(stretch: stretch)
         return CGSize(width: ceil(s.size.width + room),
-                      height: ceil(s.topOffset + s.size.height + max(room / 2, bobRoom(stretch: stretch))))
+                      height: ceil(tuck(stretch: stretch, geometry: geometry) + s.topOffset + s.size.height
+                                   + max(room / 2, bobRoom(stretch: stretch))))
+    }
+
+    /// The orb window's frame: centered under the notch (or hanging from the menu bar), its top
+    /// the tuck above the anchor edge.
+    static func windowFrame(stretch: CGFloat, geometry: HUDNotchGeometry) -> CGRect {
+        geometry.anchorFrame(for: windowSize(stretch: stretch, geometry: geometry))
+            .offsetBy(dx: 0, dy: tuck(stretch: stretch, geometry: geometry))
     }
 
     // MARK: Resting float

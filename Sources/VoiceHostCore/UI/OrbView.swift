@@ -34,15 +34,17 @@ final class OrbView: NSView {
     override var isFlipped: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    /// The shape's rect in this view: centered horizontally, `topOffset` below the top edge
-    /// plus the resting float, scaled about its center by the pulse and the armed swell.
+    /// The shape's rect in this view: centered horizontally, `topOffset` below the anchor edge
+    /// (the tuck below the top edge) plus the resting float, scaled about its center by the
+    /// pulse and the armed swell. The body drawn reaches the tuck higher (`draw`).
     func shapeRect() -> (rect: CGRect, shape: OrbShape) {
         let shape = OrbLayout.shape(stretch: animator.stretch, geometry: geometry)
         var size = shape.size
         let scale = pulseScale()
         size.width *= scale
         size.height *= scale
-        let center = CGPoint(x: bounds.midX, y: shape.topOffset + animator.bobOffset + shape.size.height / 2)
+        let tuck = OrbLayout.tuck(stretch: animator.stretch, geometry: geometry)
+        let center = CGPoint(x: bounds.midX, y: tuck + shape.topOffset + animator.bobOffset + shape.size.height / 2)
         return (CGRect(x: center.x - size.width / 2, y: center.y - size.height / 2, width: size.width, height: size.height), shape)
     }
 
@@ -73,7 +75,11 @@ final class OrbView: NSView {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         let (rect, shape) = shapeRect()
         let scale = rect.width / max(shape.size.width, 1)
-        let path = OrbLayout.path(in: rect, topRadius: shape.topRadius * scale, bottomRadius: shape.bottomRadius * scale)
+        // The body reaches up into the camera housing by the tuck; the bars and the dot stay
+        // centered in what shows below it (`rect`).
+        let tuck = OrbLayout.tuck(stretch: animator.stretch, geometry: geometry)
+        let body = CGRect(x: rect.minX, y: rect.minY - tuck, width: rect.width, height: rect.height + tuck)
+        let path = OrbLayout.path(in: body, topRadius: shape.topRadius * scale, bottomRadius: shape.bottomRadius * scale)
         let t = animator.stretch
         let palette = palette()
 
@@ -98,7 +104,7 @@ final class OrbView: NSView {
         ctx.addPath(path)
         ctx.clip()
         ctx.setFillColor(NSColor.black.cgColor)
-        ctx.fill(rect)
+        ctx.fill(body)
         if t < 1 {
             ctx.setAlpha(1 - t)
             let colors = [palette.core.cgColor, palette.edge.cgColor] as CFArray

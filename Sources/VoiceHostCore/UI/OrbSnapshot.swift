@@ -54,8 +54,7 @@ enum OrbSnapshot {
         panel.layoutSubtreeIfNeeded()
         panel.scrollToBottom()
 
-        let orbSize = OrbLayout.windowSize(stretch: animator.stretch, geometry: geometry)
-        let orb = OrbView(frame: geometry.anchorFrame(for: orbSize), geometry: geometry)
+        let orb = OrbView(frame: OrbLayout.windowFrame(stretch: animator.stretch, geometry: geometry), geometry: geometry)
         orb.scene = scene
         orb.animator = animator
         root.addSubview(orb)
@@ -106,8 +105,7 @@ enum OrbSnapshot {
         root.appearance = NSAppearance(named: .darkAqua)
 
         if !scene.hidden {
-            let orbSize = OrbLayout.windowSize(stretch: animator.stretch, geometry: geometry)
-            let orbFrame = geometry.anchorFrame(for: orbSize)
+            let orbFrame = OrbLayout.windowFrame(stretch: animator.stretch, geometry: geometry)
             let orb = OrbView(frame: orbFrame, geometry: geometry)
             orb.scene = scene
             orb.reduceMotion = reduceMotion

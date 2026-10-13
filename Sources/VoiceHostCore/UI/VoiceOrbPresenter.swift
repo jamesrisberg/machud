@@ -355,10 +355,15 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
 
     private func layoutOrb() {
         orbView.animator = animator
-        let size = OrbLayout.windowSize(stretch: animator.stretch, geometry: geometry)
-        if orbWindow.frame.size != size || orbWindow.frame.maxY != geometry.topAnchorY {
-            orbWindow.anchorUnderNotch(size: size, geometry: geometry)
-        }
+        let frame = OrbLayout.windowFrame(stretch: animator.stretch, geometry: geometry)
+        if orbWindow.frame != frame { anchorOrb(frame) }
+    }
+
+    /// Puts the orb window at `frame` (`OrbLayout.windowFrame`: under the notch, reaching the
+    /// tuck up into it) at the level that draws above the menu bar.
+    private func anchorOrb(_ frame: CGRect) {
+        orbWindow.level = HUDPanelWindow.notchAnchorLevel
+        orbWindow.setFrame(frame, display: true)
     }
 
     private func fade(_ window: NSWindow, to alpha: CGFloat, completion: (() -> Void)? = nil) {
@@ -535,7 +540,7 @@ public final class VoiceOrbPresenter: VoiceHostPresenting {
         geometry = HUDNotchGeometry(screen: screen)
         orbView.geometry = geometry
         presence.anchor(screenID: HUDScreenSnapshot.id(for: screen), geometry: geometry, reason: reason)
-        orbWindow.anchorUnderNotch(size: OrbLayout.windowSize(stretch: animator.stretch, geometry: geometry), geometry: geometry)
+        anchorOrb(OrbLayout.windowFrame(stretch: animator.stretch, geometry: geometry))
         apply(now: Date())
     }
 

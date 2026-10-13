@@ -60,9 +60,41 @@ final class OrbLayoutTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(center - pulsed / 2, 0, "and its top must not cross the anchor")
     }
 
-    func testWaveformWindowIsExactlyTheBody() {
+    func testWaveformWindowIsExactlyTheBodyAndItsTuck() {
         let size = OrbLayout.windowSize(stretch: 1, geometry: notched)
-        XCTAssertEqual(size, CGSize(width: 185, height: OrbLayout.waveformHeight))
+        XCTAssertEqual(size, CGSize(width: 185, height: OrbLayout.waveformHeight + OrbLayout.notchTuck))
+    }
+
+    /// The flush waveform body reaches up into the camera housing, so the housing's rounded
+    /// bottom corners leave no gap above its square top corners; what shows below the housing
+    /// is the body as before.
+    func testTheFlushBodyTucksUpIntoTheHousing() {
+        XCTAssertEqual(OrbLayout.tuck(stretch: 1, geometry: notched), OrbLayout.notchTuck)
+        let frame = OrbLayout.windowFrame(stretch: 1, geometry: notched)
+        XCTAssertEqual(frame.maxY, 982 - 32 + OrbLayout.notchTuck, "its top inside the housing")
+        XCTAssertEqual(frame.minY, 982 - 32 - OrbLayout.waveformHeight, "its bottom where it was")
+        XCTAssertEqual(frame.midX, 756)
+        XCTAssertLessThan(OrbLayout.notchTuck, 32, "never above the housing")
+    }
+
+    /// The tuck grows with the morph and is only ever where the housing hides it: none for the
+    /// resting orb, none on a screen without a housing, none for a body wider than the housing.
+    func testTheTuckIsOnlyUnderTheHousing() {
+        XCTAssertEqual(OrbLayout.tuck(stretch: 0, geometry: notched), 0)
+        XCTAssertEqual(OrbLayout.tuck(stretch: 1, geometry: plain), 0)
+        let narrow = HUDNotchGeometry(screenFrame: notched.screenFrame, visibleFrame: notched.visibleFrame,
+                                      safeAreaInsetTop: 32, notchWidth: 120)
+        XCTAssertEqual(OrbLayout.tuck(stretch: 1, geometry: narrow), 0, "a body wider than the housing would show above it")
+        var last: CGFloat = 0
+        for step in 0...10 {
+            let t = CGFloat(step) / 10
+            let tuck = OrbLayout.tuck(stretch: t, geometry: notched)
+            XCTAssertGreaterThanOrEqual(tuck, last)
+            XCTAssertLessThanOrEqual(OrbLayout.shape(stretch: t, geometry: notched).size.width, 185 + 0.001,
+                                     "everything above the anchor is within the housing's width")
+            last = tuck
+        }
+        XCTAssertEqual(OrbLayout.windowFrame(stretch: 1, geometry: plain), plain.anchorFrame(for: OrbLayout.windowSize(stretch: 1, geometry: plain)))
     }
 
     func testOrbWindowIsCenteredUnderTheNotch() {
