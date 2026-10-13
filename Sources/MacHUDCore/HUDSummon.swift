@@ -10,9 +10,10 @@ protocol HUDSummonDock: AnyObject {
     func setSummoned(_ on: Bool, at point: CGPoint?)
     /// The summon has it on screen: summoned, with a button to show.
     var showsForSummon: Bool { get }
-    /// Called when the dock's summon ends from the dock's side (it was turned on or off), so
-    /// the summon can see whether anything of it is left up.
-    var onSummonEnded: (() -> Void)? { get set }
+    /// Called when what the dock shows for the summon may have changed from the dock's side
+    /// (turned on or off by hand, its buttons changed), so the summon can see whether anything
+    /// of it is left up.
+    var onSummonChange: (() -> Void)? { get set }
     /// While the wheel is open the dock's hover buttons open nothing, so no panel slides out
     /// over the wheel as the pointer passes them.
     var hoverPaused: Bool { get set }
@@ -44,13 +45,29 @@ protocol HUDSummonWidgets: AnyObject {
 }
 
 /// A click while a summon is left up, as the watch saw it.
-struct HUDSummonClick: Equatable {
+struct HUDSummonClick {
+    /// The topmost window under the click.
+    struct Owner: Equatable {
+        /// The bundle id of the app owning it, when known.
+        var app: String?
+        /// It is a menu (at the pop-up menu level or above).
+        var inMenu = false
+    }
+
     /// Screen coordinates.
     var point: CGPoint
-    /// The bundle id of the app owning the topmost window under the click, when known.
-    var app: String?
-    /// That window is a menu (at the pop-up menu level or above).
-    var inMenu = false
+    /// Finds the window under the click: asked only when the click is not already on the dock,
+    /// a raised widget or during one of the dock's menus, since it reads the whole window list.
+    var lookUp: () -> Owner
+
+    init(point: CGPoint, lookUp: @escaping () -> Owner) {
+        self.point = point
+        self.lookUp = lookUp
+    }
+
+    init(point: CGPoint, app: String? = nil, inMenu: Bool = false) {
+        self.init(point: point, lookUp: { Owner(app: app, inMenu: inMenu) })
+    }
 }
 
 /// What ends a summon left up: Esc, and a click (the summon decides whether the click was away).
@@ -91,7 +108,7 @@ final class HUDSummon {
 
     private(set) var phase: Phase = .idle
     var dock: HUDSummonDock? {
-        didSet { dock?.onSummonEnded = { [weak self] in self?.somethingWent() } }
+        didSet { dock?.onSummonChange = { [weak self] in self?.somethingWent() } }
     }
     var widgets: HUDSummonWidgets? {
         didSet { widgets?.onRevealChange = { [weak self] in self?.somethingWent() } }
@@ -200,23 +217,24 @@ final class HUDSummon {
         dismiss()
     }
 
-    /// A click while the summon is left up: away from the dock, its open panels (and any window
-    /// of their apps, so their menus and popovers), the dock's own menus and the raised
-    /// widgets, it ends the summon.
+    /// A click while the summon is left up: away from the dock, its open panels, the raised
+    /// widgets, any window of their apps (their menus and popovers), the dock's own menus and
+    /// MacHUD's menus, it ends the summon. The window under the click is looked up last.
     func clicked(_ click: HUDSummonClick) {
         guard phase == .held else { return }
         let frames = (dock?.summonKeepFrames ?? []) + (widgets?.summonKeepFrames ?? [])
         if frames.contains(where: { $0.contains(click.point) }) { return }
         if dock?.isMenuOpen == true { return }
-        if let app = click.app {
+        let owner = click.lookUp()
+        if let app = owner.app {
             let apps = (dock?.summonKeepApps ?? []).union(widgets?.summonKeepApps ?? [])
             if apps.contains(app) { return }
-            if click.inMenu, app == ownApp { return }
+            if owner.inMenu, app == ownApp { return }
         }
         dismiss()
     }
 
-    /// The dock's summon ended from its side, or the widgets changed: a summon left up with
+    /// The dock's summon changed from its side, or the widgets changed: a summon left up with
     /// nothing of it on screen ends, giving Esc and the clicks back.
     private func somethingWent() {
         guard phase == .held, !anythingUp else { return }
@@ -285,8 +303,14 @@ final class HUDSummonEvents: HUDSummonWatch {
         escapeID = nil
     }
 
-    /// The click at `point` (screen coordinates) with the topmost on-screen window under it.
+    /// The click at `point` (screen coordinates), looking up the topmost on-screen window under
+    /// it when asked.
     static func click(at point: CGPoint) -> HUDSummonClick {
+        HUDSummonClick(point: point) { owner(at: point) }
+    }
+
+    /// The topmost on-screen window under `point` (screen coordinates).
+    static func owner(at point: CGPoint) -> HUDSummonClick.Owner {
         let primary = NSScreen.screens.first?.frame.maxY ?? 0
         let flipped = CGPoint(x: point.x, y: primary - point.y)
         let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
@@ -300,8 +324,8 @@ final class HUDSummonEvents: HUDSummonWatch {
                   let pid = info[kCGWindowOwnerPID as String] as? pid_t else { continue }
             let layer = info[kCGWindowLayer as String] as? Int ?? 0
             let app = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier
-            return HUDSummonClick(point: point, app: app, inMenu: layer >= menuLevel)
+            return HUDSummonClick.Owner(app: app, inMenu: layer >= menuLevel)
         }
-        return HUDSummonClick(point: point)
+        return HUDSummonClick.Owner()
     }
 }

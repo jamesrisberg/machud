@@ -13,7 +13,7 @@ final class HUDSummonTests: XCTestCase {
         var summonKeepFrames: [CGRect] = []
         var summonKeepApps: Set<String> = []
         var isMenuOpen = false
-        var onSummonEnded: (() -> Void)?
+        var onSummonChange: (() -> Void)?
         var log: [String] = []
         var showsForSummon: Bool { summoned && hasButtons }
         func setSummoned(_ on: Bool, at point: CGPoint?) {
@@ -26,7 +26,7 @@ final class HUDSummonTests: XCTestCase {
             guard summoned else { return }
             summoned = false
             log.append("dock set")
-            onSummonEnded?()
+            onSummonChange?()
         }
     }
 
@@ -341,6 +341,25 @@ final class HUDSummonTests: XCTestCase {
         summon.wheelOpened(at: centre)
         summon.wheelClosed(.cancelled)
         click(900, 500, app: "com.apple.Safari", menu: true)
+        XCTAssertEqual(summon.phase, .idle)
+    }
+
+    /// The window under a click is looked up only when the keep-frames and the dock's menus
+    /// have not already kept the summon up.
+    func testTheWindowUnderAClickIsLookedUpOnlyWhenNeeded() {
+        dock.summonKeepFrames = [CGRect(x: 0, y: 0, width: 400, height: 64)]
+        summon.wheelOpened(at: centre)
+        summon.wheelClosed(.cancelled)
+        var lookups = 0
+        let lookUp = { () -> HUDSummonClick.Owner in lookups += 1; return .init(app: "com.apple.Safari") }
+        watch.click?(HUDSummonClick(point: CGPoint(x: 20, y: 30), lookUp: lookUp))
+        dock.isMenuOpen = true
+        watch.click?(HUDSummonClick(point: CGPoint(x: 900, y: 500), lookUp: lookUp))
+        dock.isMenuOpen = false
+        XCTAssertEqual(lookups, 0, "kept without the window list")
+        XCTAssertEqual(summon.phase, .held)
+        watch.click?(HUDSummonClick(point: CGPoint(x: 900, y: 500), lookUp: lookUp))
+        XCTAssertEqual(lookups, 1)
         XCTAssertEqual(summon.phase, .idle)
     }
 

@@ -123,8 +123,8 @@ final class ToolDock: NSObject, Panel {
     /// On screen now: turned on, or brought up by the summon (which needs a button to show).
     var isShowing: Bool { config().isEnabled || showsForSummon }
     var showsForSummon: Bool { summoned && !items.isEmpty }
-    /// See `HUDSummonDock.onSummonEnded`.
-    var onSummonEnded: (() -> Void)?
+    /// See `HUDSummonDock.onSummonChange`.
+    var onSummonChange: (() -> Void)?
     /// See `HUDSummonDock.isMenuOpen`.
     var isMenuOpen: Bool { menuOpen }
 
@@ -142,7 +142,7 @@ final class ToolDock: NSObject, Panel {
             saveConfig(c)
         }
         refresh()
-        if endsSummon { onSummonEnded?() }
+        if endsSummon { onSummonChange?() }
     }
 
     // MARK: - Geometry
@@ -199,10 +199,13 @@ final class ToolDock: NSObject, Panel {
         parking?.orbsHiddenByDefault = c.isEnabled
         let hasParked = (parking?.orbsHidden ?? false) && !(parking?.parked.isEmpty ?? true)
         let next = ToolDockModel.items(apps: externals.apps, hasParked: hasParked, hidden: externals.config().hiddenFromDock)
-        if next != items {
+        let buttonsChanged = next != items
+        if buttonsChanged {
             items = next
             perform(hover.retain(Set(items.filter(\.isHover).map(\.id))))
         }
+        // Without buttons a summoned dock shows nothing: the summon may have nothing left up.
+        defer { if buttonsChanged, summoned { onSummonChange?() } }
         watchRegistry()
         // Sibling strips sit next to the dock the settings place, never a summoned one.
         if c.isEnabled, let g = geometry(summoned: false) { publish(g) } else { unpublish() }

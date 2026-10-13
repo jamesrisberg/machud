@@ -96,8 +96,13 @@ dock's hover buttons open nothing.
   held, so it needs no Accessibility and the app in front does not get it; never taken by an
   instance with `MACHUD_NO_HOTKEYS`), a click away, a tap of the wheel's hotkey (which then opens
   the search bar), a loadout being applied (by any means) or `radial dismiss` put them back. A
-  click does not count as away on the dock, the panels open from it, any window of their apps
-  (their menus and popovers), the dock's own menus, a MacHUD menu, or a widget above the windows.
+  click does not count as away on the dock or the panels open from it, on a widget above the
+  windows (revealed, being edited, or on the floating layer), in any window of those panels' apps
+  or of an app with a widget above the windows (their menus and popovers, but also their other
+  windows), while one of the dock's own menus is open, or in a MacHUD menu. The window under the
+  click is read from the window list only when the click is not on the dock, a panel or a widget.
+  The summon also ends when nothing of it is left up: the dock losing its last button, or the
+  widgets it raised changed by someone else, with the dock not showing for it.
   Any wheel opening over a held summon, by the hotkey or `radial show`, carries it on.
 - `tooldock show|hide|toggle`, ⌃⌥D and the menus' Show Tool Dock end the dock's part of a summon,
   and the summon ends with it when it had not raised the widgets (or someone changed them since).

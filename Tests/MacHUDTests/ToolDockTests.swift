@@ -777,6 +777,24 @@ final class ToolDockControllerTests: XCTestCase {
         }
     }
 
+    /// The last sibling going (the dock losing every button) while a summon with nothing else
+    /// up is held ends the summon, so Esc is given back.
+    func testTheDockLosingItsButtonsEndsAHeldSummonWithNothingElseUp() {
+        _ = dock.handle(["_": "hide"])
+        let watch = HUDSummonTests.Watch()
+        let summon = HUDSummon(watch: watch)
+        summon.dock = dock
+        summon.wheelOpened(at: nil)
+        summon.wheelClosed(.cancelled)
+        XCTAssertEqual(summon.phase, .held)
+        externals.install([], autoLaunch: [])
+        dock.refresh()
+        XCTAssertTrue(dock.items.isEmpty)
+        XCTAssertEqual(summon.phase, .idle)
+        XCTAssertFalse(watch.watching)
+        XCTAssertFalse(dock.summoned)
+    }
+
     func testPutBackTurnedOffTheHoverPanelsCloseWithTheDock() throws {
         _ = dock.handle(["_": "hide"])
         dock.setSummoned(true, at: nil)
