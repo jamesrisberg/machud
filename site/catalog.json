@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-13T20:13:10Z",
+  "updatedAt": "2026-10-13T20:14:20Z",
   "hudkit": "0.4.0",
   "apps": [
     {
@@ -130,12 +130,12 @@
       "name": "Sift",
       "kind": "windowed",
       "summary": "An on-screen file manager for sorting, reviewing and moving files",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "minOS": "14.0",
-      "download": "https://github.com/jamesrisberg/sift/releases/download/v0.3.0/Sift-0.3.0.zip",
-      "sha256": "a2d859df6d1c59aac104466442ff171b72cd1eea0c23f246d0de0cf64bb0cf74",
-      "size": 2598316,
-      "publishedAt": "2026-10-02T04:37:43Z",
+      "download": "https://github.com/jamesrisberg/sift/releases/download/v0.3.1/Sift-0.3.1.zip",
+      "sha256": "37202977a84bc669ef8d5d64dce20020a6df88b08413b93c127040275c5c98b7",
+      "size": 2758401,
+      "publishedAt": "2026-10-13T20:14:20Z",
       "icon": "https://jamesrisberg.github.io/machud/icons/sift.png",
       "homepage": "https://github.com/jamesrisberg/sift",
       "bundled": false
