@@ -387,6 +387,7 @@ The repos sit next to this one (`~/dev/<name>`); `workspace.json` lists them.
 | [magickhud](../magickhud) | hover app | ImageMagick presets for dropped images |
 | [servershud](../servershud) | hover app | Every dev server listening on your Mac, with stop and open, and a Running Servers widget |
 | [widgethud](../widgethud) | widget app | Desktop widgets: a clock, the weather and a calendar (bundle `xyz.machud.widgethud`) |
+| [usagehud](../usagehud) | hover app | Your Claude and Codex subscription usage: each window's percent used and when it resets, and Codex credits (bundle `xyz.machud.usagehud`) |
 | [wormhole](../wormhole) | menu bar app (Xcode) | Glowing drop target that sends files with Magic Wormhole |
 | [archibald](../archibald) | menu bar app (Xcode) | Wake-phrase voice agent with an orb and transcript panel |
 
