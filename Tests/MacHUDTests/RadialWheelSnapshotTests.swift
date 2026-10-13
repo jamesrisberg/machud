@@ -4,11 +4,12 @@ import XCTest
 @testable import MacHUDCore
 
 /// Renders the loadout wheel offscreen for review, as the screen would show it: a generated
-/// desktop (shapes and text, never a screenshot) and the wheel's view drawn over it, settled with
-/// the shot's path highlighted (or posed part-way through popping out). Under each bubble the
-/// desktop is blurred (a Gaussian of radius 25 pt, the window server's blur under HUDKit's glass)
-/// within the bubble's shape, at full strength even while it fades in; with Reduce transparency
-/// it is an opaque dark grey there instead (the system's material, a guess). No window is
+/// desktop (shapes and text, never a screenshot) under the wheel's scrim (`RadialScrim`), and the
+/// wheel's view drawn over it, settled with the shot's path highlighted (or posed part-way
+/// through unfurling and popping out). Under each bubble the dimmed desktop is blurred (a
+/// Gaussian of radius 25 pt, the window server's blur under HUDKit's glass) within the bubble's
+/// shape, at full strength even while it fades in; with Reduce transparency it is an opaque dark
+/// grey there instead (the system's material, a guess). No window is
 /// ordered in and nothing acts on the desktop. Pictures go to `MACHUD_WHEEL_SNAPSHOT_DIR`;
 /// without it they are rendered and checked, and nothing is written.
 @MainActor
@@ -59,7 +60,7 @@ final class RadialWheelSnapshotTests: XCTestCase {
 
     /// What is rendered without `MACHUD_WHEEL_SNAPSHOT_DIR`.
     private static let checked: Set<String> = ["stage-3-actions-03-bright", "reduce-transparency-06-bright",
-                                               "screen-1024x640-03-open-bright", "bloom-actions-03-bright-0.08s"]
+                                               "screen-1024x640-03-open-bright", "unfurl-actions-03-bright-0.12s"]
 
     private func shots() -> [Shot] {
         var out: [Shot] = []
@@ -75,19 +76,32 @@ final class RadialWheelSnapshotTests: XCTestCase {
         }
         out.append(Shot(name: "stage-3-loadout-03-colourful", tree: three, selection: ["loadouts", "Code"], desktop: .colourful))
 
-        // Popping out, part-way: the wheel opening, and a loadout's actions unfolding.
-        for t in [0.04, 0.08, 0.14] {
+        // A loadout's actions open, with 3, 10 and 14 loadouts, and Capture open, on each desktop.
+        let ten = Self.tree(Self.short, loadouts: 10), fourteenLong = Self.tree(Self.long, loadouts: 14)
+        let capture = Self.tree(Self.short, loadouts: 3, allScreens: true)
+        for desktop in Desktop.allCases {
+            out.append(Shot(name: "actions-10-\(desktop.rawValue)", tree: ten, selection: ["loadouts", "Focus", "apply"], desktop: desktop))
+            out.append(Shot(name: "actions-14-long-\(desktop.rawValue)", tree: fourteenLong, selection: ["loadouts", "dev: Browsers", "apply"],
+                            desktop: desktop))
+            out.append(Shot(name: "actions-14-long-edge-\(desktop.rawValue)", tree: fourteenLong,
+                            selection: ["loadouts", "Design critique", "preview"], desktop: desktop))
+            out.append(Shot(name: "capture-\(desktop.rawValue)", tree: capture, selection: ["capture", "screen"], desktop: desktop))
+        }
+
+        // Part-way: the wheel opening, the loadouts coming out, a loadout's and Capture's stems
+        // unfurling with their leaves popping at the tips.
+        for t in [0.06, 0.12, 0.2] {
             out.append(Shot(name: "bloom-open-03-bright-\(t)s", tree: three, selection: [], desktop: .bright, after: t))
-            out.append(Shot(name: "bloom-loadouts-03-dark-\(t)s", tree: three, selection: ["loadouts"], desktop: .dark, after: t))
-            out.append(Shot(name: "bloom-actions-03-bright-\(t)s", tree: three, selection: ["loadouts", "Reading"], desktop: .bright,
+            out.append(Shot(name: "unfurl-actions-03-bright-\(t)s", tree: three, selection: ["loadouts", "Reading"], desktop: .bright,
                             after: t, from: ["loadouts"]))
+            out.append(Shot(name: "unfurl-capture-dark-\(t)s", tree: capture, selection: ["capture"], desktop: .dark, after: t))
         }
         out.append(Shot(name: "bloom-loadouts-14-colourful-0.1s", tree: Self.tree(Self.short, loadouts: 14), selection: ["loadouts"],
                         desktop: .colourful, after: 0.1))
 
         // More loadouts: up to five on the first row, the rest on rows further out, all in the
         // top sector; and long names.
-        let six = Self.tree(Self.short, loadouts: 6), ten = Self.tree(Self.short, loadouts: 10)
+        let six = Self.tree(Self.short, loadouts: 6)
         let fourteen = Self.tree(Self.short, loadouts: 14)
         out.append(Shot(name: "loadouts-06-open-bright", tree: six, selection: ["loadouts"], desktop: .bright))
         out.append(Shot(name: "loadouts-10-open-dark", tree: ten, selection: ["loadouts"], desktop: .dark))
@@ -216,6 +230,9 @@ final class RadialWheelSnapshotTests: XCTestCase {
             let u = max(0, min(1, (start + t - begin) / animation.duration))
             if let keys = animation as? CAKeyframeAnimation, let values = keys.values as? [NSValue] {
                 layer.setValue(values[Int((u * Double(values.count - 1)).rounded())], forKeyPath: keys.keyPath!)
+            } else if let basic = animation as? CABasicAnimation, basic.keyPath == "strokeEnd",
+                      let from = basic.fromValue as? CGFloat, let to = basic.toValue as? CGFloat, let shape = layer as? CAShapeLayer {
+                shape.strokeEnd = from + (to - from) * CGFloat(u)
             } else if let basic = animation as? CABasicAnimation, basic.keyPath == "opacity",
                       let from = basic.fromValue as? Float, let to = basic.toValue as? Float {
                 layer.opacity = from + (to - from) * Float(u)
@@ -253,6 +270,8 @@ final class RadialWheelSnapshotTests: XCTestCase {
             for bubble in view.subviews.compactMap({ $0 as? RadialBubble }) where !bubble.isHidden {
                 if let layer = bubble.layer { Self.pose(layer, at: t, from: start) }
             }
+            // The stems, in the view under the bubbles.
+            for layer in view.subviews.first?.layer?.sublayers ?? [] { Self.pose(layer, at: t, from: start) }
         } else {
             view.settle(selection: shot.selection)
         }
@@ -283,9 +302,12 @@ final class RadialWheelSnapshotTests: XCTestCase {
         guard let context = Self.context(size: picture) else { return nil }
         let bounds = CGRect(origin: .zero, size: picture)
 
-        let desktop = Self.desktop(shot.desktop, size: picture)
-        context.draw(desktop, in: bounds)
+        context.draw(Self.desktop(shot.desktop, size: picture), in: bounds)
         if shot.screen != nil { Self.menuBar(in: context, width: picture.width, top: picture.height) }
+        // The scrim over the whole screen; what the bubbles blur is the desktop under it.
+        context.setFillColor(NSColor.black.withAlphaComponent(RadialScrim.darkness).cgColor)
+        context.fill(bounds)
+        guard let desktop = context.makeImage() else { return nil }
 
         let (view, window) = wheel(shot, layout: layout, canvas: canvas)
         defer { window.close() }
