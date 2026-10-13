@@ -116,6 +116,12 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   centre and the top petals as the wheel opens, then whatever unfolds, outward, one ring after
   another; they shrink away quickly when you move off. With Reduce motion on they only fade. None
   of this holds you up: the wheel follows the pointer, and letting go acts, at once.
+- The wheel reads like a tree: a loadout's Preview, Apply and Clear + Apply sit right beside it
+  instead of far out past the next row, and Capture's, Park's and Widgets' actions sit right beside
+  theirs, each hanging from a thin stem. As you reach a petal its stems grow out and its actions pop
+  out at their tips; moving off draws them back. The rows of loadouts sit a little further apart to
+  make room, so on a small screen the wheel is drawn a little smaller.
+- The screen dims behind the wheel while it shows, so its bubbles stand out from a busy desktop.
 - A loadout's name sits on one line in its place, shrinking to fit; a long one ends in an
   ellipsis after a whole word, and the line under the wheel says it in full. Its apps' icons show
   however many loadouts you have.
