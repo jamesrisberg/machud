@@ -140,7 +140,7 @@ machud apps perform app=Scratch verb=append text=hi   # one of the app's own act
 ## Tool dock
 
 ```sh
-machud tooldock                               # position, segments, buttons {title, group, kind, acceptsDrop, frame, edge}, neighbors
+machud tooldock                               # position, segments, buttons {title, group, kind, acceptsDrop, frame, edge}, neighbors, summoned
 machud tooldock show|hide|toggle
 machud tooldock position position=topLeft     # bottom|top|left|right (row/column) or topLeft|topRight|bottomLeft|bottomRight (an L)
 machud tooldock autohide value=on             # also: magnify
@@ -199,6 +199,12 @@ machud orb show|hide                      # orbs are hidden while the tool dock 
   Preview / Apply / Clear + Apply; Capture: This screen / Draw layout, with All screens between
   them while multi-desktop loadouts are on; Park: Park / Restore; Widgets: Reveal or Lower /
   Edit or Done. `commit` on a petal with children cancels.
+- HUD summon: holding the wheel's hotkey also shows the tool dock (even when off or auto-hidden, on
+  the wheel's display) and reveals the widgets, changing no setting. An action puts them back once it
+  has run; letting go on nothing leaves them up until Esc, a click away or the hotkey again.
+  `machud radial action=show summon=1` opens the wheel that way, `machud radial action=dismiss` ends a
+  summon left up; `radial` replies carry `summon {active, phase}`, `tooldock` says `summoned`.
+  To show the dock for good use `machud tooldock show`, not a summon.
 - Menu bar hiding (off until enabled): `machud menubar state|collapse|expand|toggle|peek|enable|disable`.
 - MacHUD's settings: `machud settings get`, `machud settings set menuBar.enabled=1`,
   `machud settings schema`.

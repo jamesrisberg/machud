@@ -66,7 +66,7 @@ setting and everything it turns on are under [Multi-desktop loadouts
 | `clear` | `screen=<ref>` (optional) | minimise the windows showing on one screen, the display under the pointer (or `screen`; one that matches no display is an error), except MacHUD's own, running sibling apps' (external panels) and hidden apps'; windows on its other desktops and on other displays stay. It is the set `apply … clear=1` clears for that screen, and it also closes the web windows MacHUD opened. Returns `cleared` and `screen`. With multi-desktop loadouts on and no `screen`, it reaches every window on every desktop (see [Multi-desktop loadouts (experimental)](#multi-desktop-loadouts-experimental)) |
 | `restore` | | un-minimise everything the last `clear` (or `apply … clear=1`) minimised, whichever mode; returns `restored` |
 | `place` | `window` (CGWindow number from `windows`), `region` (region id, name, or index) | move one window into one region |
-| `radial` | `action=show\|hide\|cancel\|select\|commit`, `x`, `y` (with `show`), `path` (with `select`) | drive the loadout wheel without the hotkey. `show` opens the wheel in the middle of the screen the pointer is on (with `x` and `y`, the screen holding that point), lower only as far as its rows of loadouts need the room, at the screen's size for the wheel (chosen for the screen, never for how many loadouts there are). Without `x` and `y` it moves the pointer to the wheel's centre, as the hotkey does; with them it leaves the pointer alone. Either way it opens on the top petals with nothing lit until the pointer moves a few points or a `select` (or a digit) picks one. `select path=loadouts/Messaging/apply` highlights that node as if the pointer had reached it, unfolding the petals along the way; it holds until the pointer leaves the dead zone, and is refused when the wheel is not showing or the tree has no such path. `commit` does what letting go of the hotkey does: the highlighted action, or cancel on a petal with children or on nothing. The reply is `menu`'s object for the wheel as it is after the action, with `center` and the last `selection` even once it is hidden or committed (a `menu` reply for a hidden wheel has neither) |
+| `radial` | `action=show\|hide\|cancel\|select\|commit\|dismiss`, `x`, `y`, `summon=1` (with `show`), `path` (with `select`) | drive the loadout wheel without the hotkey. `show` opens the wheel in the middle of the screen the pointer is on (with `x` and `y`, the screen holding that point), lower only as far as its rows of loadouts need the room, at the screen's size for the wheel (chosen for the screen, never for how many loadouts there are). Without `x` and `y` it moves the pointer to the wheel's centre, as the hotkey does; with them it leaves the pointer alone. Either way it opens on the top petals with nothing lit until the pointer moves a few points or a `select` (or a digit) picks one. `select path=loadouts/Messaging/apply` highlights that node as if the pointer had reached it, unfolding the petals along the way; it holds until the pointer leaves the dead zone, and is refused when the wheel is not showing or the tree has no such path. `commit` does what letting go of the hotkey does: the highlighted action, or cancel on a petal with children or on nothing. `show summon=1` opens it as holding the hotkey does, with the HUD summon (below); without it the wheel summons nothing. `hide` closes it as a cancel does for the summon (it stays up); `dismiss` ends a summon. The reply is `menu`'s object for the wheel as it is after the action, with `center` and the last `selection` even once it is hidden or committed (a `menu` reply for a hidden wheel has neither), and `summon {active, phase: idle\|wheel\|held, raisedWidgets?}` |
 
 Screen references (`<ref>` above): a display name (`"DELL S2722QC"`), `main`, `builtin`, or an
 index into the display list.
@@ -74,6 +74,32 @@ index into the display list.
 When the set of attached displays changes (debounced 1 s; resolution and
 arrangement changes do not count), the active loadout is re-applied without
 `clear`.
+
+### HUD summon
+
+Holding the wheel's hotkey (or `radial show summon=1`) summons the HUD (`HUDSummon`): as the wheel
+opens, the tool dock shows on the wheel's display even while `toolDock.enabled` is off or it is
+auto-hidden (`tooldock state` says `summoned: true`), and the desktop widgets are revealed as
+`widgets reveal` does, unless they already were. No setting changes, and the dock registry keeps
+the dock the settings place. While the wheel is open the dock's hover buttons open nothing.
+
+- Let go on an action: it runs, then (on the main queue's next turn, after the action has started)
+  the dock goes back to what its settings say (hidden, or tucked away again) and the widgets are
+  lowered if the summon raised them and nothing else changed them since. Widgets › Reveal and
+  Lower set the widgets themselves, so the summon leaves them; Widgets › Edit keeps them up while
+  editing, and Done lowers them.
+- Let go on nothing (the centre, Esc, a petal with children, `radial hide`): the wheel goes, the
+  dock and widgets stay (`phase: held`). Esc (a hotkey of its own while held, so it needs no
+  Accessibility and the app in front does not get it; never taken by an instance with
+  `MACHUD_NO_HOTKEYS`), a click anywhere but the dock, the panels open from it (hover panels and its
+  windowed apps' panels on screen) and the placed widgets, a tap of the wheel's hotkey (which then
+  opens the search bar) or `radial dismiss` put them back. Holding the hotkey again opens the wheel
+  over the same summon.
+- `tooldock show|hide|toggle`, ⌃⌥D and the menus' Show Tool Dock end the dock's part of a summon:
+  `toggle` and ⌃⌥D hide what is on screen, so a summoned dock goes and the setting stays off.
+- Layers: the wheel's scrim dims the screen's visible frame at `.floating` − 1, under the dock
+  (`.floating` + 1), the raised widgets and the siblings' panels (`.floating`), and the menu bar and
+  system Dock at the wheel's level just under it; the wheel (`.screenSaver`) is above everything.
 
 ## Placement plan
 
@@ -607,7 +633,8 @@ system Dock, and shrinks its icons if an arm would not fit.
 - Right-click: Show, Hide, Park at Edge ▸, Place in Region ▸ (active layout, on the
   dock's display), Quit/Launch, Settings…, then Position on Screen ▸ (eight positions),
   Auto-hide, Magnification. The status menu has the same options under **Tool Dock**;
-  ⌃⌥D (`hotkeys.dock`) shows and hides the dock.
+  ⌃⌥D (`hotkeys.dock`) shows and hides the dock. Holding the wheel's hotkey brings it up with
+  the wheel without changing these settings ([HUD summon](#hud-summon)).
 - **Dock registry**: on every move the dock publishes its arms to `HUDDockRegistry`
   (`~/Library/Application Support/MacHUD/docks.json`, key: MacHUD's bundle id) so
   sibling strips such as Sift's dock mode can sit next to it, and removes itself when
@@ -617,7 +644,7 @@ system Dock, and shrinks its icons if an arm would not fit.
 
 | Command | Args | Effect |
 | --- | --- | --- |
-| `tooldock` | `state` (default) \| `show` \| `hide` \| `toggle` (bare verb or `action=`) | show/hide set `toolDock.enabled`. Returns `enabled`, `position`, `autoHide`, `iconSize`, `magnify`, `visible`, `tucked` (auto-hidden right now), `frame`, `segments[]` (the arms), `dividers[]`, `screenName`, `buttons[] {id, title, group (hover/windowed), kind (hover/windowed/menu), acceptsDrop, panels[], indicator (none/running/visible), frame, edge, label? (windowed and menu buttons: the name shown beside the dock while the pointer rests on it), revealed?, pinned?, panelFrame?}`, `neighbors {app id: {position, frames[]}}`, `remembered {panel id: frame}`, `dragging` (the dock is being dragged), `labelShown` (the button whose label is on screen) and `pointer` while overridden |
+| `tooldock` | `state` (default) \| `show` \| `hide` \| `toggle` (bare verb or `action=`) | show/hide set `toolDock.enabled` (and end a summon); `toggle` flips what is on screen, so a summoned dock is hidden. Returns `enabled`, `position`, `autoHide`, `iconSize`, `magnify`, `visible` (on and on screen), `tucked` (auto-hidden right now), `summoned` (brought up by the HUD summon, see [HUD summon](#hud-summon); `frame`, `segments` and `screenName` are then where it shows), `frame`, `segments[]` (the arms), `dividers[]`, `screenName`, `buttons[] {id, title, group (hover/windowed), kind (hover/windowed/menu), acceptsDrop, panels[], indicator (none/running/visible), frame, edge, label? (windowed and menu buttons: the name shown beside the dock while the pointer rests on it), revealed?, pinned?, panelFrame?}`, `neighbors {app id: {position, frames[]}}`, `remembered {panel id: frame}`, `dragging` (the dock is being dragged), `labelShown` (the button whose label is on screen) and `pointer` while overridden |
 | `tooldock position` | `position=<one of the eight>` (`top-left` and `topleft` work too) or `edge=bottom\|left\|right\|top`, `screen=<display name>` (empty: the main display), `iconSize=24…96` | move/resize the dock and persist it. `offset=` is gone (the dock is centred) and is refused |
 | `tooldock autohide` / `magnify` | `value=on\|off` (default: flip) | |
 | `tooldock click` | `id=<button id, app name or title>` | what clicking the button does |
@@ -802,7 +829,8 @@ checklist stays beside the card in every section, updating in place. The section
   layout of the same name, one region per window, as the menu's capture does) and the card
   comes back showing its regions. Done once captured.
 - **radial**: how the wheel works (hotkey `loadoutMenu`, ⌃⌥Space by default: hold, onto Apply
-  Loadout, on to a loadout, on to Preview / Apply / Clear + Apply, let go),
+  Loadout, on to a loadout, on to Preview / Apply / Clear + Apply, let go; holding it also brings up
+  the tool dock and widgets),
   then practice: Try it on the desktop shrinks the overlay again, and applying the loadout just
   made (else the first loadout there is), by the wheel or any other way, while practising or on
   this step completes it and brings the overlay back.

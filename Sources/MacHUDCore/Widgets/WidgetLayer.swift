@@ -69,6 +69,8 @@ final class WidgetLayer {
     private(set) var editing = false
     /// Desktop-layer widgets float above windows for now.
     private(set) var revealed = false
+    /// Counts the changes to `revealed` (see `HUDSummonWidgets.revealChanges`).
+    private(set) var revealChanges = 0
     /// Why an app refused an instance (sync `rejected`, a failed create), by instance id.
     private(set) var problems: [String: String] = [:]
     /// Settings an app dropped from an instance during sync: instance → key → why.
@@ -344,6 +346,7 @@ final class WidgetLayer {
     func setRevealed(_ on: Bool) {
         guard on != revealed else { return }
         revealed = on
+        revealChanges += 1
         broadcast("reveal", on)
     }
 
@@ -679,4 +682,10 @@ final class WidgetLayer {
               let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else { return "null" }
         return String(decoding: data, as: UTF8.self)
     }
+}
+
+/// The HUD summon raises and lowers the widgets as the Widgets petal's Reveal and Lower do.
+extension WidgetLayer: HUDSummonWidgets {
+    var servesWidgets: Bool { !servingApps.isEmpty }
+    var summonKeepFrames: [CGRect] { placements().values.map(\.frame) }
 }

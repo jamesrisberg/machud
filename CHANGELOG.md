@@ -7,6 +7,15 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 ## [Unreleased]
 
 ### Added
+- **Holding ⌃⌥Space now summons your HUD.** The tool dock and the desktop widgets come up with the
+  radial wheel, on the wheel's display, even when the dock is off or tucked away by auto-hide, and
+  they read clearly over the wheel's dimmed backdrop. Let go on an action and it runs, then the dock
+  and widgets go back as they were (Widgets' Reveal, Lower and Edit set the widgets themselves). Let
+  go on nothing (the centre, Esc) and they stay up so you can use the dock; Esc, a click away from the
+  dock, its panels and the widgets, or the hotkey again put them back. Your tool dock and widget
+  settings never change. ⌃⌥D hides a dock summoned this way. `machud radial action=show summon=1`
+  does the same from a script, `machud radial action=dismiss` ends it, and `machud tooldock` reports
+  `summoned`.
 - A **Multi-desktop loadouts** switch under Experimental in MacHUD's settings, off by default
   (`machud settings set experimental.multiDesktopLoadouts=true` from a script). It takes effect at once.
 - **Save Diagnostics** in the MacHUD menu's Advanced submenu, and `machud diagnose` for scripts and agents (the MCP tool

@@ -1,11 +1,12 @@
 import AppKit
 import CoreImage
+import HUDKit
 import XCTest
 @testable import MacHUDCore
 
 /// Renders the loadout wheel offscreen for review, as the screen would show it: a generated
-/// desktop (shapes and text, never a screenshot) under the wheel's scrim (`RadialScrim`), and the
-/// wheel's view drawn over it, settled with the shot's path highlighted (or posed part-way
+/// desktop (shapes and text, never a screenshot) under the wheel's scrim (`RadialScrim`), the
+/// summoned tool dock and widgets over the scrim on some, and the wheel's view drawn over it, settled with the shot's path highlighted (or posed part-way
 /// through unfurling and popping out). Under each bubble the dimmed desktop is blurred (a
 /// Gaussian of radius 25 pt, the window server's blur under HUDKit's glass) within the bubble's
 /// shape, at full strength even while it fades in; with Reduce transparency it is an opaque dark
@@ -54,13 +55,17 @@ final class RadialWheelSnapshotTests: XCTestCase {
         /// Posed this long after the wheel opened on `from`, then moved to `selection`, rather than at rest.
         var after: TimeInterval?
         var from: [String] = []
+        /// The HUD summon (a whole screen only): the tool dock at this position and two raised
+        /// widgets, over the scrim and under the wheel, as their windows' levels put them.
+        var hud: HUDDockPosition?
     }
 
     // MARK: The set
 
     /// What is rendered without `MACHUD_WHEEL_SNAPSHOT_DIR`.
     private static let checked: Set<String> = ["stage-3-actions-03-bright", "reduce-transparency-06-bright",
-                                               "screen-1024x640-03-open-bright", "unfurl-actions-03-bright-0.12s"]
+                                               "screen-1024x640-03-open-bright", "unfurl-actions-03-bright-0.12s",
+                                               "summon-1024x640-topleft-open-bright"]
 
     private func shots() -> [Shot] {
         var out: [Shot] = []
@@ -150,7 +155,55 @@ final class RadialWheelSnapshotTests: XCTestCase {
             out.append(Shot(name: "screen-\(label)-14-loadouts-colourful", tree: fourteen, selection: ["loadouts"],
                             desktop: .colourful, screen: screen))
         }
+        // The HUD summon: the tool dock (top left, an L; and along the bottom) and two raised
+        // widgets read over the scrim, the wheel above them.
+        for (label, screen) in [("1024x640", CGSize(width: 1024, height: 616)), ("1440x900", CGSize(width: 1440, height: 876))] {
+            let three = Self.tree(Self.long, loadouts: 3)
+            out.append(Shot(name: "summon-\(label)-topleft-open-bright", tree: three, selection: [], desktop: .bright,
+                            screen: screen, hud: .topLeft))
+            out.append(Shot(name: "summon-\(label)-bottom-widgets-colourful", tree: three, selection: ["widgets"],
+                            desktop: .colourful, screen: screen, hud: .bottom))
+            out.append(Shot(name: "summon-\(label)-topleft-apply-dark", tree: three, selection: ["loadouts", "Messaging", "apply"],
+                            desktop: .dark, screen: screen, hud: .topLeft))
+        }
         return out
+    }
+
+    // MARK: The HUD over the scrim
+
+    /// The tool dock's strip at `position` on a visible frame of `size`, drawn as its snapshot
+    /// (its glass a dark stand-in), and two widget stand-ins: what the summon brings up.
+    private static func drawHUD(_ position: HUDDockPosition, visible size: CGSize, in context: CGContext) {
+        let visible = CGRect(origin: .zero, size: size)
+        let symbols = ["doc.on.clipboard", "note.text", "terminal", "folder", "wand.and.stars"]
+        let items = symbols.enumerated().map { i, symbol in
+            HUDDockItem(id: symbol, title: symbol, content: .symbol(symbol), indicator: i < 3 ? .running : .none, label: .none)
+        }
+        let groups = [3, 2]
+        let layout = ToolDockLayout(position: position, iconSize: 44).fitted(groups: groups, visible: visible)
+        let placement = layout.place(groups: groups, visible: visible)
+        let strip = HUDDockStripView(frame: CGRect(origin: .zero, size: placement.frame.size))
+        strip.style = layout.style
+        strip.apply(items: items, placement: placement.local)
+        if let image = strip.snapshot(scale: 2)?.cgImage { context.draw(image, in: placement.frame) }
+
+        // A small and a medium widget on the right, glass stand-ins with a line of text each.
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        let tiles = [(CGRect(x: size.width - 24 - 170, y: size.height - 24 - 170, width: 170, height: 170), "18°  Sunny"),
+                     (CGRect(x: size.width - 24 - 356, y: size.height - 24 - 170 - 16 - 170, width: 356, height: 170), "3 servers up")]
+        for (frame, text) in tiles {
+            let path = NSBezierPath(roundedRect: frame, xRadius: 18, yRadius: 18)
+            NSColor(calibratedWhite: 0.13, alpha: 0.92).setFill()
+            path.fill()
+            NSColor(white: 1, alpha: 0.18).setStroke()
+            path.lineWidth = 1
+            path.stroke()
+            NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 17, weight: .semibold),
+                                                          .foregroundColor: NSColor.white])
+                .draw(at: CGPoint(x: frame.minX + 16, y: frame.maxY - 36))
+        }
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     func testSnapshotsOfTheWheel() throws {
@@ -307,6 +360,8 @@ final class RadialWheelSnapshotTests: XCTestCase {
         // The scrim over the whole screen; what the bubbles blur is the desktop under it.
         context.setFillColor(NSColor.black.withAlphaComponent(RadialScrim.darkness).cgColor)
         context.fill(bounds)
+        // The summoned HUD over the scrim; the bubbles blur it too, being under the wheel.
+        if let position = shot.hud, let screen = shot.screen { Self.drawHUD(position, visible: screen, in: context) }
         guard let desktop = context.makeImage() else { return nil }
 
         let (view, window) = wheel(shot, layout: layout, canvas: canvas)

@@ -205,6 +205,7 @@ struct ToolDockStep: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Good to know").font(.system(size: 12, weight: .semibold)).foregroundStyle(OnboardingStyle.secondary)
                             tip("keyboard", "\(model.hotkeys.toolDock) shows or hides it from anywhere.")
+                            tip("circle.circle", "Holding \(model.hotkeys.radialWheel) brings it up with the wheel, even while it is off; let go in the centre and it stays until Esc or a click away.")
                             tip("hand.draw", "Drag the strip to any edge or corner; it snaps to the nearest spot.")
                             tip("contextualmenu.and.cursorarrow", "Right-click it for auto-hide and magnification.")
                             tip("square.grid.2x2", "Apps you install join it by themselves.")
