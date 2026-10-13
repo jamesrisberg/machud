@@ -682,7 +682,7 @@ final class ToolDockControllerTests: XCTestCase {
         XCTAssertEqual(dock.summonKeepFrames, [], "nothing to keep once it is gone")
     }
 
-    func testTheSummonUntucksAnAutoHiddenDockAndTucksItBackAfter() {
+    func testTheSummonUntucksAnAutoHiddenDockAndTucksItBackAfter() throws {
         _ = dock.handle(["autohide": "on"])
         XCTAssertTrue(dock.tucked, "auto-hide starts hidden")
         dock.setSummoned(true, at: nil)
@@ -695,10 +695,12 @@ final class ToolDockControllerTests: XCTestCase {
         XCTAssertTrue(dock.tucked, "tucked away again")
         XCTAssertTrue(config.isAutoHide)
         XCTAssertTrue(config.isEnabled)
-        // The edge reveals it as before.
+        // The edge reveals it as before: a point in one of its strips, inside the screen.
         let g = dock.geometry()!
-        let zone = g.layout.revealZone(g.frame, screen: g.screen.frame)
-        let edge = CGPoint(x: zone.midX, y: zone.midY)
+        let zones = g.layout.revealZones(g.frame, screen: g.screen.frame)
+        let edge = try XCTUnwrap(zones.lazy.map { $0.intersection(g.screen.frame) }.first { !$0.isEmpty }
+            .map { CGPoint(x: $0.midX, y: $0.midY) })
+        XCTAssertTrue(zones.contains { $0.contains(edge) })
         dock.step(mouse: edge, now: 10)
         dock.step(mouse: edge, now: 10.2)
         XCTAssertFalse(dock.tucked)
