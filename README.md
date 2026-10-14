@@ -455,7 +455,9 @@ with hardened runtime and [MacHUD.entitlements](MacHUD.entitlements) (Apple Even
 
 The whole family can be driven from here with `scripts/hud-workspace.sh`, which reads
 [workspace.json](workspace.json) and runs against the sibling directories next to this
-repo (missing ones are skipped with a note):
+repo (missing ones are skipped with a note). Repos of your own that are not in the public
+list go in a `workspace.local.json` beside it, in the same format; it is gitignored and its
+repos run after the public ones:
 
 ```sh
 scripts/hud-workspace.sh clone     # clone missing siblings (fill in the git urls first)

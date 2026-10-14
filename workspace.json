@@ -1,5 +1,5 @@
 {
-  "comment": "The MacHUD family, checked out side by side (~/dev/<name>). Paths are relative to this file. Replace OWNER in the git urls before `hud-workspace.sh clone`. kind: swiftpm-app (build.sh, swift test, install.sh), swiftpm-library (swift build, swift test), xcode (status only; build prints the xcodebuild command).",
+  "comment": "The MacHUD family, checked out side by side (~/dev/<name>). Repos of your own go in a gitignored workspace.local.json beside it, in the same format; hud-workspace.sh runs them after these. Paths are relative to this file. Replace OWNER in the git urls before `hud-workspace.sh clone`. kind: swiftpm-app (build.sh, swift test, install.sh), swiftpm-library (swift build, swift test), xcode (status only; build prints the xcodebuild command).",
   "repos": [
     {"name": "machud",     "path": ".",             "git": "git@github.com:OWNER/machud.git",     "kind": "swiftpm-app"},
     {"name": "hudkit",     "path": "../hudkit",     "git": "git@github.com:OWNER/hudkit.git",     "kind": "swiftpm-library"},

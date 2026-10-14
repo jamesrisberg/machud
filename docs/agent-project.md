@@ -17,6 +17,9 @@ development Mac; an item marked n/a does not apply to this project.
   server helper), `Tests/MacHUDTests`, `Tests/VoiceHostCoreTests`, `Tests/MacHUDMCPTests`,
   `scripts/` (`machud` CLI, `hud-workspace.sh`, `integration-smoke.sh`), `site/` (catalog and
   GitHub Pages).
+- Family repos: `workspace.json` lists the public ones; a gitignored `workspace.local.json`
+  beside it (same format) adds checkouts that are not public. `scripts/hud-workspace.sh` runs
+  over both, the local ones last.
 - Current-system docs: `docs/API.md` (socket verbs), `docs/MCP.md` (the MCP tool server),
   `docs/INTEGRATION.md` (sibling apps),
   `docs/PLACEMENT.md` (placement plans), `README.md`. The family contract lives in
