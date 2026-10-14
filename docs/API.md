@@ -829,6 +829,9 @@ checklist stays beside the card in every section, updating in place. The section
   dictation history choice (Off, Text only, Text and audio; Share history with SpeakFree while
   it is installed; `history status`), and a "try it" area that follows the voice host's
   `subscribe` stream and has a text box dictation pastes into.
+- **brain**: a card per runtime `brain status` lists (BrainKit's built-ins, then each runtime
+  plugin with its title, summary and note), marked Found, Unavailable (with the reason) or Not
+  found; the workspace folder, the home folder unless one is
   chosen (Change…, Use Home); spoken replies on/off, the reply voice, **Test voice** (`action
   name=say`) and, for Kokoro, its download (`models action=status|download`); and why the brain
   is not up yet until it is. Done once the brain is ready.
@@ -911,8 +914,11 @@ phrase (only phrases there is a model for, each marked when its model is not ins
 model's Download button, progress and terms, sensitivity, and Confirm the wake phrase before
 listening (`voice.wakeConfirm`), reply voice, spoken replies, spoken replies to typed messages, Test Voice (`action say`), the Kokoro voice's
 Download button and progress (`models`), Grok key) and Brain tab (why the brain cannot take a
-found; the workspace folder, chosen with a folder picker, the home folder while none is chosen;
-assistant name, port, per-runtime paths; while the companion still runs another runtime than the
+turn, or Ready; on/off; runtime, listing what `brain status` lists, BrainKit's built-ins and
+each runtime plugin by its title, marked when not installed or unavailable, with the chosen
+runtime's summary and note, its install command while it is not installed or its sign-in
+command once it is, each with Copy, and its documentation link; the workspace folder, chosen with a folder picker, the home folder while none is chosen;
+assistant name, port, per-runtime paths (one per runtime plugin listed, `brain.plugins.<id>.executablePath`); while the companion still runs another runtime than the
 one chosen, a note saying so; MacHUD tools on/off and whether each MacHUD action asks first) edit the same settings through the same socket, and
 say why while the voice host is down (Retry restarts a stopped or failed host; Turn On Voice
 while voice is off). The status menu's Voice submenu has Mute/Unmute and Voice Settings…, with

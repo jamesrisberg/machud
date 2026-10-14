@@ -162,20 +162,14 @@ struct OnboardingStore {
 }
 
 /// The voice host's `brain status` reply: whether the brain is up, why not, the workspace and
-/// which runtimes are installed.
+/// the runtimes it found.
 struct BrainStatus: Equatable {
-    struct Runtime: Equatable {
-        var id: String
-        var installed: Bool
-        var path: String?
-    }
-
     var available: Bool
     var problem: String?
     var workspace: String
-    var runtimes: [Runtime]
+    var runtimes: [BrainRuntimeInfo]
 
-    init(available: Bool, problem: String? = nil, workspace: String = "", runtimes: [Runtime] = []) {
+    init(available: Bool, problem: String? = nil, workspace: String = "", runtimes: [BrainRuntimeInfo] = []) {
         self.available = available
         self.problem = problem
         self.workspace = workspace
@@ -188,14 +182,10 @@ struct BrainStatus: Equatable {
         self.available = available
         problem = (reply["problem"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         workspace = reply["workspace"] as? String ?? ""
-        runtimes = (reply["runtimes"] as? [[String: Any]] ?? []).compactMap { r in
-            guard let id = r["id"] as? String else { return nil }
-            return Runtime(id: id, installed: r["installed"] as? Bool ?? false,
-                           path: (r["path"] as? String).flatMap { $0.isEmpty ? nil : $0 })
-        }
+        runtimes = (reply["runtimes"] as? [[String: Any]] ?? []).compactMap(BrainRuntimeInfo.init)
     }
 
-    func runtime(_ id: String) -> Runtime? { runtimes.first { $0.id == id } }
+    func runtime(_ id: String) -> BrainRuntimeInfo? { runtimes.first { $0.id == id } }
 }
 
 /// A runtime the brain can drive, as the onboarding presents it.
@@ -203,13 +193,26 @@ struct BrainRuntimeChoice: Equatable, Identifiable {
     var id: String
     var title: String
     var blurb: String
+    /// A runtime plugin's one line about itself, shown under the blurb.
+    var note: String?
 
-    /// The runtimes `brain.runtime` takes, in the order they are offered.
-    static let all = [
+    /// BrainKit's built-in runtimes in its order, in the onboarding's words.
+    static let builtIns = [
         BrainRuntimeChoice(id: "codex", title: "Codex", blurb: "OpenAI's coding agent, run on this Mac."),
-        BrainRuntimeChoice(id: "claude", title: "Claude Code", blurb: "Anthropic's coding agent, run on this Mac."),
         BrainRuntimeChoice(id: "hermes", title: "Hermes", blurb: "A Hermes agent server you run, reached by URL."),
+        BrainRuntimeChoice(id: "claude", title: "Claude Code", blurb: "Anthropic's coding agent, run on this Mac."),
     ]
+
+    /// The cards: every runtime the voice host found, in its order, a built-in in the
+    /// onboarding's words and a runtime plugin in its own (title, summary, note); the built-ins
+    /// alone until the host has answered.
+    static func all(from status: BrainStatus?) -> [BrainRuntimeChoice] {
+        guard let runtimes = status?.runtimes, !runtimes.isEmpty else { return builtIns }
+        return runtimes.map { runtime in
+            builtIns.first { $0.id == runtime.id }
+                ?? BrainRuntimeChoice(id: runtime.id, title: runtime.name, blurb: runtime.summary ?? "", note: runtime.note)
+        }
+    }
 }
 
 /// The voice host's live `state`, reduced to what the onboarding's "try it" area shows.

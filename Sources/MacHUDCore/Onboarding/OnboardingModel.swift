@@ -355,6 +355,8 @@ final class OnboardingModel: ObservableObject {
     /// Whether `id` is installed, as `brain status` detected it; nil when unknown.
     func runtimeInstalled(_ id: String) -> Bool? { brain?.runtime(id)?.installed }
     func runtimePath(_ id: String) -> String? { brain?.runtime(id)?.path }
+    /// The runtime as `brain status` listed it; nil when unknown.
+    func runtime(_ id: String) -> BrainRuntimeInfo? { brain?.runtime(id) }
 
     func chooseRuntime(_ id: String) {
         apply(["brainEnabled": true, "brain.runtime": id])
@@ -495,9 +497,6 @@ final class OnboardingModel: ObservableObject {
         }
     }
 
-    // MARK: - Apps
-
-
     // MARK: - Tool dock
 
     func refreshToolDock() {
@@ -590,7 +589,8 @@ final class OnboardingModel: ObservableObject {
                                         "workspace": workspace]
         if let problem = brainProblem { brainJSON["problem"] = problem }
         if let brain { brainJSON["runtimes"] = brain.runtimes.map { r -> [String: Any] in
-            ["id": r.id, "installed": r.installed, "path": r.path.map { $0 as Any } ?? NSNull()]
+            ["id": r.id, "installed": r.installed, "available": r.available, "plugin": r.plugin,
+             "path": r.path.map { $0 as Any } ?? NSNull()]
         } }
         if let brainStatusError { brainJSON["statusError"] = brainStatusError }
         brainJSON["workspaceIsDefault"] = workspaceIsDefault

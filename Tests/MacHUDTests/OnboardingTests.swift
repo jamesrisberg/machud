@@ -92,8 +92,11 @@ final class OnboardingTests: XCTestCase {
     private var brainReply: [String: Any]? = ["ok": true, "available": false, "problem": "Choose a workspace folder for the agent.",
                                               "workspace": "", "runtimes": [
                                                 ["id": "codex", "installed": true, "path": "/opt/homebrew/bin/codex"],
-                                                ["id": "claude", "installed": true, "path": "/Users/me/.local/bin/claude"],
                                                 ["id": "hermes", "installed": false],
+                                                ["id": "claude", "installed": true, "path": "/Users/me/.local/bin/claude"],
+                                                ["id": "example-agent", "name": "Example Agent", "installed": true,
+                                                 "plugin": true, "available": true, "path": "/Users/me/.local/bin/example-agent",
+                                                 "summary": "An example runtime.", "note": "Runs in its own app too."]]]
 
     override func setUpWithError() throws {
         // Short: socket paths are limited to 103 bytes.
@@ -226,8 +229,12 @@ final class OnboardingTests: XCTestCase {
         let status = try XCTUnwrap(BrainStatus(reply: brainReply!))
         XCTAssertFalse(status.available)
         XCTAssertEqual(status.problem, "Choose a workspace folder for the agent.")
+        XCTAssertEqual(status.runtimes.map(\.id), ["codex", "hermes", "claude", "example-agent"])
         XCTAssertEqual(status.runtime("hermes")?.installed, false)
+        XCTAssertEqual(status.runtime("hermes")?.available, false, "a reply without availability: installed decides")
         XCTAssertNil(status.runtime("hermes")?.path)
+        XCTAssertEqual(status.runtime("example-agent")?.path, "/Users/me/.local/bin/example-agent")
+        XCTAssertEqual(status.runtime("example-agent")?.note, "Runs in its own app too.")
         XCTAssertNil(BrainStatus(reply: ["ok": false, "error": "unknown command brain"]))
         XCTAssertNil(BrainStatus(reply: ["ok": true, "available": true, "problem": ""])?.problem)
     }
@@ -236,9 +243,29 @@ final class OnboardingTests: XCTestCase {
     func testBrainStatusParsesTheHostsFullReply() throws {
         let status = try XCTUnwrap(BrainStatus(reply: [
             "ok": true, "available": false, "problem": "Choose a workspace folder for the agent.", "workspace": "",
-            "runtimes": [["id": "codex", "name": "Codex", "installed": true, "path": "/bin/codex"],
-                         ["id": "hermes", "name": "Hermes", "installed": true, "apiServer": false],
-        XCTAssertEqual(status.runtime("codex")?.path, "/bin/codex")
+            "runtime": "example-agent", "sessionKey": "example:abc",
+            "runtimes": [["id": "codex", "name": "Codex", "installed": true, "plugin": false, "available": true,
+                          "path": "/bin/codex", "installCommand": "brew install --cask codex", "loginCommand": "codex login",
+                          "loginTitle": "Log In", "summary": "OpenAI's Codex CLI.", "docsURL": "https://example.com/codex"],
+                         ["id": "hermes", "name": "Hermes", "installed": true, "plugin": false, "available": false,
+                          "reason": "Hermes' API server is off: set API_SERVER_ENABLED=true in ~/.hermes/.env.",
+                          "apiServer": false],
+                         ["id": "example-agent", "name": "example-agent", "installed": false, "plugin": true,
+                          "available": false, "reason": "The plugin folder /x/example-agent is missing"]]]))
+        XCTAssertEqual(status.runtimes.map(\.id), ["codex", "hermes", "example-agent"])
+        let codex = try XCTUnwrap(status.runtime("codex"))
+        XCTAssertEqual(codex.path, "/bin/codex")
+        XCTAssertEqual(codex.installCommand, "brew install --cask codex")
+        XCTAssertEqual(codex.loginCommand, "codex login")
+        XCTAssertEqual(codex.loginTitle, "Log In")
+        XCTAssertEqual(codex.summary, "OpenAI's Codex CLI.")
+        XCTAssertEqual(codex.docsURL, URL(string: "https://example.com/codex"))
+        XCTAssertFalse(codex.plugin)
+        XCTAssertEqual(status.runtime("hermes")?.available, false)
+        XCTAssertEqual(status.runtime("hermes")?.reason, "Hermes' API server is off: set API_SERVER_ENABLED=true in ~/.hermes/.env.")
+        XCTAssertEqual(status.runtime("example-agent")?.installed, false)
+        XCTAssertEqual(status.runtime("example-agent")?.plugin, true)
+        XCTAssertEqual(status.runtime("example-agent")?.reason, "The plugin folder /x/example-agent is missing")
         XCTAssertEqual(status.problem, "Choose a workspace folder for the agent.")
     }
 
@@ -651,10 +678,13 @@ final class OnboardingTests: XCTestCase {
         XCTAssertTrue(spin(until: { model.brain != nil }))
         XCTAssertEqual(model.runtimeInstalled("codex"), true)
         XCTAssertEqual(model.runtimeInstalled("hermes"), false)
+        XCTAssertEqual(model.runtimePath("example-agent"), "/Users/me/.local/bin/example-agent")
         XCTAssertFalse(model.brainReady)
         XCTAssertEqual(model.brainProblem, "Choose a workspace folder for the agent.")
 
         let sets = host.settingsSets
+        model.chooseRuntime("example-agent")
+        XCTAssertTrue(spin(until: { (self.host.settings["brain"] as? [String: Any])?["runtime"] as? String == "example-agent" }))
         XCTAssertEqual(host.settingsSets, sets + 1, "runtime and brainEnabled go in one settings set")
         XCTAssertEqual(host.settings["brainEnabled"] as? Bool, true)
         XCTAssertEqual((host.settings["voice"] as? [String: Any])?["wakePhrase"] as? String, "Hey Computer", "other keys kept")
@@ -701,6 +731,7 @@ final class OnboardingTests: XCTestCase {
         registerModels(on: host)
         XCTAssertTrue(host.server.start())
         host.brainProblem = "Codex is not installed"
+        host.plugin = ["id": "example-agent", "name": "Example Agent", "installed": true, "plugin": true, "available": true]
         let model = makeModel()
         connect()
         model.go(to: .brain)
@@ -709,6 +740,7 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(model.runtimeInstalled("codex"), true)
         XCTAssertEqual(model.runtimePath("codex"), "/bin/codex")
         XCTAssertEqual(model.runtimeInstalled("claude"), false)
+        XCTAssertEqual(model.runtimeInstalled("example-agent"), true)
         model.chooseFolder = { done in done(URL(fileURLWithPath: "/w")) }
         model.chooseWorkspace()
         XCTAssertTrue(spin(until: { model.workspace == "/w" }))
@@ -810,7 +842,18 @@ final class OnboardingTests: XCTestCase {
         XCTAssertNil(older.kokoro)
     }
 
-        let model = makeModel()
+    /// The runtime cards follow the host's list: the built-ins with the onboarding's own words,
+    /// then each runtime plugin with its title, summary and note; before the host answers, the
+    /// built-ins alone.
+    func testRuntimeCardsFollowTheHostsRuntimes() throws {
+        XCTAssertEqual(BrainRuntimeChoice.all(from: nil).map(\.id), ["codex", "hermes", "claude"])
+        let status = try XCTUnwrap(BrainStatus(reply: brainReply!))
+        let choices = BrainRuntimeChoice.all(from: status)
+        XCTAssertEqual(choices.map(\.id), ["codex", "hermes", "claude", "example-agent"])
+        XCTAssertEqual(choices[2].title, "Claude Code")
+        XCTAssertNil(choices[2].note)
+        XCTAssertEqual(choices[3], BrainRuntimeChoice(id: "example-agent", title: "Example Agent",
+                                                      blurb: "An example runtime.", note: "Runs in its own app too."))
     }
 
     // MARK: - Snapshots
@@ -846,6 +889,7 @@ final class OnboardingTests: XCTestCase {
                      row(id: "xyz.machud.stash", name: "Stash", summary: "A clipboard shelf for snippets and files.", bundled: true,
                          installed: "0.1.0"),
                      row(id: "xyz.machud.scratch", name: "Scratch", summary: "A quick notes pad.", phase: .downloading(0.4)),
+                     row(id: "JER.wormhole", name: "Wormhole", summary: "Send files with magic-wormhole.", kind: "windowed")]
         apps.selected = ["xyz.machud.sift"]
         apps.catalogNote = "4 apps · checked just now"
         model.loadoutName = "Deep Work"
