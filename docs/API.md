@@ -542,6 +542,8 @@ an app that quits are dropped with their orb.
 
 ## Agent sessions
 
+A discovered app may declare HUDKit's `agent-sessions` capability on a panel
+(`HUDAgentSessions`): it shows agent sessions and answers `action open-session id=` and a
 `sessions` command on its own socket (`../hudkit/docs/CONTRACT.md` § Agent sessions). MacHUD
 brokers the capability so a client can ask "who shows agent sessions" instead of naming an app.
 
@@ -550,6 +552,7 @@ brokers the capability so a client can ask "who shows agent sessions" instead of
 | `sessions` / `sessions providers` | | every discovered app with a panel declaring `agent-sessions`: `providers[] {app, socket, running}` |
 | `sessions open` | `id=<sessionKey>` | forwards `action open-session id=` to the first provider already running, else one whose process is starting, else the first discovered (launching it, as `apps launch` does); returns `{app}` (the bundle id it reached), or the provider's own `ok: false` reply, or `{"error": "No app shows agent sessions"}` when none is discovered |
 
+`sessionKey` is opaque to MacHUD; the provider defines it (for example `claude:<sessionId>`).
 
 ## Text feed
 
@@ -1180,7 +1183,8 @@ or the brain is off, the brain companion's own reason (`Choose a workspace folde
 agent.`, a missing Node.js), the chosen runtime's tool is not installed (`Codex is not
 installed.`), or it is starting, connecting or restarting. A problem the user has to fix refuses
 an agent take with that reason; starting, connecting and restarting do not. `sessionKey` is the
-`claude:<sessionId>`), and `sessionProvider` the app MacHUD opens it in, once MacHUD has named
+brain's current session when its runtime drives one other apps show too (BrainKit's
+`sessionKey`, in the runtime's own form), and `sessionProvider` the app MacHUD opens it in, once MacHUD has named
 one (`sessions providers`); the reply card then offers "Open in <app>". `phase` is `{"name": …}`, one of `idle`, `listening`, `transcribing`,
 `working`, `awaitingApproval`, `speaking`, `failed`, plus `"mode": "dictation"|"agent"` for
 `listening` and `transcribing` and `"message"` for `failed`. `card` is `{prompt, reply,

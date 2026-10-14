@@ -23,6 +23,7 @@ final class OrbSnapshotTests: XCTestCase {
                                  progress: ["fs.du ~/dev/machud/.build"],
                                  approval: VoiceApproval(id: "ap-1", summary: "Delete ~/dev/machud/.build (2.4 GB)?",
                                                          detail: "rm -rf ~/dev/machud/.build"))
+        let working = VoiceHostState(phase: .working, card: card, sessionKey: "claude:abc", sessionProvider: "Sessions")
         let cases: [(String, VoiceHostState, CGFloat?, [Double], Bool)] = [
             ("01-idle", VoiceHostState(), nil, [], false),
             ("02-idle-muted", VoiceHostState(muted: true), nil, [], false),
@@ -120,9 +121,11 @@ final class OrbSnapshotTests: XCTestCase {
         let card = VoiceCard(prompt: "Clean up the build folder", reply: "", progress: ["fs.du ~/dev/machud/.build"])
         let cases: [(String, VoiceHostState, [ConversationRow], String, String?)] = [
             ("31-pinned-history", VoiceHostState(phase: .awaitingApproval, card: card, sessionKey: "claude:abc",
+                                                 sessionProvider: "Sessions", cardMode: .pinned), rows, "", nil),
             ("32-pinned-streaming", VoiceHostState(phase: .working, card: card, cardMode: .pinned), streaming, "", nil),
             ("33-pinned-empty", VoiceHostState(cardMode: .pinned), [], "", nil),
             ("34-expanded-history", VoiceHostState(phase: .awaitingApproval, card: card, sessionKey: "claude:abc",
+                                                   sessionProvider: "Sessions", cardMode: .expanded), rows, "", nil),
             ("35-expanded-typing", VoiceHostState(card: card, cardMode: .expanded), Array(rows.prefix(7)),
              "Also block an hour on Friday for the\nquarterly planning doc", nil),
             ("36-expanded-busy-refused", VoiceHostState(phase: .working, card: card, cardMode: .expanded), streaming,
