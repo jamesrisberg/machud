@@ -2,7 +2,8 @@
 
 `scripts/integration-smoke.sh` drives an **isolated** MacHUD (its own socket, config and
 no hotkeys) against dev builds of Sift and Wormhole, end to end: discovery, default
-placement on launch (Wormhole parks itself at the right edge), showing each panel, a loadout
+placement on launch (MacHUD parks Wormhole at the right edge, from
+`apps.JER.wormhole.placement`), showing each panel, a loadout
 that places Sift in the left half and parks Wormhole right (cooperatively, over its socket),
 revealing a parked panel as the orb does, the shared settings window reading each app's
 schema, the tool dock (its button list, an L in the top-left corner, and a HUD loadout
@@ -48,7 +49,8 @@ multi-desktop loadouts (`experimental.multiDesktopLoadouts`, off by default, see
 
 ## Sample run (main display 1728 pt wide)
 
-Replies are trimmed by the script's `jq` filters. Frames are Cocoa coordinates.
+The output below is illustrative; the script itself is the source of truth. Replies are
+trimmed by the script's `jq` filters. Frames are Cocoa coordinates.
 
 ```
 $ machud apps
@@ -137,7 +139,7 @@ What it shows:
   frame with `panel mode full`; `park conceal` parks it again.
 - The settings window has a tab per app plus MacHUD. MacHUD serves its schema over the
   socket (`settings schema`); Sift's comes from its bundle; Wormhole ships none, so its tab lists the keys it reports.
-- The tool dock lists the hover apps first, then the windowed ones (Sift);
+- The tool dock lists the hover apps first, then the windowed ones (Sift, Wormhole);
   at `topLeft` it has two arms, hover buttons against the left edge and windowed ones
   against the top. `capture name=HUD hud=only` records `dock.position` and each app's
   panels (Sift's `dock.edge` setting with them); after moving the dock to the bottom,
