@@ -149,6 +149,7 @@ machud tooldock drop id=magickHUD paths=/path/a.png,/path/b.png   # hand files t
 ```
 
 Buttons list hover apps (Stash, Scratch, ffmpegHUD, …) first, then windowed apps
+(Sift, Wormhole, …).
 
 ## Desktop widgets
 

@@ -55,6 +55,7 @@ development Mac; an item marked n/a does not apply to this project.
 | Practical lane concurrency | 4 to 6 lanes, one repo area each |
 | Session recovery/report location | Wave doc in `dev/tasks/wave-<name>.md`; briefs are saved there before dispatch |
 | Push and release authority | Explicit user authorization for each push or release |
+| Commit attribution | Family repos (hudkit, machud, sift, stash, scratch, ffmpeghud, magickhud, servershud, widgethud, usagehud): commits authored by the user only, no co-author trailer |
 
 ## Local environment procedure
 

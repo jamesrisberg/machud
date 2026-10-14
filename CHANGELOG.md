@@ -317,7 +317,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 
 ### widgetHUD and the other widget apps
 - widgetHUD is a new HUD app that puts a clock, the weather and a calendar on your desktop as
-  offer widgets too, and the README lists them.
+  widgets. serversHUD (Running Servers) and Stash (Latest Clips) now offer widgets too, and the
+  README lists them.
 
 ### The orb lets you finish your sentence
 - Talking to the agent through the orb, the wake word or `ask` no longer stops at the first
@@ -362,6 +363,7 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 
 ### The brain can drive MacHUD
 - MacHUD ships an MCP tool server, `Contents/Helpers/machud-mcp`, so an agent (Codex, Claude
+  Code or any MCP client) can read and drive MacHUD directly: see the displays, loadouts,
   tool dock, installed HUD apps and parked windows; apply or capture a loadout; show, hide or
   toggle an app's panel; run an app's own actions (validated against what the app declares); move
   the tool dock; park and unpark windows; open an agent session; add text to Stash; and speak
@@ -371,12 +373,13 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   it if needed.
 
 ### Brain: MacHUD tools, and switching the agent works
+- Changing the agent (Codex, Claude, Hermes) in the Brain tab now takes effect: the
   running agent switches, without a restart, as soon as it is between turns. While a switch is
   waiting, the Brain tab says so, and
   `machud voice brain status` shows the agent actually running (`activeRuntime`) next to the one
   chosen.
 - When MacHUD starts, the agent starts once, knowing every HUD app that announces itself in the
-  first seconds, instead of starting and then restarting (which took about a minute with
+  first seconds, instead of starting and then restarting.
 - The agent can use MacHUD itself: apply and capture loadouts, show and hide panels, run the HUD
   apps' actions, move the tool dock and more, through MacHUD's own tools instead of trying to
   drive the screen. It is told which HUD apps and loadouts you have. On by default; turn it off,
@@ -430,7 +433,7 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 
 ### Agent sessions
 - MacHUD can find and open an agent session in whichever app shows it, without naming the app:
-  dashboard is one), and `machud sessions open id=<session key>` opens and focuses one, launching
+  `machud sessions providers` lists the discovered apps that show agent sessions, and `machud sessions open id=<session key>` opens and focuses one, launching
   the app if it is not running.
 
 ### Text feed
@@ -446,6 +449,7 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   jump to it.
 - The sections: the permissions MacHUD needs (Accessibility and the microphone, with live
   status); voice (on/off, hold or tap on the fn key, and a "try it" area that shows what the
+  voice host hears); the brain (pick Codex, Claude Code or Hermes with what is
   installed shown, the folder it works in, your home folder unless you choose another, spoken
   replies, the reply voice with a Test voice button, and the Kokoro voice's download); the HUD
   apps with one-click installs; the tool dock (what it is, on or off, and where it sits, changed
@@ -481,6 +485,7 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   instead of recording it first, and the Brain tab shows the same reason, or Ready.
 - The agent works in your home folder until you choose another: the Brain tab shows which
   folder it uses and picks another with a folder picker. The runtime list marks runtimes that
+  aren't installed.
 - Pressing fn no longer starts the orb toward the waveform before it knows what you meant: while
   a second press could still turn the take into an agent request, the orb swells slightly,
   brightens and shows a soft ring that follows your voice, then turns into the waveform
@@ -490,6 +495,7 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   Download button for the Kokoro voice with its progress; replies use Kokoro as soon as it is
   installed. `machud voice action say text=…` speaks any text, and `machud voice models` shows or
   starts (`download id=kokoro`) the download.
+- When the agent's session is one other apps show too, the reply card has an
   "Open in <app>" button that shows it there.
 - The resting orb breathes softly and floats a few points below its spot, so it reads as alive
   and ready; it stays still when muted and under Reduce Motion.
