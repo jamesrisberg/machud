@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-14T02:01:59Z",
+  "updatedAt": "2026-10-14T02:07:22Z",
   "hudkit": "0.5.0",
   "apps": [
     {
@@ -9,12 +9,12 @@
       "name": "MacHUD",
       "kind": "umbrella",
       "summary": "A heads-up display for your Mac. Window loadouts, a tool dock, and a family of hover and windowed apps",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "minOS": "14.0",
-      "download": "https://github.com/jamesrisberg/machud/releases/download/v0.4.0/MacHUD-0.4.0.zip",
-      "sha256": "290eed520ac5a869436aca6696d5a064e7f941155ff5df95d1761c7056d40a2e",
-      "size": 27432271,
-      "publishedAt": "2026-10-13T20:08:31Z",
+      "download": "https://github.com/jamesrisberg/machud/releases/download/v0.5.0/MacHUD-0.5.0.zip",
+      "sha256": "39d0545c06daaf8cb1a895b98a127698d49cd540e1970090542955c3d652bed4",
+      "size": 27482957,
+      "publishedAt": "2026-10-14T02:07:22Z",
       "icon": "https://jamesrisberg.github.io/machud/icons/machud.png",
       "homepage": "https://github.com/jamesrisberg/machud",
       "bundled": false
