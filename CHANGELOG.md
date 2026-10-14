@@ -11,7 +11,7 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
   and any runtime plugin another app has installed for it, each by its own name. A runtime that is
   not installed or cannot be used says so, and the one you chose shows what it is, the command to
   install it or sign in (with Copy) and its documentation. A runtime plugin's path can be set under
-  Runtimes. The setup guide's Brain step offers the same runtimes. If the runtime you chose is a
+  Runtimes, or with `machud voice settings set brain.plugins.<id>.executablePath=<path>`. The setup guide's Brain step offers the same runtimes. If the runtime you chose is a
   plugin that has gone missing, it stays chosen and the brain says why it cannot run.
 
 ## [0.4.0] - 2026-10-13
