@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-13T20:22:57Z",
-  "hudkit": "0.4.0",
+  "updatedAt": "2026-10-14T02:01:59Z",
+  "hudkit": "0.5.0",
   "apps": [
     {
       "id": "com.jrisberg.machud",
