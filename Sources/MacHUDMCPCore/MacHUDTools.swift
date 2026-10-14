@@ -179,6 +179,7 @@ public final class MacHUDTools: @unchecked Sendable {
                  "Put a parked window back for good (without id: every parked window). machud_status lists parked windows.",
                  properties: ["id": ["type": "string", "description": "The parked entry's id. Omit to unpark all."]]),
             tool("open_session",
+                 "Show an agent session in the app that shows agent sessions, launching it if needed.",
                  properties: ["id": ["type": "string", "description": "The session key, e.g. claude:<sessionId>."]],
                  required: ["id"]),
             tool("feed_add",

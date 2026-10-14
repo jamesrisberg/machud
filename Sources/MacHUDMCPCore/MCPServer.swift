@@ -47,6 +47,7 @@ public final class MCPServer: @unchecked Sendable {
 
     public static let defaultInstructions = """
         MacHUD arranges the user's Mac: saved loadouts put apps and windows in screen regions, a tool \
+        dock shows the MacHUD family's HUD apps (Stash, Scratch, Sift, …), windows can be \
         parked behind edge orbs, and a voice host speaks replies. Call machud_status first to see the \
         displays, loadouts, apps and their action verbs. Applying a loadout, capturing and parking \
         change the user's live desktop: do them when asked.

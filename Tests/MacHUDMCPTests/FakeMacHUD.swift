@@ -61,6 +61,9 @@ final class FakeMacHUD {
                                  "verbs": ["show", "hide", "toggle", "frame", "mode", "append", "new", "clear"]]]],
     ]
     static let dashboard: [String: Any] = [
+        "id": "xyz.example.sessions", "name": "Sessions", "health": "notRunning", "running": false,
+        "panels": ["xyz.example.sessions/dashboard"],
+        "manifest": ["id": "xyz.example.sessions", "name": "Sessions", "socket": "sessions",
                      "panels": [["id": "dashboard", "title": "Dashboard", "kind": "windowed",
                                  "capabilities": ["agent-sessions"],
                                  "verbs": ["show", "hide", "frame", "open-session", "approve", "deny"]]]],
