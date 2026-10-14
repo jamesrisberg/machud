@@ -12,14 +12,15 @@
 #   scripts/hud-workspace.sh clean     delete each SwiftPM repo's .build
 #
 # Options: --only name[,name...]  limit to those repos.
-# Paths in each file are relative to that file (the repo root). Missing checkouts are
-# skipped with a note. Exits non-zero when any repo's command failed.
+# Both files are read and checked before anything runs (exit 2 when one is broken); a local
+# repo named like a public one is skipped with a note. Paths in each file are relative to that
+# file. Missing checkouts are skipped with a note. Exits non-zero when any repo's command failed.
 set -uo pipefail
 
 root="${${(%):-%x}:A:h:h}"
 manifest="${HUD_WORKSPACE:-$root/workspace.json}"
 
-usage() { sed -n '2,16p' "${${(%):-%x}:A}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,17p' "${${(%):-%x}:A}" | sed 's/^# \{0,1\}//'; }
 
 cmd="${1:-}"
 [[ -n "$cmd" ]] || { usage; exit 2; }
@@ -46,6 +47,27 @@ local_manifest="${manifest:A:h}/workspace.local.json"
 # field <index> <key>: a string from repos[index] of the current manifest, empty when absent.
 field() { plutil -extract "repos.$1.$2" raw -o - "$m" 2>/dev/null || true; }
 
+# Read and check every manifest before running anything, so a broken workspace.local.json
+# stops the run up front. A repo is run once, from the first file that names it.
+typeset -a entries
+typeset -A seen
+for m in $manifests; do
+  if [[ "$(plutil -type repos "$m" 2>/dev/null)" != array ]]; then
+    print -u2 "hud-workspace: $m is not a workspace file: it needs valid JSON with a \"repos\" array"; exit 2
+  fi
+  count="$(plutil -extract repos raw -o - "$m")"
+  for (( i = 0; i < count; i++ )); do
+    name="$(field $i name)"
+    [[ -n "$name" ]] || { print -u2 "hud-workspace: $m: repos[$i] has no name"; exit 2; }
+    if [[ -n "${seen[$name]:-}" ]]; then
+      print "note: $name in ${m:t} is already listed in ${seen[$name]:t}; skipping the ${m:t} entry"
+      continue
+    fi
+    seen[$name]="$m"
+    entries+=("$m:$i")
+  done
+done
+
 typeset -a failed skipped ok
 
 # run <name> <dir> <command...>: run in dir, record the outcome.
@@ -55,50 +77,47 @@ run() {
   if (cd "$dir" && "$@"); then ok+=("$name"); else failed+=("$name"); fi
 }
 
-for m in $manifests; do
-  count="$(plutil -extract repos raw -o - "$m")" || { print -u2 "hud-workspace: cannot read repos from $m"; exit 2; }
-  base="${m:A:h}"
-  for (( i = 0; i < count; i++ )); do
-    name="$(field $i name)"; rpath="$(field $i path)"; kind="$(field $i kind)"; git="$(field $i git)"
-    [[ -n "$only" && ",$only," != *",$name,"* ]] && continue
-    dir="${rpath:-../$name}"; [[ "$dir" == /* ]] || dir="$base/$dir"; dir="${dir:a}"
-    print -P "%B== $name%b ($kind, ${dir/#$HOME/~})"
+for entry in $entries; do
+  m="${entry%:*}"; i="${entry##*:}"; base="${m:A:h}"
+  name="$(field $i name)"; rpath="$(field $i path)"; kind="$(field $i kind)"; git="$(field $i git)"
+  [[ -n "$only" && ",$only," != *",$name,"* ]] && continue
+  dir="${rpath:-../$name}"; [[ "$dir" == /* ]] || dir="$base/$dir"; dir="${dir:a}"
+  print -P "%B== $name%b ($kind, ${dir/#$HOME/~})"
 
-    if [[ "$cmd" == clone ]]; then
-      if [[ -d "$dir/.git" || -f "$dir/.git" ]]; then print "   present"; ok+=("$name"); continue; fi
-      if [[ -z "$git" || "$git" == *OWNER* ]]; then
-        print "   skipped: no git url (replace OWNER in ${m:t})"; skipped+=("$name"); continue
-      fi
-      run "$name" "${dir:h}" git clone "$git" "${dir:t}"
-      continue
+  if [[ "$cmd" == clone ]]; then
+    if [[ -d "$dir/.git" || -f "$dir/.git" ]]; then print "   present"; ok+=("$name"); continue; fi
+    if [[ -z "$git" || "$git" == *OWNER* ]]; then
+      print "   skipped: no git url (replace OWNER in ${m:t})"; skipped+=("$name"); continue
     fi
+    run "$name" "${dir:h}" git clone "$git" "${dir:t}"
+    continue
+  fi
 
-    if [[ ! -d "$dir" ]]; then print "   skipped: not checked out (run clone)"; skipped+=("$name"); continue; fi
+  if [[ ! -d "$dir" ]]; then print "   skipped: not checked out (run clone)"; skipped+=("$name"); continue; fi
 
-    case "$cmd:$kind" in
-      status:*)
-        run "$name" "$dir" git status -sb ;;
-      build:swiftpm-app)
-        run "$name" "$dir" ./build.sh ;;
-      build:swiftpm-library)
-        run "$name" "$dir" swift build ;;
-      build:xcode)
-        project="$(field $i project)"; scheme="$(field $i scheme)"
-        print -r -- "   Xcode project, not built here. Run:"
-        print -r -- "   xcodebuild -project ${dir/#$HOME/~}/$project -scheme $scheme -configuration Debug -destination 'platform=macOS' build"
-        skipped+=("$name") ;;
-      test:swiftpm-*)
-        run "$name" "$dir" swift test ;;
-      install:swiftpm-app)
-        if [[ -x "$dir/install.sh" ]]; then run "$name" "$dir" ./install.sh
-        else print "   skipped: no install.sh"; skipped+=("$name"); fi ;;
-      clean:swiftpm-*)
-        if [[ -d "$dir/.build" ]]; then run "$name" "$dir" rm -rf .build
-        else print "   nothing to clean"; ok+=("$name"); fi ;;
-      *)
-        print "   skipped: '$cmd' does not apply to a $kind repo"; skipped+=("$name") ;;
-    esac
-  done
+  case "$cmd:$kind" in
+    status:*)
+      run "$name" "$dir" git status -sb ;;
+    build:swiftpm-app)
+      run "$name" "$dir" ./build.sh ;;
+    build:swiftpm-library)
+      run "$name" "$dir" swift build ;;
+    build:xcode)
+      project="$(field $i project)"; scheme="$(field $i scheme)"
+      print -r -- "   Xcode project, not built here. Run:"
+      print -r -- "   xcodebuild -project ${dir/#$HOME/~}/$project -scheme $scheme -configuration Debug -destination 'platform=macOS' build"
+      skipped+=("$name") ;;
+    test:swiftpm-*)
+      run "$name" "$dir" swift test ;;
+    install:swiftpm-app)
+      if [[ -x "$dir/install.sh" ]]; then run "$name" "$dir" ./install.sh
+      else print "   skipped: no install.sh"; skipped+=("$name"); fi ;;
+    clean:swiftpm-*)
+      if [[ -d "$dir/.build" ]]; then run "$name" "$dir" rm -rf .build
+      else print "   nothing to clean"; ok+=("$name"); fi ;;
+    *)
+      print "   skipped: '$cmd' does not apply to a $kind repo"; skipped+=("$name") ;;
+  esac
 done
 
 print
