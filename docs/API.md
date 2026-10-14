@@ -542,6 +542,8 @@ an app that quits are dropped with their orb.
 
 ## Agent sessions
 
+A discovered app may declare HUDKit's `agent-sessions` capability on a panel
+(`HUDAgentSessions`): it shows agent sessions and answers `action open-session id=` and a
 `sessions` command on its own socket (`../hudkit/docs/CONTRACT.md` § Agent sessions). MacHUD
 brokers the capability so a client can ask "who shows agent sessions" instead of naming an app.
 
@@ -550,6 +552,7 @@ brokers the capability so a client can ask "who shows agent sessions" instead of
 | `sessions` / `sessions providers` | | every discovered app with a panel declaring `agent-sessions`: `providers[] {app, socket, running}` |
 | `sessions open` | `id=<sessionKey>` | forwards `action open-session id=` to the first provider already running, else one whose process is starting, else the first discovered (launching it, as `apps launch` does); returns `{app}` (the bundle id it reached), or the provider's own `ok: false` reply, or `{"error": "No app shows agent sessions"}` when none is discovered |
 
+`sessionKey` is opaque to MacHUD; the provider defines it (for example `claude:<sessionId>`).
 
 ## Text feed
 
@@ -829,6 +832,10 @@ checklist stays beside the card in every section, updating in place. The section
   dictation history choice (Off, Text only, Text and audio; Share history with SpeakFree while
   it is installed; `history status`), and a "try it" area that follows the voice host's
   `subscribe` stream and has a text box dictation pastes into.
+- **brain**: a card per runtime `brain status` lists (BrainKit's built-ins, then each runtime
+  plugin with its title, summary and note), marked Found (Ready for Hermes reached by its URL),
+  Unavailable (with the reason: a refused plugin, a missing tool it requires, Hermes' API server
+  off) or Not found; the workspace folder, the home folder unless one is
   chosen (Change…, Use Home); spoken replies on/off, the reply voice, **Test voice** (`action
   name=say`) and, for Kokoro, its download (`models action=status|download`); and why the brain
   is not up yet until it is. Done once the brain is ready.
@@ -893,7 +900,7 @@ see Running several instances).
 | `voice models` | `status` (default) / `download id=kokoro\|parakeet\|hey-jarvis` | the voice host's `models` (below): whether the Parakeet speech model, the Kokoro reply voice and the wake models are installed or downloading, or start a download |
 | `voice history` | `status` (default) | the voice host's `history status` (below): where finished dictations are kept |
 | `voice settings get` | | `settings`: the voice host's settings object |
-| `voice settings set` | `settings=<JSON object>`, or dotted `key=value` pairs | `settings=` replaces the whole object. `key=value` pairs (`enabled=false`, `voice.speakReplies=true`, `brain.runtime=claude`) are applied to the current settings, each converted to the type already stored, and the whole object is sent back; an unknown key is an error. A `history.` key while no `history` is saved starts from what `history status` resolves to. Turning `enabled` off stops the voice host; on starts it |
+| `voice settings set` | `settings=<JSON object>`, or dotted `key=value` pairs | `settings=` replaces the whole object. `key=value` pairs (`enabled=false`, `voice.speakReplies=true`, `brain.runtime=claude`) are applied to the current settings, each converted to the type already stored, and the whole object is sent back; an unknown key is an error, except a runtime plugin's path override, `brain.plugins.<id>.executablePath=<path>`, which is created the first time it is set. A `history.` key while no `history` is saved starts from what `history status` resolves to. Turning `enabled` off stops the voice host; on starts it |
 | `voice conversation` | | the voice host's `conversation` (below): the conversation with the agent as rows |
 | `voice takes` | `limit=` (default 20) | the voice host's `takes` (below): the newest takes, what started each and what became of it |
 | `voice send` | `text=` | the voice host's `send` (below): sends `text` to the agent as a typed message, to the same session as voice (the agent may use its tools); `voice action say` speaks text aloud instead |
@@ -911,8 +918,11 @@ phrase (only phrases there is a model for, each marked when its model is not ins
 model's Download button, progress and terms, sensitivity, and Confirm the wake phrase before
 listening (`voice.wakeConfirm`), reply voice, spoken replies, spoken replies to typed messages, Test Voice (`action say`), the Kokoro voice's
 Download button and progress (`models`), Grok key) and Brain tab (why the brain cannot take a
-found; the workspace folder, chosen with a folder picker, the home folder while none is chosen;
-assistant name, port, per-runtime paths; while the companion still runs another runtime than the
+turn, or Ready; on/off; runtime, listing what `brain status` lists, BrainKit's built-ins and
+each runtime plugin by its title, marked when not installed or unavailable, with the chosen
+runtime's summary and note, its install command while it is not installed or its sign-in
+command once its tool is here (neither for a refused plugin or Hermes reached by its URL), each with Copy, and its documentation link; the workspace folder, chosen with a folder picker, the home folder while none is chosen;
+assistant name, port, per-runtime paths (one per runtime plugin listed, `brain.plugins.<id>.executablePath`); while the companion still runs another runtime than the
 one chosen, a note saying so; MacHUD tools on/off and whether each MacHUD action asks first) edit the same settings through the same socket, and
 say why while the voice host is down (Retry restarts a stopped or failed host; Turn On Voice
 while voice is off). The status menu's Voice submenu has Mute/Unmute and Voice Settings…, with
@@ -928,10 +938,11 @@ HUDKit's JSON-lines socket, one request per connection, served by `MacHUDVoice` 
 | `state` | | `state`: the host's state, and `orb`: what the host intends for the orb, the window that hid it and the orb's window (both below) |
 | `subscribe` | `events=state,models` (optional) | keeps the connection open and pushes `{"event": "state", "state": {…}}` on every change (many times a second while listening) and `{"event": "models", "kokoro": {…}, "parakeet": {…}, "wake": […]}` as a model's status changes (its download progress) |
 | `settings` | `action=get` | `settings`: the whole settings object |
-| `settings` | `action=set settings=<JSON object>` | replaces the whole object (decoded leniently: missing or invalid keys take their defaults, except that a choice setting (`keyMode`, `handsFree.endOfTurn`, `handsFree.sensitivity`, `history.mode`, `brain.runtime`, `voice.replyVoice`) with a value not among its choices is refused with `{ok: false, error}` and nothing is saved), saves `voice.json`, applies it and returns the stored `settings`. With `voice.wakeWordEnabled` true, a `voice.wakePhrase` no model detects (the default "Hey Computer") is saved as the first phrase there is a model for; while the wake word is off the phrase is kept as given |
+| `settings` | `action=set settings=<JSON object>` | replaces the whole object (decoded leniently: missing or invalid keys take their defaults, except that a choice setting (`keyMode`, `handsFree.endOfTurn`, `handsFree.sensitivity`, `history.mode`, `voice.replyVoice`) with a value not among its choices, or a `brain.runtime` that is not a runtime id (a lowercase letter, then up to 31 lowercase letters, digits or `-`), is refused with `{ok: false, error}` and nothing is saved; any runtime id is kept, so a runtime plugin that is not installed stays chosen and `brain status` says why it cannot run), saves `voice.json`, applies it and returns the stored `settings`. With `voice.wakeWordEnabled` true, a `voice.wakePhrase` no model detects (the default "Hey Computer") is saved as the first phrase there is a model for; while the wake word is off the phrase is kept as given |
 | `action` | `name=<click\|ask\|dictate\|stop\|cancel\|approve\|deny\|dismiss\|mute\|unmute>`, `id=` for `approve`/`deny` | performs it; returns `state` |
 | `action` | `name=say text=<text>` | speaks `text` with the configured reply voice, whether or not `voice.speakReplies` is on (previews in settings and onboarding), replacing anything being said; `{ok, state}`, or `{ok: false, error}` without `text`, while a take is recording, or without a voice. Silent under `MACHUD_VOICE_NO_SPEECH=1` |
 | `action` | `name=open-session` | asks MacHUD to show the brain's current session (`sessions open id=<sessionKey>` on MacHUD's control socket, `$MACHUD_SOCKET` else `/tmp/machud-<uid>.sock`); replies once MacHUD has, `{ok, app, state}`, or `{ok: false, error}` (also shown briefly under the orb) |
+| `brain` | `action=status` (or `brain status`) | `{ok, available, problem?, workspace, workspaceDefault, runtime, activeRuntime?, runtimes[], machudTools}`: `workspace` is the folder the agent works in, the home folder while `brain.workspacePath` is empty (`workspaceDefault` true; the setting itself stays empty until the user chooses one); `runtime` is the one chosen and `activeRuntime` the one the connected companion reports running (absent while none is connected; it differs from `runtime` until a switch lands, see Brain below); `machudTools` is `{enabled, requireApproval, available, path?, active?, note?}`: the two settings, whether `machud-mcp` was found beside the voice host (and its path), and, once the companion reports it, whether its runtime gives the agent MacHUD's tools and why not (Hermes cannot); `runtimes` lists what BrainKit finds, in its order: the built-ins `codex`, `hermes`, `claude`, then each runtime plugin installed (`~/Library/Application Support/BrainKit/Runtimes`, or `BRAINKIT_RUNTIMES_DIR`), then the chosen runtime if it is none of those (a plugin that is not installed, listed so it shows as unavailable); each is `{id, name, installed, plugin, refused, available, reason?, path?, apiServer?, installCommand?, loginCommand?, loginTitle?, note?, summary?, docsURL?}`: `name` is the built-in's name or the plugin's title, `installed` whether its executable was found, `refused` whether it is a plugin whose folder is there but that BrainKit will not use (its trust rule, an invalid `runtime.json`; such a plugin is unavailable, not missing), `available` whether it can take a turn with the current settings and `reason` BrainKit's sentence why not (not installed, a tool it requires is missing, a plugin refused or not found; for hermes, its API server off in `~/.hermes/.env` unless `brain.hermes.url` is set), `path` the executable found, `apiServer` (hermes only) whether `~/.hermes/.env` turns Hermes' API server on, and the rest what the runtime says about itself (a plugin's `note` is one line to show beside it). Tools are looked up again on each call |
 | `models` | `action=status` (or `models status`) | `{ok, kokoro: {…}, parakeet: {…}}`, each `{installed, downloading, progress, bytes, id?, error?}`: `progress` is 0…1 (1 once installed), `bytes` the whole download's size (Parakeet's is an estimate until its download reports the real size), `error` why the last download failed. `parakeet.id` is the speech model dictation uses (`parakeet-tdt-0.6b-v2`, English, or `-v3`, multilingual), else the one a download fetches. Parakeet is installed when either model is complete in FluidAudio's cache (`~/Library/Application Support/FluidAudio/Models`), the folder SpeakFree uses, so either app's download serves both; it is read from disk on each call. `wake` lists the wake phrases there is a model for (today "Hey Jarvis"), each `{id, phrase, manifestId, licence, note, redistributable, installed, downloading, progress, bytes, error?}`: `id` is what `download` takes (`hey-jarvis`), `licence` the model's licence (Hey Jarvis: openWakeWord's CC BY-NC-SA 4.0, personal non-commercial use), `note` those terms in a few words, `redistributable` false for a model that is downloaded on request and never bundled |
 | `models` | `action=download id=kokoro` | starts downloading the Kokoro reply voice into `~/Library/Application Support/MacHUD/Voice/Models` (unless it is installed or already downloading) and returns the status; each file is checked against its pinned size and SHA-256 before it is installed. Progress arrives through `models status` and `models` events; the next reply uses Kokoro once it is installed |
 | `models` | `action=download id=parakeet` | downloads SpeakFree's default Parakeet model (English) through SpeakFreeLib's `ParakeetModelManager`, as SpeakFree does: the large files with byte progress, then FluidAudio fetches the rest and compiles it for this Mac. Returns the status; progress as above. Dictation uses it from the next take, without a restart. Without a speech model a dictation fails with "Speech model not installed" |
@@ -956,7 +967,11 @@ engine's words; `.meta.json`), so SpeakFree's tools read either folder: MacHUD's
 the host's scratch folder (`~/Library/Application Support/MacHUD/Voice/Dictation/recordings`),
 which is emptied at start and whenever no take is in flight.
 
-The brain runs on the runtime in `brain.runtime`. A change of runtime alone reaches the running
+The brain runs on the runtime in `brain.runtime`: one of BrainKit's built-ins (`codex`, `hermes`,
+`claude`) or the id of a runtime plugin, an agent runtime another app installs for BrainKit
+(see `../hudkit/Kits/BrainKit/README.md`); `brain.plugins.<id>.executablePath` overrides where a
+plugin's executable is found. A chosen plugin that is not installed, or cannot be used, stays
+chosen and the brain says why. A change of runtime alone reaches the running
 companion without restarting it: BrainKit switches it once no turn is running, and checks each
 time the companion comes up that it runs the chosen runtime. Any other brain setting restarts the
 companion, which then starts on the chosen runtime.
@@ -1137,6 +1152,7 @@ changes), and its end once the listener listens again, with how many restarts it
 `state` is `{phase, inputLevel, partialTranscript, card?, hiddenForFullScreen, brainAvailable,
 brainProblem?, sessionKey?, sessionProvider?, activeRuntime?, wakeListening, wakeProblem?, muted,
 gesturePending, cardMode, lastTakeEnd?}`; `cardMode` is the reply card's state (see above). `activeRuntime` is the runtime the brain companion reports running (`codex`,
+`hermes`, `claude` or a runtime plugin's id), absent while none is connected.
 `wakeListening` is true while the wake word is armed; it pauses while a take records and listens
 again after. There is one listener for the phrase's model, `voice.wakeThreshold` and
 `voice.wakeFrames`: it keeps its model loaded while paused (the microphone closes) and other
@@ -1168,7 +1184,8 @@ or the brain is off, the brain companion's own reason (`Choose a workspace folde
 agent.`, a missing Node.js), the chosen runtime's tool is not installed (`Codex is not
 installed.`), or it is starting, connecting or restarting. A problem the user has to fix refuses
 an agent take with that reason; starting, connecting and restarting do not. `sessionKey` is the
-`claude:<sessionId>`), and `sessionProvider` the app MacHUD opens it in, once MacHUD has named
+brain's current session when its runtime drives one other apps show too (BrainKit's
+`sessionKey`, in the runtime's own form), and `sessionProvider` the app MacHUD opens it in, once MacHUD has named
 one (`sessions providers`); the reply card then offers "Open in <app>". `phase` is `{"name": …}`, one of `idle`, `listening`, `transcribing`,
 `working`, `awaitingApproval`, `speaking`, `failed`, plus `"mode": "dictation"|"agent"` for
 `listening` and `transcribing` and `"message"` for `failed`. `card` is `{prompt, reply,

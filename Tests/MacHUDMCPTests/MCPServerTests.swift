@@ -125,6 +125,7 @@ final class MCPServerTests: XCTestCase {
         }
         let action = try XCTUnwrap(list.first { $0["name"] as? String == "app_action" })
         let app = ((action["inputSchema"] as? [String: Any])?["properties"] as? [String: Any])?["app"] as? [String: Any]
+        XCTAssertEqual(app?["enum"] as? [String], ["xyz.machud.scratch", "xyz.example.sessions"])
         let description = action["description"] as? String ?? ""
         XCTAssertTrue(description.contains("Scratch (xyz.machud.scratch): append, new, clear"), description)
         XCTAssertTrue(description.contains("open-session, approve, deny"), description)
@@ -174,6 +175,8 @@ final class MCPServerTests: XCTestCase {
         loadApps()
         call("show_panel", ["app": "Scratch"])
         XCTAssertEqual(fake.requests("summon").last, ["id": "xyz.machud.scratch/pad"])
+        call("hide_panel", ["app": "xyz.example.sessions", "panel": "dashboard"])
+        XCTAssertEqual(fake.requests("dismiss").last, ["id": "xyz.example.sessions/dashboard"])
 
         fake.replies["panels"] = { _ in ["ok": true, "panels": [["id": "xyz.machud.scratch/pad", "visible": true]]] }
         call("toggle_panel", ["app": "xyz.machud.scratch"])
@@ -383,6 +386,7 @@ final class MCPServerTests: XCTestCase {
         XCTAssertEqual(voice["brainAvailable"] as? Bool, true)
         XCTAssertNil(voice["inputLevel"])
         let apps = try XCTUnwrap(status["apps"] as? [[String: Any]])
+        XCTAssertEqual(apps.map { $0["app"] as? String }, ["xyz.machud.scratch", "xyz.example.sessions"])
         XCTAssertEqual((apps[0]["panels"] as? [[String: Any]])?.first?["visible"] as? Bool, true)
         XCTAssertEqual(apps[1]["actions"] as? [String], ["open-session", "approve", "deny"])
         XCTAssertEqual(apps[0]["outdated"] as? Bool, true)

@@ -18,3 +18,6 @@ site/apps.html
 
 # Local notes and task docs (never committed)
 dev/
+
+# Repos of your own for scripts/hud-workspace.sh (see workspace.json)
+workspace.local.json

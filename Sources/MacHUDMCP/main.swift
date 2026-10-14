@@ -2,6 +2,7 @@ import Foundation
 import MacHUDMCPCore
 
 // machud-mcp: MacHUD as an MCP tool server over stdio, for the voice host's brain (Codex, Claude
+// Code, a runtime plugin) or any MCP client. Talks to MacHUD's control socket: MACHUD_SOCKET, else
 // MacHUD's contract socket. stdout carries only protocol messages; diagnostics go to stderr.
 
 /// The enclosing MacHUD's version (`Contents/Helpers/machud-mcp` → `Contents/Info.plist`), or

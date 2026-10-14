@@ -6,6 +6,8 @@ import HUDKit
 final class SessionsBrokerTests: XCTestCase {
     private let plainID = "xyz.plain"
     private let plainSock = "/tmp/plain-test.sock"
+    private let dashID = "xyz.example.sessions"
+    private let dashSock = "/tmp/sessions-test.sock"
     private var dir: URL!
     private var workspace: FakeWorkspace!
     private var connector: FakeConnector!
@@ -19,8 +21,10 @@ final class SessionsBrokerTests: XCTestCase {
                     bundleURL: dir.appendingPathComponent("Plain.app"))
     }
     private var dashboard: ExternalApp {
+        ExternalApp(manifest: HUDManifest(id: dashID, name: "Sessions", socket: dashSock, panels: [
             HUDManifest.Panel(id: "dashboard", title: "Dashboard", capabilities: [SessionsBroker.capability],
                               verbs: ["show", "hide", "frame"])]),
+                    bundleURL: dir.appendingPathComponent("Sessions.app"))
     }
 
     override func setUpWithError() throws {

@@ -7,12 +7,11 @@ import SwiftUI
 struct BrainStep: View {
     @ObservedObject var model: OnboardingModel
     @ObservedObject var settings: VoiceSettingsModel
-    @ObservedObject var apps: AppsTabModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             StepTitle(title: "Brain", subtitle: "Choose your agent to strap into the MacHUD mech suit.")
-            let choices = BrainRuntimeChoice.all
+            let choices = BrainRuntimeChoice.all(from: model.brain)
             Grid(horizontalSpacing: 10, verticalSpacing: 10) {
                 ForEach(Array(stride(from: 0, to: choices.count, by: 2)), id: \.self) { i in
                     GridRow {
@@ -147,6 +146,11 @@ struct BrainStep: View {
                     }
                     Text(runtime.blurb).font(.system(size: 11)).foregroundStyle(OnboardingStyle.secondary)
                         .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                    if let note = runtime.note {
+                        Label(note, systemImage: "info.circle").font(.system(size: 11))
+                            .foregroundStyle(OnboardingStyle.secondary).lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
@@ -156,25 +160,17 @@ struct BrainStep: View {
         .disabled(!model.voiceHostUp)
     }
 
+    /// Found (with its path; Ready when it needs nothing on this Mac), Unavailable (with the
+    /// reason), or Not found, decided from availability first (`BrainRuntimeInfo.state`).
     @ViewBuilder private func detection(_ id: String) -> some View {
-        switch model.runtimeInstalled(id) {
-        case true?: StatusPill(text: "Found", ok: true).help(model.runtimePath(id) ?? "")
-        case false?: StatusPill(text: "Not found", ok: false)
-        case nil: EmptyView()
-        }
-    }
-
-            HStack(spacing: 6) {
-                Image(systemName: "rectangle.stack").font(.system(size: 11))
-                switch row.status.state {
-                case .notInstalled:
-                    if let phase = row.phase { Text(phase.text).font(.system(size: 11)).foregroundStyle(OnboardingStyle.secondary) }
-                        .buttonStyle(HUDButtonStyle(kind: .secondary)).disabled(row.busy)
-                default:
-                }
+        if let runtime = model.runtime(id) {
+            switch runtime.state {
+            case .available:
+                if runtime.installed { StatusPill(text: "Found", ok: true).help(runtime.path ?? "") }
+                else { StatusPill(text: "Ready", ok: true) }
+            case .unavailable: StatusPill(text: "Unavailable", ok: false).help(runtime.reason ?? "")
+            case .notInstalled: StatusPill(text: "Not found", ok: false).help(runtime.reason ?? "")
             }
-        } else {
-                .foregroundStyle(OnboardingStyle.secondary)
         }
     }
 }

@@ -230,7 +230,8 @@ final class VoiceHostCommands {
 
     /// `brain status`: whether the brain can take a turn, why not, the workspace, the runtime
     /// chosen and the one the companion runs (`activeRuntime`, while connected), the runtimes
-    /// found on this Mac and MacHUD's tools. Detection runs again each time, so an install shows up.
+    /// BrainKit finds on this Mac (built-ins and runtime plugins) and MacHUD's tools. Detection
+    /// runs again each time, so an install shows up.
     private func brain(_ args: [String: String]) -> [String: Any] {
         let sub = args["action"] ?? args["_"] ?? "status"
         guard sub == "status" else { return ["ok": false, "error": "brain takes status, not \(sub)"] }
@@ -241,7 +242,7 @@ final class VoiceHostCommands {
             "ok": true, "available": state.brainAvailable,
             "workspace": controller.resolvedBrain.workspacePath, "workspaceDefault": chosen.isEmpty,
             "runtime": controller.settings.brain.runtime.rawValue,
-            "runtimes": controller.runtimeDetections().map(\.json),
+            "runtimes": BrainRuntimes.status(controller.runtimeDetections(), brain: controller.resolvedBrain),
         ]
         if let problem = state.brainProblem { reply["problem"] = problem }
         if let key = state.sessionKey { reply["sessionKey"] = key }

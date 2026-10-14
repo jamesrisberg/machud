@@ -1,5 +1,6 @@
 #!/bin/zsh
 # integration-smoke.sh — end-to-end MacHUD check against an ISOLATED MacHUD instance and
+# dev builds of Sift and Wormhole. Never talks to the live instance.
 #
 #   scripts/integration-smoke.sh            run it (prints each command and a trimmed reply)
 #
@@ -37,6 +38,7 @@ for live in "/tmp/machud-$(id -u).sock"; do
   fi
 done
 [[ -x "$MACHUD_BIN" ]] || { echo "no MacHUD binary at $MACHUD_BIN (run ./build.sh debug)" >&2; exit 2; }
+for d in "$SIFT_BUILD/Sift.app" "$WORMHOLE_BUILD/wormhole.app"; do
   [[ -d "$d" ]] || { echo "missing $d" >&2; exit 2; }
 done
 
@@ -61,13 +63,14 @@ cat > "$MACHUD_CONFIG" <<EOF
   "gap": 0,
   "layouts": [{"name": "MacHUD", "regions": [
     {"id": "left", "name": "Left", "x": 0, "y": 0, "w": 0.5, "h": 1},
-    {"id": "right", "name": "Right", "x": 0.6, "y": 0.35, "w": 0.4, "h": 0.4},
-    {"id": "strip", "name": "Strip", "x": 0, "y": 0.3, "w": 0.3, "h": 0.4}]}],
+    {"id": "right", "name": "Right", "x": 0.6, "y": 0.35, "w": 0.4, "h": 0.4}]}],
   "loadouts": [{"name": "Ecosystem", "layout": "MacHUD", "slots": [
     {"regionID": "left", "occupant": {"kind": "panel", "id": "$SIFT/browser"}},
-    {"regionID": "right", "occupant": {"kind": "panel", "id": "$WORM/portal"}, "mode": "parked", "edge": "right"},
+    {"regionID": "right", "occupant": {"kind": "panel", "id": "$WORM/portal"}, "mode": "parked", "edge": "right"}]}],
   "apps": {
+    "searchPaths": ["$SIFT_BUILD", "$WORMHOLE_BUILD"],
     "standardDirectories": false,
+    "$WORM": {"placement": {"mode": "parked", "edge": "right"}}
   }
 }
 EOF
@@ -75,6 +78,7 @@ EOF
 pid=""
 cleanup() {
   [[ "${KEEP_RUNNING:-0}" == 1 ]] && return
+  for id in $SIFT $WORM; do
     [[ -n "${preexisting[$id]:-}" ]] && continue
     gs apps quit id=$id >/dev/null 2>&1 || true
   done
@@ -93,9 +97,13 @@ fi
 apps_filter='{ok, apps: [.apps[] | {id, health, placement, placementResult} | with_entries(select(.value != null))]}'
 
 step "$apps_filter" apps
+# Default placement: Wormhole is configured to park on the right when MacHUD launches it.
+step '{ok, placement, health: .app.health}' apps launch id=$WORM
 sleep 3
+step "$apps_filter | .apps |= map(select(.id == \"$WORM\"))" apps
 step '{ok, parked: [.parked[] | {id, label, kind, edge}]}' park list
 
+for p in $SIFT/browser $WORM/portal; do
   step '{ok, visible, mode}' panel show id=$p
 done
 sleep 4
@@ -103,8 +111,8 @@ step '{ok, panels: [.panels[] | select(.app != null) | {id, health, cooperative,
 
 step '{ok, placed, failed}' apply loadout=Ecosystem
 sleep 1
-# Where the windows ended up (Cocoa coordinates): Sift fills the left half; the parked
-# ones sit past their edges.
+# Where the windows ended up (Cocoa coordinates): Sift fills the left half; the portal
+# sits past the right edge.
 step '{ok, panels: [.panels[] | select(.app != null) | {id, mode, frame: .frames[0]}]}' panels
 step '{ok, parked: [.parked[] | {id, label, kind, edge, rest}], orbs: [.orbs[] | {edge, count}]}' park list
 step '{ok, panels: [.panels[] | select(.app != null) | {id, visible, mode, frame: .frames[0]}]}' panels
@@ -132,6 +140,7 @@ step '{ok, hud}' apply loadout=HUD
 step '{ok, position}' tooldock
 jq -c 'keys' "$TEST_DIR/docks.json"
 
+for id in $SIFT $WORM; do
   if [[ -n "${preexisting[$id]:-}" ]]; then echo "# $id was already running; not quitting it"; continue; fi
   step '{ok, id, wasRunning}' apps quit id=$id
 done

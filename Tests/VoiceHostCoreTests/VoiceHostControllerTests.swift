@@ -22,6 +22,7 @@ final class VoiceHostControllerTests: XCTestCase {
     /// The take and wake-listener lines the controller logged.
     private var logged: [String] = []
     private var missingRuntimes: Set<String> = []
+    private var pluginRuntimes: [String] = []
     private let brainRoot = URL(fileURLWithPath: "/tmp/voice-tests/Brain")
     /// The wall clock at uptime 0; it moves with `clock`.
     private let launchDate = Date(timeIntervalSince1970: 1_791_000_000)
@@ -40,6 +41,7 @@ final class VoiceHostControllerTests: XCTestCase {
         confirmer = FakeWakeConfirmer()
         logged = []
         missingRuntimes = []
+        pluginRuntimes = []
     }
 
     private func makeController(_ settings: VoiceHostSettings = VoiceHostSettings(),
@@ -51,7 +53,7 @@ final class VoiceHostControllerTests: XCTestCase {
             brain: brain ?? self.brain, speaker: speaker, wake: wake,
             wakeModels: [WakePhraseModel(model: WakeModels.heyJarvis, store: wakeStore)], wakeConfirmer: confirmer,
             brainStateRoot: brainRoot,
-            sessions: sessions, detectRuntimes: FakeRuntimes.detect(missing: missingRuntimes),
+            sessions: sessions, detectRuntimes: FakeRuntimes.detect(missing: missingRuntimes, plugins: pluginRuntimes),
             sessionKeyOf: { _ in fakeBrain.sessionKey },
             now: { clock.now }, wallClock: { [launchDate] in launchDate.addingTimeInterval(clock.now) },
             schedule: { clock.schedule($0, $1) }, takeJournal: journal)
@@ -473,9 +475,24 @@ final class VoiceHostControllerTests: XCTestCase {
     }
 
     func testAMissingRuntimeThatIsNotChosenIsNoProblem() {
+        missingRuntimes = ["claude", "example-agent"]
+        pluginRuntimes = ["example-agent"]
         let controller = makeController()
         brain.onHealthChanged?(.ready)
         XCTAssertNil(controller.state.brainProblem)
+    }
+
+    /// A chosen runtime plugin that cannot be used is the problem, in its own words; the
+    /// runtime stays chosen.
+    func testAChosenPluginThatCannotBeUsedIsTheProblem() {
+        missingRuntimes = ["example-agent"]
+        pluginRuntimes = ["example-agent"]
+        var settings = VoiceHostSettings()
+        settings.brain.runtime = AgentRuntime(rawValue: "example-agent")!
+        let controller = makeController(settings)
+        brain.onHealthChanged?(.ready)
+        XCTAssertEqual(controller.state.brainProblem, "Example Agent is not installed.")
+        XCTAssertEqual(controller.settings.brain.runtime.rawValue, "example-agent")
     }
 
     func testSettingsProblems() {

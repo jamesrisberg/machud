@@ -30,7 +30,7 @@ apps that make up the rest of the HUD:
   Stash's snippets, all from the keyboard. A quick tap of **⌃⌥Space** opens it, as does `machud search show`
   ([docs/API.md#search-bar](docs/API.md#search-bar)).
 - **Widgets**: glass tiles on the desktop that any sibling can serve (widgetHUD's clock, weather
-  sessions), placed on a grid, under your windows until **⌃⌥W** raises them.
+  and calendar, serversHUD's running dev servers, Stash's latest clips), placed on a grid, under your windows until **⌃⌥W** raises them.
 - **Parking**: tuck windows off an edge behind a hover orb.
 - **Menu bar**: hide menu bar items behind a separator, Hidden Bar style.
 - **Voice**: MacHUD runs its voice host (dictation and the agent brain) as a helper process,
@@ -129,6 +129,7 @@ then windowed apps**, with a thin divider between them.
   after the pointer reaches their button. Move down into the panel and it stays; move
   away and it fades within about an eighth of a second. Sliding along the dock to
   another hover app cross-fades between them. Click to pin one open.
+- **Windowed apps** (Sift, Wormhole, …) summon and dismiss on click and come back
   where they were.
 - **Summon**: hold **⌃⌥Space** and the dock comes up with the wheel, on the wheel's display,
   even while it is off or tucked away by auto-hide. Let go on nothing and it stays, so you can
@@ -152,7 +153,8 @@ script). See docs/API.md.
 
 Any sibling app can serve widgets: small glass tiles on the desktop, such as a clock or the
 dev servers that are up. MacHUD places them and remembers where. widgetHUD serves a clock, the
-(Running Servers, Latest Clips, Claude Sessions).
+weather and a calendar; serversHUD and Stash each add a widget beside their panel
+(Running Servers, Latest Clips).
 
 - **Add**: status menu › Widgets › Add Widget, or **Edit Widgets…**, which opens a gallery of
   every widget by app with an Add button per size (small, medium, large, extra large; each a
@@ -455,7 +457,10 @@ with hardened runtime and [MacHUD.entitlements](MacHUD.entitlements) (Apple Even
 
 The whole family can be driven from here with `scripts/hud-workspace.sh`, which reads
 [workspace.json](workspace.json) and runs against the sibling directories next to this
-repo (missing ones are skipped with a note):
+repo (missing ones are skipped with a note). Repos of your own that are not in the public
+list go in a `workspace.local.json` beside it, in the same format; it is gitignored, its
+repos run after the public ones (one named like a public repo is skipped), and a broken one
+stops the script before anything runs:
 
 ```sh
 scripts/hud-workspace.sh clone     # clone missing siblings (fill in the git urls first)

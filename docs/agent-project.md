@@ -17,6 +17,9 @@ development Mac; an item marked n/a does not apply to this project.
   server helper), `Tests/MacHUDTests`, `Tests/VoiceHostCoreTests`, `Tests/MacHUDMCPTests`,
   `scripts/` (`machud` CLI, `hud-workspace.sh`, `integration-smoke.sh`), `site/` (catalog and
   GitHub Pages).
+- Family repos: `workspace.json` lists the public ones; a gitignored `workspace.local.json`
+  beside it (same format) adds checkouts that are not public. `scripts/hud-workspace.sh` runs
+  over both, the local ones last.
 - Current-system docs: `docs/API.md` (socket verbs), `docs/MCP.md` (the MCP tool server),
   `docs/INTEGRATION.md` (sibling apps),
   `docs/PLACEMENT.md` (placement plans), `README.md`. The family contract lives in
@@ -52,6 +55,7 @@ development Mac; an item marked n/a does not apply to this project.
 | Practical lane concurrency | 4 to 6 lanes, one repo area each |
 | Session recovery/report location | Wave doc in `dev/tasks/wave-<name>.md`; briefs are saved there before dispatch |
 | Push and release authority | Explicit user authorization for each push or release |
+| Commit attribution | Family repos (hudkit, machud, sift, stash, scratch, ffmpeghud, magickhud, servershud, widgethud, usagehud): commits authored by the user only, no co-author trailer |
 
 ## Local environment procedure
 

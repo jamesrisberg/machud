@@ -152,15 +152,9 @@ final class VoiceSettingsModel: ObservableObject {
     static let voiceSample = "Hi, this is how my replies will sound."
     weak var services: VoiceServices?
 
-    /// One runtime from `brain status`.
-    struct BrainRuntimeInfo: Equatable {
-        var id: String
-        var name: String
-        var installed: Bool
-        var path: String?
-    }
-
-    static let baseRuntimes = [("codex", "Codex"), ("claude", "Claude"), ("hermes", "Hermes")]
+    /// BrainKit's built-in runtimes, in its order: what the picker offers until the host has
+    /// listed what it found.
+    static let builtInRuntimes = [("codex", "Codex"), ("hermes", "Hermes"), ("claude", "Claude")]
 
     var canEdit: Bool { status == .ready }
     /// Voice is switched off: the tabs offer to turn it on.
@@ -217,17 +211,13 @@ final class VoiceSettingsModel: ObservableObject {
         if status == .ready { loadBrainStatus() }
     }
 
-    /// `brain status`: which runtimes are installed.
+    /// `brain status`: the runtimes the host found and whether each can be used.
     func loadBrainStatus(completion: (() -> Void)? = nil) {
         guard let services else { completion?(); return }
         services.perform(.forward("brain", ["action": "status"])) { [weak self] reply in
             defer { completion?() }
             guard let self, reply["ok"] as? Bool == true, let list = reply["runtimes"] as? [[String: Any]] else { return }
-            let runtimes = list.compactMap { entry -> BrainRuntimeInfo? in
-                guard let id = entry["id"] as? String else { return nil }
-                return BrainRuntimeInfo(id: id, name: entry["name"] as? String ?? id,
-                                        installed: entry["installed"] as? Bool ?? false, path: entry["path"] as? String)
-            }
+            let runtimes = list.compactMap(BrainRuntimeInfo.init)
             if runtimes != self.runtimes { self.runtimes = runtimes }
             let workspace = reply["workspace"] as? String
             if workspace != self.workspace { self.workspace = workspace }
@@ -316,19 +306,30 @@ final class VoiceSettingsModel: ObservableObject {
     var runtimeSwitchNote: String? {
         let chosen = string("brain.runtime")
         guard let active = activeRuntime, !chosen.isEmpty, active != chosen else { return nil }
-        let name = { (id: String) in Self.baseRuntimes.first { $0.0 == id }?.1 ?? id }
-        return "The brain is still running \(name(active)); it switches to \(name(chosen)) when it is between turns."
+        return "The brain is still running \(runtimeName(active)); it switches to \(runtimeName(chosen)) when it is between turns."
     }
 
-    /// or already chosen; a runtime the host did not find says so.
+    /// A runtime's name as the host lists it, else a built-in's, else its id.
+    func runtimeName(_ id: String) -> String {
+        runtime(id)?.name ?? Self.builtInRuntimes.first { $0.0 == id }?.1 ?? id
+    }
+
+    /// The runtime with this id as the host listed it.
+    func runtime(_ id: String) -> BrainRuntimeInfo? { runtimes.first { $0.id == id } }
+
+    /// The runtime plugins the host listed, for their path overrides.
+    var pluginRuntimes: [BrainRuntimeInfo] { runtimes.filter(\.plugin) }
+
+    /// The runtime picker's choices: what the host found, in its order (BrainKit's built-ins,
+    /// then each runtime plugin), each marked when it is not installed or cannot be used; the
+    /// built-ins until the host has answered. The saved runtime is always among them.
     var runtimeOptions: [(value: String, title: String)] {
         let chosen = string("brain.runtime")
-        var options = Self.baseRuntimes
+        var options = runtimes.isEmpty ? Self.builtInRuntimes : runtimes.map { ($0.id, $0.title) }
+        if !chosen.isEmpty, !options.contains(where: { $0.0 == chosen }) {
+            options.append((chosen, runtimes.isEmpty ? chosen : "\(chosen) (not installed)"))
         }
-        return options.map { id, name in
-            let found = runtimes.first { $0.id == id }
-            return (id, found?.installed == false ? "\(name) (not installed)" : name)
-        }
+        return options.map { (value: $0.0, title: $0.1) }
     }
 
     /// The wake threshold for a sensitivity (its inverse), to two places.
@@ -484,7 +485,8 @@ struct BrainTabView: View {
                 if let note = model.runtimeSwitchNote {
                     Text(note).font(.caption).foregroundStyle(.orange)
                 }
-                        .font(.caption).foregroundStyle(.secondary)
+                if let runtime = model.runtime(model.string("brain.runtime")) {
+                    BrainRuntimeRows(runtime: runtime)
                 }
                 VoiceText(model: model, title: "Workspace", path: "brain.workspacePath", isPath: true, foldersOnly: true,
                           prompt: "Home folder")
@@ -509,6 +511,9 @@ struct BrainTabView: View {
                 VoiceText(model: model, title: "codex", path: "brain.codex.executablePath", isPath: true)
                 VoiceText(model: model, title: "claude", path: "brain.claude.executablePath", isPath: true)
                 VoiceText(model: model, title: "Hermes URL", path: "brain.hermes.url")
+                ForEach(model.pluginRuntimes) { runtime in
+                    VoiceText(model: model, title: runtime.name, path: "brain.plugins.\(runtime.id).executablePath", isPath: true)
+                }
                 Text("Empty paths are looked up on PATH and the usual install folders.")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -656,6 +661,40 @@ struct DictationHistoryRows: View {
         if history.shareWithSpeakFree { note += " One history with SpeakFree, in its format." }
         if history.isDefault, history.speakFreeInstalled { note += " Following SpeakFree's own setting until you choose." }
         return note
+    }
+}
+
+/// What the chosen runtime says about itself: its summary and a plugin's note, the command
+/// that installs it while it is not installed or signs in once its tool is here
+/// (`BrainRuntimeInfo.command`), and its documentation.
+/// Why it cannot be used is the problem row's.
+struct BrainRuntimeRows: View {
+    let runtime: BrainRuntimeInfo
+
+    var body: some View {
+        let about = [runtime.summary, runtime.note].compactMap { $0 }.joined(separator: " ")
+        if !about.isEmpty {
+            Text(about).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        if let offered = runtime.command {
+            command(offered.title, offered.command)
+        }
+        if let docs = runtime.docsURL {
+            Link("\(runtime.name) documentation", destination: docs).font(.caption)
+        }
+    }
+
+    /// A command to run in Terminal, selectable, with a Copy button.
+    private func command(_ title: String, _ command: String) -> some View {
+        LabeledContent(title) {
+            HStack {
+                Text(command).font(.system(.caption, design: .monospaced)).textSelection(.enabled).lineLimit(2)
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(command, forType: .string)
+                }
+            }
+        }
     }
 }
 

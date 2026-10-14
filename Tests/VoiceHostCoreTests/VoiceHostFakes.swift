@@ -373,13 +373,20 @@ final class ManualClock {
 
 /// Every runtime installed, or those in `missing` not.
 enum FakeRuntimes {
-    static func detect(missing: Set<String> = []) -> (BrainSettings) -> [BrainRuntimeDetection] {
+    /// The built-in runtimes in BrainKit's order, then a runtime plugin per id in `plugins`
+    /// (titled "Example Agent"); those in `missing` are not installed.
+    static func detect(missing: Set<String> = [], plugins: [String] = []) -> (BrainSettings) -> [BrainRuntimeDetection] {
         { _ in
-            BrainRuntimes.ids.map { id in
+            let names = ["codex": "Codex", "hermes": "Hermes", "claude": "Claude"]
+            return (["codex", "hermes", "claude"] + plugins).map { id in
                 let installed = !missing.contains(id)
-                return BrainRuntimeDetection(id: id, name: BrainRuntimes.name(for: id), installed: installed,
+                let name = names[id] ?? "Example Agent"
+                return BrainRuntimeDetection(id: id, name: name, installed: installed,
                                              path: installed ? "/fake/bin/\(id)" : nil,
-                                             apiServerEnabled: id == "hermes" ? true : nil)
+                                             apiServerEnabled: id == "hermes" ? true : nil,
+                                             unavailableReason: installed ? nil : "\(name) is not installed.",
+                                             plugin: names[id] == nil,
+                                             note: names[id] == nil ? "A note from the plugin." : nil)
             }
         }
     }

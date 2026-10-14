@@ -1,5 +1,7 @@
 #!/bin/zsh
-# hud-workspace.sh — run one command across the MacHUD family listed in workspace.json.
+# hud-workspace.sh — run one command across the MacHUD family listed in workspace.json,
+# then the repos in workspace.local.json beside it when there is one (same format, gitignored:
+# checkouts of your own that are not public).
 #
 #   scripts/hud-workspace.sh clone     clone every repo that is missing (skips OWNER placeholders)
 #   scripts/hud-workspace.sh status    git status -sb for each
@@ -10,14 +12,15 @@
 #   scripts/hud-workspace.sh clean     delete each SwiftPM repo's .build
 #
 # Options: --only name[,name...]  limit to those repos.
-# Paths in workspace.json are relative to the file (the repo root). Missing checkouts are
-# skipped with a note. Exits non-zero when any repo's command failed.
+# Both files are read and checked before anything runs (exit 2 when one is broken); a local
+# repo named like a public one is skipped with a note. Paths in each file are relative to that
+# file. Missing checkouts are skipped with a note. Exits non-zero when any repo's command failed.
 set -uo pipefail
 
 root="${${(%):-%x}:A:h:h}"
 manifest="${HUD_WORKSPACE:-$root/workspace.json}"
 
-usage() { sed -n '2,14p' "${${(%):-%x}:A}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,17p' "${${(%):-%x}:A}" | sed 's/^# \{0,1\}//'; }
 
 cmd="${1:-}"
 [[ -n "$cmd" ]] || { usage; exit 2; }
@@ -37,12 +40,34 @@ case "$cmd" in
   *) print -u2 "hud-workspace: unknown command '$cmd'"; usage >&2; exit 2 ;;
 esac
 [[ -f "$manifest" ]] || { print -u2 "hud-workspace: no $manifest"; exit 2; }
+typeset -a manifests=("$manifest")
+local_manifest="${manifest:A:h}/workspace.local.json"
+[[ -f "$local_manifest" ]] && manifests+=("$local_manifest")
 
-# field <index> <key>: a string from repos[index], empty when absent.
-field() { plutil -extract "repos.$1.$2" raw -o - "$manifest" 2>/dev/null || true; }
+# field <index> <key>: a string from repos[index] of the current manifest, empty when absent.
+field() { plutil -extract "repos.$1.$2" raw -o - "$m" 2>/dev/null || true; }
 
-count="$(plutil -extract repos raw -o - "$manifest")" || { print -u2 "hud-workspace: cannot read repos from $manifest"; exit 2; }
-base="${manifest:A:h}"
+# Read and check every manifest before running anything, so a broken workspace.local.json
+# stops the run up front. A repo is run once, from the first file that names it.
+typeset -a entries
+typeset -A seen
+for m in $manifests; do
+  if [[ "$(plutil -type repos "$m" 2>/dev/null)" != array ]]; then
+    print -u2 "hud-workspace: $m is not a workspace file: it needs valid JSON with a \"repos\" array"; exit 2
+  fi
+  count="$(plutil -extract repos raw -o - "$m")"
+  for (( i = 0; i < count; i++ )); do
+    name="$(field $i name)"
+    [[ -n "$name" ]] || { print -u2 "hud-workspace: $m: repos[$i] has no name"; exit 2; }
+    if [[ -n "${seen[$name]:-}" ]]; then
+      print "note: $name in ${m:t} is already listed in ${seen[$name]:t}; skipping the ${m:t} entry"
+      continue
+    fi
+    seen[$name]="$m"
+    entries+=("$m:$i")
+  done
+done
+
 typeset -a failed skipped ok
 
 # run <name> <dir> <command...>: run in dir, record the outcome.
@@ -52,7 +77,8 @@ run() {
   if (cd "$dir" && "$@"); then ok+=("$name"); else failed+=("$name"); fi
 }
 
-for (( i = 0; i < count; i++ )); do
+for entry in $entries; do
+  m="${entry%:*}"; i="${entry##*:}"; base="${m:A:h}"
   name="$(field $i name)"; rpath="$(field $i path)"; kind="$(field $i kind)"; git="$(field $i git)"
   [[ -n "$only" && ",$only," != *",$name,"* ]] && continue
   dir="${rpath:-../$name}"; [[ "$dir" == /* ]] || dir="$base/$dir"; dir="${dir:a}"
@@ -61,7 +87,7 @@ for (( i = 0; i < count; i++ )); do
   if [[ "$cmd" == clone ]]; then
     if [[ -d "$dir/.git" || -f "$dir/.git" ]]; then print "   present"; ok+=("$name"); continue; fi
     if [[ -z "$git" || "$git" == *OWNER* ]]; then
-      print "   skipped: no git url (replace OWNER in workspace.json)"; skipped+=("$name"); continue
+      print "   skipped: no git url (replace OWNER in ${m:t})"; skipped+=("$name"); continue
     fi
     run "$name" "${dir:h}" git clone "$git" "${dir:t}"
     continue

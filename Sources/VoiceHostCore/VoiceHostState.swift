@@ -17,7 +17,8 @@ public struct VoiceHostState: Codable, Equatable, Sendable {
     /// Why the brain cannot take a turn, in words for the user ("Choose a workspace folder for
     /// the agent.", "Codex is not installed."); nil once it can.
     public var brainProblem: String?
-    /// The brain's current session, when its runtime drives one other apps also show
+    /// The brain's current session, when its runtime drives one other apps also show (the
+    /// runtime's own key, BrainKit's `sessionKey`); `openSession` asks MacHUD to show it.
     public var sessionKey: String?
     /// The app MacHUD opens agent sessions in (the `agent-sessions` provider), once known.
     public var sessionProvider: String?

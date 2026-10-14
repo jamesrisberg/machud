@@ -111,7 +111,7 @@ struct OnboardingCard: View {
                 case .welcome: WelcomeStep(model: model)
                 case .permissions: PermissionsStep(model: model)
                 case .voice: VoiceStep(model: model, settings: model.voiceSettings)
-                case .brain: BrainStep(model: model, settings: model.voiceSettings, apps: model.apps)
+                case .brain: BrainStep(model: model, settings: model.voiceSettings)
                 case .apps: AppsStep(model: model, apps: model.apps)
                 case .toolDock: ToolDockStep(model: model)
                 case .loadout: LoadoutStep(model: model)

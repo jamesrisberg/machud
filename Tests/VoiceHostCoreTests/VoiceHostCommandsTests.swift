@@ -24,6 +24,7 @@ final class VoiceHostCommandsTests: XCTestCase {
         controller = VoiceHostController(
             settings: VoiceHostSettings(), dictation: dictation, keys: nil, brain: brain, speaker: nil,
             wake: nil, brainStateRoot: directory, sessions: sessions,
+            detectRuntimes: FakeRuntimes.detect(missing: ["example-agent"], plugins: ["example-agent"]),
             sessionKeyOf: { _ in fakeBrain.sessionKey }, schedule: { _, _ in }, takeJournal: journal)
         controller.start()
         commands = VoiceHostCommands(controller: controller, store: VoiceHostSettingsStore(directory: directory),
@@ -125,7 +126,7 @@ final class VoiceHostCommandsTests: XCTestCase {
 
     func testAChoiceSettingOutsideItsChoicesIsRefused() {
         for json in [#"{"handsFree":{"endOfTurn":"never"}}"#, #"{"handsFree":{"sensitivity":3}}"#,
-                     #"{"keyMode":"edit"}"#, #"{"brain":{"runtime":"gpt"}}"#, #"{"voice":{"replyVoice":"x"}}"#,
+                     #"{"keyMode":"edit"}"#, #"{"voice":{"replyVoice":"x"}}"#,
                      #"{"history":{"mode":"all"}}"#] {
             let reply = commands.handle("settings", ["action": "set", "settings": json])
             XCTAssertEqual(reply["ok"] as? Bool, false, json)
@@ -134,6 +135,21 @@ final class VoiceHostCommandsTests: XCTestCase {
         XCTAssertEqual(controller.settings, VoiceHostSettings(), "nothing was saved")
         let error = commands.handle("settings", ["action": "set", "settings": #"{"handsFree":{"endOfTurn":"never"}}"#])["error"]
         XCTAssertEqual(error as? String, "handsFree.endOfTurn must be one of auto, manual, not never")
+    }
+
+    /// `brain.runtime` takes any runtime id, as BrainKit does: a built-in or a runtime plugin's,
+    /// installed or not (`brain status` then says why it cannot run). Anything else is refused.
+    func testTheRuntimeMustBeARuntimeID() {
+        for json in [#"{"brain":{"runtime":"GPT 5"}}"#, #"{"brain":{"runtime":3}}"#, #"{"brain":{"runtime":""}}"#] {
+            let reply = commands.handle("settings", ["action": "set", "settings": json])
+            XCTAssertEqual(reply["ok"] as? Bool, false, json)
+            XCTAssertEqual(reply["error"] as? String,
+                           "brain.runtime must be a runtime id (codex, hermes, claude or a runtime plugin's), not \(json.contains("GPT") ? "GPT 5" : json.contains("3") ? "3" : "")", json)
+        }
+        XCTAssertEqual(controller.settings, VoiceHostSettings(), "nothing was saved")
+        let reply = commands.handle("settings", ["action": "set", "settings": #"{"brain":{"runtime":"example-agent"}}"#])
+        XCTAssertEqual(reply["ok"] as? Bool, true, "\(reply)")
+        XCTAssertEqual(controller.settings.brain.runtime.rawValue, "example-agent")
     }
 
     func testStateReportsHowTheLastTakeEnded() throws {
@@ -306,9 +322,17 @@ final class VoiceHostCommandsTests: XCTestCase {
         XCTAssertEqual(reply["workspace"] as? String, FileManager.default.homeDirectoryForCurrentUser.path)
         XCTAssertEqual(reply["runtime"] as? String, "codex")
         let runtimes = try XCTUnwrap(reply["runtimes"] as? [[String: Any]])
+        XCTAssertEqual(runtimes.map { $0["id"] as? String }, ["codex", "hermes", "claude", "example-agent"])
         XCTAssertEqual(runtimes[0]["installed"] as? Bool, true)
+        XCTAssertEqual(runtimes[0]["available"] as? Bool, true)
         XCTAssertEqual(runtimes[0]["path"] as? String, "/fake/bin/codex")
+        XCTAssertEqual(runtimes[0]["plugin"] as? Bool, false)
+        XCTAssertEqual(runtimes[3]["name"] as? String, "Example Agent")
+        XCTAssertEqual(runtimes[3]["plugin"] as? Bool, true)
         XCTAssertEqual(runtimes[3]["installed"] as? Bool, false)
+        XCTAssertEqual(runtimes[3]["available"] as? Bool, false)
+        XCTAssertEqual(runtimes[3]["reason"] as? String, "Example Agent is not installed.")
+        XCTAssertEqual(runtimes[3]["note"] as? String, "A note from the plugin.")
         XCTAssertNil(runtimes[3]["path"])
         XCTAssertTrue(JSONSerialization.isValidJSONObject(reply))
     }

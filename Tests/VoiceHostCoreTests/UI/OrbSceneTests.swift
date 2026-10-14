@@ -223,6 +223,8 @@ final class OrbSceneTests: XCTestCase {
         let working = VoiceHostState(phase: .working, card: card, sessionKey: "claude:abc")
         XCTAssertEqual(scene(working).sessionLink, "Open Session")
         var named = working
+        named.sessionProvider = "Sessions"
+        XCTAssertEqual(scene(named).sessionLink, "Open in Sessions")
         XCTAssertNil(scene(VoiceHostState(phase: .working, card: card)).sessionLink)
         XCTAssertNil(scene(VoiceHostState(sessionKey: "claude:abc")).sessionLink, "no card, no button")
     }

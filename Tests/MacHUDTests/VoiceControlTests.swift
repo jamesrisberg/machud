@@ -10,7 +10,8 @@ final class FakeVoiceHost {
     var settings: [String: Any] = [
         "enabled": true, "keyMode": "hold", "agentGesture": true, "brainEnabled": true, "brainPort": 8791,
         "brain": ["runtime": "codex", "workspacePath": "", "assistantName": "", "nodePath": "",
-                  "codex": ["executablePath": ""], "claude": ["executablePath": ""], "hermes": ["url": ""]],
+                  "codex": ["executablePath": ""], "claude": ["executablePath": ""], "hermes": ["url": ""],
+                  "plugins": [String: Any]()],
         "voice": ["wakeWordEnabled": false, "wakePhrase": "Hey Computer", "wakeThreshold": 0.5,
                   "replyVoice": "kokoro", "speakReplies": false,
                   "kokoro": ["voice": "af_heart", "speed": 1], "system": ["voiceIdentifier": "", "rate": 1],
@@ -18,6 +19,8 @@ final class FakeVoiceHost {
     ]
     var muted = false
     var brainProblem: String? = "Choose a workspace folder for the agent."
+    /// A runtime plugin's `brain status` entry, listed after the built-ins; nil lists none.
+    var plugin: [String: Any]?
     var brainRequests: [[String: String]] = []
     var actions: [[String: String]] = []
     var secrets: [String: String] = [:]
@@ -78,9 +81,13 @@ final class FakeVoiceHost {
             var reply: [String: Any] = [
                 "ok": true, "available": self.brainProblem == nil, "workspace": self.workspace,
                 "workspaceDefault": self.workspaceDefault,
-                "runtimes": [["id": "codex", "name": "Codex", "installed": true, "path": "/bin/codex"],
-                             ["id": "claude", "name": "Claude", "installed": false],
-                             ["id": "hermes", "name": "Hermes", "installed": false],
+                "runtimes": [["id": "codex", "name": "Codex", "installed": true, "plugin": false, "available": true,
+                              "path": "/bin/codex", "loginCommand": "codex login", "loginTitle": "Log In"],
+                             ["id": "hermes", "name": "Hermes", "installed": false, "plugin": false, "available": false,
+                              "reason": "Hermes is not installed."],
+                             ["id": "claude", "name": "Claude", "installed": false, "plugin": false, "available": false,
+                              "reason": "Claude is not installed.", "installCommand": "curl -fsSL https://claude.ai/install.sh | bash"]]
+                    + (self.plugin.map { [$0] } ?? []),
             ]
             if let problem = self.brainProblem { reply["problem"] = problem }
             done(reply)
@@ -257,6 +264,33 @@ final class VoiceControlTests: XCTestCase {
         XCTAssertThrowsError(try VoiceSettingsJSON.merging(base, ["enabled": "maybe"]), "not a bool")
         XCTAssertThrowsError(try VoiceSettingsJSON.merging(base, ["brainPort": "x"]), "not a number")
         XCTAssertThrowsError(try VoiceSettingsJSON.merging(base, ["voice": "x"]), "an object is not a value")
+    }
+
+    /// A runtime plugin's path override can be set before it has one: the levels under
+    /// `brain.plugins` are made, and nothing else is.
+    func testAPluginPathCanBeSetTheFirstTime() throws {
+        let base: [String: Any] = ["brain": ["runtime": "codex", "plugins": [String: Any]()]]
+        let merged = try VoiceSettingsJSON.merging(base, ["brain.plugins.example-agent.executablePath": "/opt/x/example-agent"])
+        let plugins = (merged["brain"] as? [String: Any])?["plugins"] as? [String: Any]
+        XCTAssertEqual((plugins?["example-agent"] as? [String: Any])?["executablePath"] as? String, "/opt/x/example-agent")
+        XCTAssertEqual((merged["brain"] as? [String: Any])?["runtime"] as? String, "codex", "siblings kept")
+        let noPlugins = try VoiceSettingsJSON.merging(["brain": ["runtime": "codex"]],
+                                                      ["brain.plugins.example-agent.executablePath": "/x"])
+        XCTAssertEqual(VoiceSettingsJSON.value(noPlugins, at: "brain.plugins.example-agent.executablePath") as? String, "/x")
+        for path in ["brain.plugins.example-agent.other", "brain.plugins.Bad Id.executablePath",
+                     "brain.plugins.example-agent", "brain.retired.executablePath", "plugins.example-agent.executablePath"] {
+            XCTAssertThrowsError(try VoiceSettingsJSON.merging(base, [path: "/x"]), path)
+        }
+        XCTAssertThrowsError(try VoiceSettingsJSON.merging(["voice": [String: Any]()],
+                                                           ["brain.plugins.example-agent.executablePath": "/x"]), "no brain")
+    }
+
+    func testAPluginPathSetFromTheCommandLineReachesTheHost() {
+        let reply = run(["settings", "set", "brain.plugins.example-agent.executablePath=/opt/x/example-agent"])
+        XCTAssertEqual(reply["ok"] as? Bool, true, "\(reply)")
+        XCTAssertEqual(VoiceSettingsJSON.value(host.settings, at: "brain.plugins.example-agent.executablePath") as? String,
+                       "/opt/x/example-agent")
+        XCTAssertEqual(VoiceSettingsJSON.value(host.settings, at: "brain.runtime") as? String, "codex")
     }
 
     // MARK: - Forwarding to the host
@@ -446,7 +480,7 @@ final class VoiceControlTests: XCTestCase {
         let reply = run(["brain", "status"])
         XCTAssertEqual(reply["ok"] as? Bool, true)
         XCTAssertEqual(reply["problem"] as? String, "Choose a workspace folder for the agent.")
-        XCTAssertEqual((reply["runtimes"] as? [[String: Any]])?.count, 4)
+        XCTAssertEqual((reply["runtimes"] as? [[String: Any]])?.count, 3)
         XCTAssertEqual(host.brainRequests.last?["action"], "status")
     }
 
@@ -455,21 +489,102 @@ final class VoiceControlTests: XCTestCase {
         let model = voice.settingsModel
         XCTAssertTrue(spin(until: { model.status == .ready }))
         XCTAssertTrue(spin(until: { model.brainProblem == "Choose a workspace folder for the agent." }))
-        XCTAssertTrue(spin(until: { model.runtimes.count == 4 }))
+        XCTAssertTrue(spin(until: { model.runtimes.count == 3 }))
         host.brainProblem = nil
         host.server.publish("state", payload: ["state": host.state])
         XCTAssertTrue(spin(until: { model.brainProblem == nil }))
         XCTAssertEqual(model.json["brainProblem"] as? String, nil)
     }
 
+    /// The picker offers what the host lists, in its order: BrainKit's built-ins, then each
+    /// runtime plugin, by its title, marked when it is not installed or cannot be used.
+    func testTheRuntimePickerOffersWhatTheHostLists() {
         supervisor.start()
         let model = voice.settingsModel
-        XCTAssertTrue(spin(until: { model.runtimes.count == 4 }))
-        XCTAssertEqual(model.runtimeOptions.map(\.value), ["codex", "claude", "hermes"])
-        XCTAssertEqual(model.runtimeOptions.map(\.title), ["Codex", "Claude (not installed)", "Hermes (not installed)"])
+        XCTAssertTrue(spin(until: { model.status == .ready }))
+        XCTAssertTrue(spin(until: { model.runtimes.count == 3 }))
+        XCTAssertEqual(model.runtimeOptions.map(\.value), ["codex", "hermes", "claude"])
+        XCTAssertEqual(model.runtimeOptions.map(\.title), ["Codex", "Hermes (not installed)", "Claude (not installed)"])
+        XCTAssertEqual(model.runtime("claude")?.installCommand, "curl -fsSL https://claude.ai/install.sh | bash")
+        XCTAssertEqual(model.runtime("codex")?.loginCommand, "codex login")
+
+        host.plugin = ["id": "example-agent", "name": "Example Agent", "installed": true, "plugin": true, "available": true,
+                       "path": "/opt/tools/example-agent", "note": "Runs in its own app too.",
+                       "summary": "An example runtime.", "docsURL": "https://example.com/agent"]
         var loaded = false
         model.loadBrainStatus { loaded = true }
         XCTAssertTrue(spin(until: { loaded }))
+        XCTAssertEqual(model.runtimeOptions.map(\.value), ["codex", "hermes", "claude", "example-agent"])
+        XCTAssertEqual(model.runtimeOptions.last?.title, "Example Agent")
+        let plugin = model.runtime("example-agent")
+        XCTAssertEqual(plugin?.plugin, true)
+        XCTAssertEqual(plugin?.note, "Runs in its own app too.")
+        XCTAssertEqual(plugin?.summary, "An example runtime.")
+        XCTAssertEqual(plugin?.docsURL, URL(string: "https://example.com/agent"))
+        XCTAssertEqual(model.pluginRuntimes.map(\.id), ["example-agent"], "its path override is offered")
+
+        // Installed but missing a tool it requires: offered, marked, with the host's reason.
+        host.plugin?["available"] = false
+        host.plugin?["reason"] = "Example Agent needs example-tool, which is not installed."
+        loaded = false
+        model.loadBrainStatus { loaded = true }
+        XCTAssertTrue(spin(until: { loaded }))
+        XCTAssertEqual(model.runtimeOptions.last?.title, "Example Agent (unavailable)")
+        XCTAssertEqual(model.runtime("example-agent")?.reason, "Example Agent needs example-tool, which is not installed.")
+    }
+
+    /// What a runtime shows follows `available` first: "(not installed)" and the install
+    /// command only when it really is not installed, "(unavailable)" and the reason otherwise.
+    func testARuntimeIsNotInstalledOnlyWhenItIsNot() throws {
+        let refused = try XCTUnwrap(BrainRuntimeInfo(["id": "example-agent", "name": "example-agent", "plugin": true,
+                                                      "installed": false, "available": false, "refused": true,
+                                                      "reason": "runtime.json is writable by other users."]))
+        XCTAssertEqual(refused.state, .unavailable)
+        XCTAssertEqual(refused.title, "example-agent (unavailable)")
+        XCTAssertNil(refused.command)
+
+        let hermesByURL = try XCTUnwrap(BrainRuntimeInfo(["id": "hermes", "name": "Hermes", "installed": false,
+                                                          "available": true, "refused": false,
+                                                          "installCommand": "curl hermes | bash", "loginCommand": "hermes setup"]))
+        XCTAssertEqual(hermesByURL.state, .available)
+        XCTAssertEqual(hermesByURL.title, "Hermes")
+        XCTAssertNil(hermesByURL.command, "reached by URL: nothing to install or set up here")
+
+        let missingTool = try XCTUnwrap(BrainRuntimeInfo(["id": "example-agent", "name": "Example Agent", "plugin": true,
+                                                          "installed": true, "available": false, "refused": false,
+                                                          "reason": "Example Agent needs example-tool, which is not installed.",
+                                                          "installCommand": "brew install example-agent",
+                                                          "loginCommand": "example-agent login", "loginTitle": "Sign In"]))
+        XCTAssertEqual(missingTool.state, .unavailable)
+        XCTAssertEqual(missingTool.title, "Example Agent (unavailable)")
+        XCTAssertEqual(missingTool.command?.title, "Sign In")
+
+        let missing = try XCTUnwrap(BrainRuntimeInfo(["id": "claude", "name": "Claude", "installed": false,
+                                                      "available": false, "reason": "Claude is not installed.",
+                                                      "installCommand": "curl claude | bash", "loginCommand": "claude"]))
+        XCTAssertEqual(missing.state, .notInstalled)
+        XCTAssertEqual(missing.title, "Claude (not installed)")
+        XCTAssertEqual(missing.command?.title, "Install")
+        XCTAssertEqual(missing.command?.command, "curl claude | bash")
+
+        let ready = try XCTUnwrap(BrainRuntimeInfo(["id": "codex", "name": "Codex", "installed": true, "available": true,
+                                                    "loginCommand": "codex login", "loginTitle": "Log In"]))
+        XCTAssertEqual(ready.state, .available)
+        XCTAssertEqual(ready.command?.command, "codex login")
+    }
+
+    /// The saved runtime stays offered even when the host does not list it (it is not up yet),
+    /// so the picker never shows another runtime as chosen.
+    func testTheChosenRuntimeIsAlwaysOffered() {
+        supervisor.start()
+        let model = voice.settingsModel
+        XCTAssertTrue(spin(until: { model.status == .ready }))
+        var saved = false
+        model.set("brain.runtime", "example-agent") { saved = true }
+        XCTAssertTrue(spin(until: { saved }))
+        XCTAssertTrue(spin(until: { model.runtimes.count == 3 }))
+        XCTAssertEqual(model.runtimeOptions.map(\.value), ["codex", "hermes", "claude", "example-agent"])
+        XCTAssertEqual(model.runtimeOptions.last?.title, "example-agent (not installed)")
     }
 
     func testTheBrainTabSaysWhileTheRunningRuntimeIsNotTheChosenOne() {
