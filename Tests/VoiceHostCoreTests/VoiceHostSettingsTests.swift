@@ -49,6 +49,20 @@ final class VoiceHostSettingsTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(VoiceHostSettings.self, from: JSONEncoder().encode(settings)), settings)
     }
 
+    /// A saved `brain` from before a per-runtime key was retired still decodes: the retired
+    /// key is dropped and everything else survives. Its values are not carried anywhere.
+    func testABrainWithARetiredRuntimeKeyStillDecodes() throws {
+        let json = #"{"brain":{"runtime":"example-agent","workspacePath":"/w","retiredRuntime":{"executablePath":"/x/bin/tool"},"machudTools":false,"machudToolsRequireApproval":true}}"#
+        let settings = try JSONDecoder().decode(VoiceHostSettings.self, from: Data(json.utf8))
+        XCTAssertEqual(settings.brain.runtime.rawValue, "example-agent")
+        XCTAssertEqual(settings.brain.workspacePath, "/w")
+        XCTAssertFalse(settings.machudTools)
+        XCTAssertTrue(settings.machudToolsRequireApproval)
+        XCTAssertTrue(settings.brain.plugins.isEmpty, "the retired key's path is not migrated")
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as? [String: Any])
+        XCTAssertNil((object["brain"] as? [String: Any])?["retiredRuntime"])
+    }
+
     /// A wake starts a take only once its phrase is confirmed, unless `voice.wakeConfirm` is off;
     /// the setting lives inside `voice`, beside VoiceKit's own keys.
     func testTheWakePhraseIsConfirmedByDefaultAndTheSettingIsStoredInsideVoice() throws {
