@@ -6,6 +6,8 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-13
+
 ### Changed
 - **The Brain tab lists the agent runtimes BrainKit finds on your Mac**: Codex, Hermes and Claude,
   and any runtime plugin another app has installed for it, each by its own name. A runtime that is
