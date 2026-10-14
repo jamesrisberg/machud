@@ -10,7 +10,8 @@ final class FakeVoiceHost {
     var settings: [String: Any] = [
         "enabled": true, "keyMode": "hold", "agentGesture": true, "brainEnabled": true, "brainPort": 8791,
         "brain": ["runtime": "codex", "workspacePath": "", "assistantName": "", "nodePath": "",
-                  "codex": ["executablePath": ""], "claude": ["executablePath": ""], "hermes": ["url": ""]],
+                  "codex": ["executablePath": ""], "claude": ["executablePath": ""], "hermes": ["url": ""],
+                  "plugins": [String: Any]()],
         "voice": ["wakeWordEnabled": false, "wakePhrase": "Hey Computer", "wakeThreshold": 0.5,
                   "replyVoice": "kokoro", "speakReplies": false,
                   "kokoro": ["voice": "af_heart", "speed": 1], "system": ["voiceIdentifier": "", "rate": 1],
@@ -263,6 +264,33 @@ final class VoiceControlTests: XCTestCase {
         XCTAssertThrowsError(try VoiceSettingsJSON.merging(base, ["enabled": "maybe"]), "not a bool")
         XCTAssertThrowsError(try VoiceSettingsJSON.merging(base, ["brainPort": "x"]), "not a number")
         XCTAssertThrowsError(try VoiceSettingsJSON.merging(base, ["voice": "x"]), "an object is not a value")
+    }
+
+    /// A runtime plugin's path override can be set before it has one: the levels under
+    /// `brain.plugins` are made, and nothing else is.
+    func testAPluginPathCanBeSetTheFirstTime() throws {
+        let base: [String: Any] = ["brain": ["runtime": "codex", "plugins": [String: Any]()]]
+        let merged = try VoiceSettingsJSON.merging(base, ["brain.plugins.example-agent.executablePath": "/opt/x/example-agent"])
+        let plugins = (merged["brain"] as? [String: Any])?["plugins"] as? [String: Any]
+        XCTAssertEqual((plugins?["example-agent"] as? [String: Any])?["executablePath"] as? String, "/opt/x/example-agent")
+        XCTAssertEqual((merged["brain"] as? [String: Any])?["runtime"] as? String, "codex", "siblings kept")
+        let noPlugins = try VoiceSettingsJSON.merging(["brain": ["runtime": "codex"]],
+                                                      ["brain.plugins.example-agent.executablePath": "/x"])
+        XCTAssertEqual(VoiceSettingsJSON.value(noPlugins, at: "brain.plugins.example-agent.executablePath") as? String, "/x")
+        for path in ["brain.plugins.example-agent.other", "brain.plugins.Bad Id.executablePath",
+                     "brain.plugins.example-agent", "brain.retired.executablePath", "plugins.example-agent.executablePath"] {
+            XCTAssertThrowsError(try VoiceSettingsJSON.merging(base, [path: "/x"]), path)
+        }
+        XCTAssertThrowsError(try VoiceSettingsJSON.merging(["voice": [String: Any]()],
+                                                           ["brain.plugins.example-agent.executablePath": "/x"]), "no brain")
+    }
+
+    func testAPluginPathSetFromTheCommandLineReachesTheHost() {
+        let reply = run(["settings", "set", "brain.plugins.example-agent.executablePath=/opt/x/example-agent"])
+        XCTAssertEqual(reply["ok"] as? Bool, true, "\(reply)")
+        XCTAssertEqual(VoiceSettingsJSON.value(host.settings, at: "brain.plugins.example-agent.executablePath") as? String,
+                       "/opt/x/example-agent")
+        XCTAssertEqual(VoiceSettingsJSON.value(host.settings, at: "brain.runtime") as? String, "codex")
     }
 
     // MARK: - Forwarding to the host

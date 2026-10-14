@@ -186,14 +186,30 @@ enum VoiceSettingsJSON {
 
     /// `pairs` applied to `base`, each value converted to the type already stored at its path.
     /// Throws for a path `base` does not have (a typo would otherwise be dropped by the host
-    /// without a word) or a value that does not fit.
+    /// without a word) or a value that does not fit. A runtime plugin's path override
+    /// (`brain.plugins.<id>.executablePath`) is the one path that may be new: a plugin has no
+    /// options until one is set, so its levels are made, as the Brain tab makes them.
     static func merging(_ base: [String: Any], _ pairs: [String: String]) throws -> [String: Any] {
         var out = base
         for (path, raw) in pairs.sorted(by: { $0.key < $1.key }) {
+            if value(base, at: path) == nil, isPluginPath(path), base["brain"] is [String: Any] {
+                out = setting(out, path, to: raw)
+                continue
+            }
             guard let current = value(base, at: path) else { throw VoiceCommand.Invalid("no such voice setting \(path)") }
             out = setting(out, path, to: try convert(raw, like: current, path: path))
         }
         return out
+    }
+
+    /// `brain.plugins.<id>.executablePath` with `id` a runtime id (BrainKit's rule: a lowercase
+    /// letter, then up to 31 lowercase letters, digits or `-`).
+    static func isPluginPath(_ path: String) -> Bool {
+        let keys = path.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+        guard keys.count == 4, keys[0] == "brain", keys[1] == "plugins", keys[3] == "executablePath" else { return false }
+        let id = keys[2].unicodeScalars
+        guard let first = id.first, ("a"..."z").contains(first), id.count <= 32 else { return false }
+        return id.allSatisfy { ("a"..."z").contains($0) || ("0"..."9").contains($0) || $0 == "-" }
     }
 
     private static func convert(_ raw: String, like current: Any, path: String) throws -> Any {
