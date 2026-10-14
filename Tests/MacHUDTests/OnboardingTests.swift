@@ -251,7 +251,7 @@ final class OnboardingTests: XCTestCase {
                           "reason": "Hermes' API server is off: set API_SERVER_ENABLED=true in ~/.hermes/.env.",
                           "apiServer": false],
                          ["id": "example-agent", "name": "example-agent", "installed": false, "plugin": true,
-                          "available": false, "reason": "The plugin folder /x/example-agent is missing"]]]))
+                          "available": false, "reason": "No runtime plugin example-agent is installed."]]]))
         XCTAssertEqual(status.runtimes.map(\.id), ["codex", "hermes", "example-agent"])
         let codex = try XCTUnwrap(status.runtime("codex"))
         XCTAssertEqual(codex.path, "/bin/codex")
@@ -265,7 +265,7 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(status.runtime("hermes")?.reason, "Hermes' API server is off: set API_SERVER_ENABLED=true in ~/.hermes/.env.")
         XCTAssertEqual(status.runtime("example-agent")?.installed, false)
         XCTAssertEqual(status.runtime("example-agent")?.plugin, true)
-        XCTAssertEqual(status.runtime("example-agent")?.reason, "The plugin folder /x/example-agent is missing")
+        XCTAssertEqual(status.runtime("example-agent")?.reason, "No runtime plugin example-agent is installed.")
         XCTAssertEqual(status.problem, "Choose a workspace folder for the agent.")
     }
 

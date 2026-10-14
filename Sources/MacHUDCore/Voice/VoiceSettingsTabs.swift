@@ -665,7 +665,8 @@ struct DictationHistoryRows: View {
 }
 
 /// What the chosen runtime says about itself: its summary and a plugin's note, the command
-/// that installs it while it is not installed or signs in once it is, and its documentation.
+/// that installs it while it is not installed or signs in once its tool is here
+/// (`BrainRuntimeInfo.command`), and its documentation.
 /// Why it cannot be used is the problem row's.
 struct BrainRuntimeRows: View {
     let runtime: BrainRuntimeInfo
@@ -675,10 +676,8 @@ struct BrainRuntimeRows: View {
         if !about.isEmpty {
             Text(about).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
-        if !runtime.installed, let install = runtime.installCommand {
-            command("Install", install)
-        } else if runtime.installed, let login = runtime.loginCommand {
-            command(runtime.loginTitle ?? "Log In", login)
+        if let offered = runtime.command {
+            command(offered.title, offered.command)
         }
         if let docs = runtime.docsURL {
             Link("\(runtime.name) documentation", destination: docs).font(.caption)

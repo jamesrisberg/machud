@@ -96,8 +96,9 @@ final class BrainRuntimesTests: XCTestCase {
         XCTAssertEqual(found.map(\.id), ["codex", "hermes", "claude", "example-agent"])
         XCTAssertFalse(found[3].installed)
         XCTAssertTrue(found[3].plugin)
+        XCTAssertFalse(found[3].refused, "no folder: not installed, not refused")
         let reason = found[3].unavailableReason
-        XCTAssertEqual(reason, "The plugin folder \(runtimes.path)/example-agent is missing")
+        XCTAssertEqual(reason, "No runtime plugin example-agent is installed.")
         XCTAssertEqual(BrainRuntimes.problem(runtime: "example-agent", brain: brain, detections: found), reason)
     }
 
@@ -107,7 +108,37 @@ final class BrainRuntimesTests: XCTestCase {
                                          readFile: { _ in nil })
         let plugin = try XCTUnwrap(found.first { $0.id == "example-agent" })
         XCTAssertTrue(plugin.installed)
+        XCTAssertFalse(plugin.refused)
         XCTAssertEqual(plugin.unavailableReason, "Example Agent needs example-tool, which is not installed.")
+    }
+
+    /// A plugin folder BrainKit does not trust is there but refused: unavailable with the
+    /// reason, never "not installed".
+    func testARefusedPluginIsThereButUnavailable() throws {
+        try writePlugin("example-agent")
+        try FileManager.default.setAttributes([.posixPermissions: 0o646],
+                                              ofItemAtPath: runtimes.appendingPathComponent("example-agent/runtime.json").path)
+        let brain = BrainSettings()
+        let found = BrainRuntimes.detect(brain, locator: locator(["/opt/tools/example-agent"]), readFile: { _ in nil })
+        let plugin = try XCTUnwrap(found.first { $0.id == "example-agent" })
+        XCTAssertTrue(plugin.refused)
+        XCTAssertEqual(plugin.unavailableReason, "runtime.json is writable by other users.")
+        let entry = try XCTUnwrap(BrainRuntimes.status(found, brain: brain).last)
+        XCTAssertEqual(entry["refused"] as? Bool, true)
+        XCTAssertEqual(entry["available"] as? Bool, false)
+        XCTAssertEqual(entry["reason"] as? String, "runtime.json is writable by other users.")
+    }
+
+    /// Hermes reached by its URL needs nothing on this Mac: available, though not installed.
+    func testHermesByURLIsAvailableWithoutBeingInstalled() throws {
+        var brain = BrainSettings()
+        brain.hermes.url = "http://127.0.0.1:8642"
+        let found = BrainRuntimes.detect(brain, locator: locator([]), readFile: { _ in nil })
+        let hermes = try XCTUnwrap(BrainRuntimes.status(found, brain: brain).first { $0["id"] as? String == "hermes" })
+        XCTAssertEqual(hermes["installed"] as? Bool, false)
+        XCTAssertEqual(hermes["available"] as? Bool, true)
+        XCTAssertEqual(hermes["refused"] as? Bool, false)
+        XCTAssertNil(hermes["reason"])
     }
 
     func testProblems() {
@@ -136,6 +167,7 @@ final class BrainRuntimesTests: XCTestCase {
         XCTAssertEqual(entries[0]["available"] as? Bool, true)
         XCTAssertNil(entries[0]["reason"])
         XCTAssertEqual(entries[0]["plugin"] as? Bool, false)
+        XCTAssertEqual(entries[0]["refused"] as? Bool, false)
         XCTAssertEqual(entries[1]["available"] as? Bool, false)
         XCTAssertEqual(entries[1]["reason"] as? String, "Hermes is not installed.")
         XCTAssertEqual(entries[1]["apiServer"] as? Bool, false)

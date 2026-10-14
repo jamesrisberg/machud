@@ -160,15 +160,16 @@ struct BrainStep: View {
         .disabled(!model.voiceHostUp)
     }
 
-    /// Found (with its path), found but unavailable (with the reason), or not found.
+    /// Found (with its path; Ready when it needs nothing on this Mac), Unavailable (with the
+    /// reason), or Not found, decided from availability first (`BrainRuntimeInfo.state`).
     @ViewBuilder private func detection(_ id: String) -> some View {
         if let runtime = model.runtime(id) {
-            if !runtime.installed {
-                StatusPill(text: "Not found", ok: false).help(runtime.reason ?? "")
-            } else if runtime.available {
-                StatusPill(text: "Found", ok: true).help(runtime.path ?? "")
-            } else {
-                StatusPill(text: "Unavailable", ok: false).help(runtime.reason ?? "")
+            switch runtime.state {
+            case .available:
+                if runtime.installed { StatusPill(text: "Found", ok: true).help(runtime.path ?? "") }
+                else { StatusPill(text: "Ready", ok: true) }
+            case .unavailable: StatusPill(text: "Unavailable", ok: false).help(runtime.reason ?? "")
+            case .notInstalled: StatusPill(text: "Not found", ok: false).help(runtime.reason ?? "")
             }
         }
     }

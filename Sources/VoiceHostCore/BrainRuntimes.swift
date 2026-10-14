@@ -18,6 +18,9 @@ public struct BrainRuntimeDetection: Equatable, Sendable {
     public var unavailableReason: String?
     /// A runtime plugin rather than one of BrainKit's built-ins.
     public var plugin: Bool
+    /// A plugin whose folder is there but that BrainKit will not use (its trust rule, an
+    /// invalid `runtime.json`): unavailable, though not "not installed".
+    public var refused: Bool
     public var installCommand: String?
     public var loginCommand: String?
     public var loginTitle: String?
@@ -27,7 +30,7 @@ public struct BrainRuntimeDetection: Equatable, Sendable {
     public var docsURL: URL?
 
     public init(id: String, name: String, installed: Bool, path: String? = nil, apiServerEnabled: Bool? = nil,
-                unavailableReason: String? = nil, plugin: Bool = false, installCommand: String? = nil,
+                unavailableReason: String? = nil, plugin: Bool = false, refused: Bool = false, installCommand: String? = nil,
                 loginCommand: String? = nil, loginTitle: String? = nil, note: String? = nil,
                 summary: String? = nil, docsURL: URL? = nil) {
         self.id = id
@@ -37,6 +40,7 @@ public struct BrainRuntimeDetection: Equatable, Sendable {
         self.apiServerEnabled = apiServerEnabled
         self.unavailableReason = unavailableReason
         self.plugin = plugin
+        self.refused = refused
         self.installCommand = installCommand
         self.loginCommand = loginCommand
         self.loginTitle = loginTitle
@@ -45,10 +49,16 @@ public struct BrainRuntimeDetection: Equatable, Sendable {
         self.docsURL = docsURL
     }
 
+    /// BrainKit gives a plugin with no folder a refusal too ("No runtime plugin … is
+    /// installed."); only a folder that is there makes a refusal a refusal.
     public init(_ detection: BrainCatalog.Detection) {
+        var info = stat()
+        let refused = detection.refusal != nil
+            && detection.plugin.map { lstat($0.directory, &info) == 0 } == true
         self.init(id: detection.runtime.rawValue, name: detection.title, installed: detection.isInstalled,
                   path: detection.executable, apiServerEnabled: detection.apiServerEnabled,
                   unavailableReason: detection.unavailableReason, plugin: !detection.runtime.isBuiltIn,
+                  refused: refused,
                   installCommand: detection.installCommand, loginCommand: detection.loginCommand,
                   loginTitle: detection.loginTitle, note: detection.note, summary: detection.summary,
                   docsURL: detection.docsURL)
@@ -58,7 +68,7 @@ public struct BrainRuntimeDetection: Equatable, Sendable {
     /// settings (`BrainRuntimes.problem`).
     func json(problem: String?) -> [String: Any] {
         var entry: [String: Any] = ["id": id, "name": name, "installed": installed, "plugin": plugin,
-                                    "available": problem == nil]
+                                    "refused": refused, "available": problem == nil]
         if let problem { entry["reason"] = problem }
         if let path { entry["path"] = path }
         if let apiServerEnabled { entry["apiServer"] = apiServerEnabled }

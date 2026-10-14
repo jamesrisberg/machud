@@ -505,6 +505,46 @@ final class VoiceControlTests: XCTestCase {
         XCTAssertEqual(model.runtime("example-agent")?.reason, "Example Agent needs example-tool, which is not installed.")
     }
 
+    /// What a runtime shows follows `available` first: "(not installed)" and the install
+    /// command only when it really is not installed, "(unavailable)" and the reason otherwise.
+    func testARuntimeIsNotInstalledOnlyWhenItIsNot() throws {
+        let refused = try XCTUnwrap(BrainRuntimeInfo(["id": "example-agent", "name": "example-agent", "plugin": true,
+                                                      "installed": false, "available": false, "refused": true,
+                                                      "reason": "runtime.json is writable by other users."]))
+        XCTAssertEqual(refused.state, .unavailable)
+        XCTAssertEqual(refused.title, "example-agent (unavailable)")
+        XCTAssertNil(refused.command)
+
+        let hermesByURL = try XCTUnwrap(BrainRuntimeInfo(["id": "hermes", "name": "Hermes", "installed": false,
+                                                          "available": true, "refused": false,
+                                                          "installCommand": "curl hermes | bash", "loginCommand": "hermes setup"]))
+        XCTAssertEqual(hermesByURL.state, .available)
+        XCTAssertEqual(hermesByURL.title, "Hermes")
+        XCTAssertNil(hermesByURL.command, "reached by URL: nothing to install or set up here")
+
+        let missingTool = try XCTUnwrap(BrainRuntimeInfo(["id": "example-agent", "name": "Example Agent", "plugin": true,
+                                                          "installed": true, "available": false, "refused": false,
+                                                          "reason": "Example Agent needs example-tool, which is not installed.",
+                                                          "installCommand": "brew install example-agent",
+                                                          "loginCommand": "example-agent login", "loginTitle": "Sign In"]))
+        XCTAssertEqual(missingTool.state, .unavailable)
+        XCTAssertEqual(missingTool.title, "Example Agent (unavailable)")
+        XCTAssertEqual(missingTool.command?.title, "Sign In")
+
+        let missing = try XCTUnwrap(BrainRuntimeInfo(["id": "claude", "name": "Claude", "installed": false,
+                                                      "available": false, "reason": "Claude is not installed.",
+                                                      "installCommand": "curl claude | bash", "loginCommand": "claude"]))
+        XCTAssertEqual(missing.state, .notInstalled)
+        XCTAssertEqual(missing.title, "Claude (not installed)")
+        XCTAssertEqual(missing.command?.title, "Install")
+        XCTAssertEqual(missing.command?.command, "curl claude | bash")
+
+        let ready = try XCTUnwrap(BrainRuntimeInfo(["id": "codex", "name": "Codex", "installed": true, "available": true,
+                                                    "loginCommand": "codex login", "loginTitle": "Log In"]))
+        XCTAssertEqual(ready.state, .available)
+        XCTAssertEqual(ready.command?.command, "codex login")
+    }
+
     /// The saved runtime stays offered even when the host does not list it (it is not up yet),
     /// so the picker never shows another runtime as chosen.
     func testTheChosenRuntimeIsAlwaysOffered() {
