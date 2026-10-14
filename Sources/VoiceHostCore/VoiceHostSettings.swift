@@ -193,19 +193,27 @@ extension VoiceHostSettings {
         ("handsFree.endOfTurn", HandsFreeSettings.EndOfTurn.allCases.map(\.rawValue)),
         ("handsFree.sensitivity", HandsFreeSettings.Sensitivity.allCases.map(\.rawValue)),
         ("history.mode", DictationHistorySettings.Mode.allCases.map(\.rawValue)),
-        ("brain.runtime", AgentRuntime.allCases.map(\.rawValue)),
         ("voice.replyVoice", SpeechVoiceKind.allCases.map(\.rawValue)),
     ]
 
     /// Why `object` (a settings object about to be saved) cannot be: a choice setting holds a
-    /// value that is not one of its choices. Decoding would quietly take the default instead.
+    /// value that is not one of its choices, or `brain.runtime` is not a runtime id. Decoding
+    /// would quietly take the default instead. Any runtime id is kept, as BrainKit keeps it: a
+    /// runtime plugin that is not installed stays chosen and `brain status` says why it cannot run.
     static func invalidChoice(in object: [String: Any]) -> String? {
-        for (path, values) in choices {
+        func value(at path: String) -> Any? {
             var current: Any? = object
             for key in path.split(separator: ".") { current = (current as? [String: Any])?[String(key)] }
-            guard let value = current else { continue }
+            return current
+        }
+        for (path, values) in choices {
+            guard let value = value(at: path) else { continue }
             if let text = value as? String, values.contains(text) { continue }
             return "\(path) must be one of \(values.joined(separator: ", ")), not \(value)"
+        }
+        if let runtime = value(at: "brain.runtime"), !((runtime as? String).map(AgentRuntime.isValidID) ?? false) {
+            let ids = AgentRuntime.builtIns.map(\.rawValue).joined(separator: ", ")
+            return "brain.runtime must be a runtime id (\(ids) or a runtime plugin's), not \(runtime)"
         }
         return nil
     }

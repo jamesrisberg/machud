@@ -116,18 +116,22 @@ final class BrainToolsTests: XCTestCase {
         let controller = makeController()
         await settled(controller)
         var settings = controller.settings
+        settings.brain.runtime = AgentRuntime(rawValue: "example-agent")!
         controller.apply(settings)
+        XCTAssertEqual((brain.configurations.last ?? nil)?.runtime.rawValue, "example-agent")
         XCTAssertEqual((brain.configurations.last ?? nil)?.toolServers.count, 1)
     }
 
     func testBrainStatusReportsTheRuntimeTheCompanionRuns() async throws {
         var settings = VoiceHostSettings()
+        settings.brain.runtime = AgentRuntime(rawValue: "example-agent")!
         let controller = makeController(settings)
         await settled(controller)
         let commands = VoiceHostCommands(controller: controller,
                                          store: VoiceHostSettingsStore(directory: URL(fileURLWithPath: "/tmp/unused")),
                                          secrets: InMemoryVoiceSecretStore(), version: "1")
         var reply = commands.handle("brain", ["_": "status"])
+        XCTAssertEqual(reply["runtime"] as? String, "example-agent")
         XCTAssertNil(reply["activeRuntime"], "nothing is connected yet")
         brain.onSnapshot?(FakeBrain.snapshot(status: "idle", output: "", progress: "", approvals: [], error: nil,
                                              requestId: nil, turnId: nil, runtime: "codex"))

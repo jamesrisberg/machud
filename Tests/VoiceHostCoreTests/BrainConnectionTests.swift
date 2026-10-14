@@ -217,8 +217,11 @@ final class BrainConnectionTests: XCTestCase {
         try await start(connection, .codex)
         XCTAssertEqual(connection.activeRuntime, "codex")
         // BrainService switches the runtime; the connection only reports what the companion runs.
+        connection.configure(launch(.claude))
         scheduler.runPending()
         XCTAssertEqual(launcher.specs.count, 1, "a runtime-only change is not a restart")
+        FakeCompanion.reset(runtime: "claude")
+        try await waitUntil { connection.activeRuntime == "claude" }
         XCTAssertTrue(runtimeRequests.isEmpty, "the connection never switches the runtime itself")
     }
 
@@ -243,6 +246,7 @@ final class BrainConnectionTests: XCTestCase {
     /// starts. The brain waits for the list to settle and launches once, with the final list; an
     /// app that announces after that does not restart it.
     func testAFreshStartWithAppsAnnouncingLaunchesTheCompanionOnce() async throws {
+        FakeCompanion.reset(runtime: "claude")
         let app = { (id: String) in MacHUDSnapshot.App(id: id, name: id.capitalized, panels: []) }
         let status = FakeMacHUDStatus(nil)
         status.announce([
@@ -254,6 +258,7 @@ final class BrainConnectionTests: XCTestCase {
         ])
         var settings = VoiceHostSettings()
         settings.brainPort = port
+        settings.brain.runtime = .claude
         settings.brain.workspacePath = root.appendingPathComponent("workspace").path
         let connection = makeConnection()
         let controller = VoiceHostController(
@@ -277,6 +282,7 @@ final class BrainConnectionTests: XCTestCase {
         try String(repeating: "a", count: 64).write(toFile: token + "/token", atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: token + "/token")
         launcher.processes.last?.onOutput("Brain companion ready at http://127.0.0.1:\(port)")
+        try await waitUntil { connection.activeRuntime == "claude" }
         await controller.hostContextLoad?.value
         scheduler.runPending()
         XCTAssertEqual(launcher.specs.count, 1)

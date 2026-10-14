@@ -34,13 +34,16 @@ final class VoiceHostSettingsTests: XCTestCase {
 
     /// The MacHUD tool settings live inside `brain` (`brain.machudTools`), beside BrainKit's own keys.
     func testMacHUDToolsAreStoredInsideBrain() throws {
+        let json = #"{"brain":{"runtime":"example-agent","workspacePath":"/w","machudTools":false,"machudToolsRequireApproval":true}}"#
         let settings = try JSONDecoder().decode(VoiceHostSettings.self, from: Data(json.utf8))
         XCTAssertFalse(settings.machudTools)
         XCTAssertTrue(settings.machudToolsRequireApproval)
+        XCTAssertEqual(settings.brain.runtime.rawValue, "example-agent")
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as? [String: Any])
         let brain = try XCTUnwrap(object["brain"] as? [String: Any])
         XCTAssertEqual(brain["machudTools"] as? Bool, false)
         XCTAssertEqual(brain["machudToolsRequireApproval"] as? Bool, true)
+        XCTAssertEqual(brain["runtime"] as? String, "example-agent")
         XCTAssertEqual(brain["workspacePath"] as? String, "/w")
         XCTAssertNil(object["machudTools"])
         XCTAssertEqual(try JSONDecoder().decode(VoiceHostSettings.self, from: JSONEncoder().encode(settings)), settings)

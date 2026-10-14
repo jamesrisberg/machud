@@ -1581,6 +1581,7 @@ public final class VoiceHostController: VoiceHostActing {
     /// How MacHUD's description is read: again every `interval` until two reads agree, at most
     /// `reads` times. At MacHUD's launch its apps announce themselves over a few seconds; the
     /// brain starts on the settled list, so its first launch carries the final context and no
+    /// restart follows.
     struct HostContextSettle: Sendable {
         var interval: TimeInterval = 1.5
         var reads = 8
