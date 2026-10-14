@@ -1,7 +1,9 @@
 # MacHUD integration smoke test
 
 `scripts/integration-smoke.sh` drives an **isolated** MacHUD (its own socket, config and
-default placement on launch, showing each panel, a loadout that places Sift in the left
+no hotkeys) against dev builds of Sift and Wormhole, end to end: discovery, default
+placement on launch (Wormhole parks itself at the right edge), showing each panel, a loadout
+that places Sift in the left half and parks Wormhole right (cooperatively, over its socket),
 revealing a parked panel as the orb does, the shared settings window reading each app's
 schema, the tool dock (its button list, an L in the top-left corner, and a HUD loadout
 captured with `capture hud=only` that puts the dock and the panels back), and quitting
@@ -30,50 +32,57 @@ KEEP_RUNNING=1 scripts/integration-smoke.sh # leave the instance and the apps up
 
 Environment: `MACHUD_BIN`, `MACHUD_SOCKET` (default `/tmp/machud-test-int.sock`),
 `TEST_DIR` (default `/tmp/machud-test-int`, holds `layouts.json`, parking state and the
+log), `SIFT_BUILD`, `WORMHOLE_BUILD`. To talk to the instance by hand:
 
 ```sh
 MACHUD_SOCKET=/tmp/machud-test-int.sock build/MacHUD.app/Contents/MacOS/MacHUD ctl panels
 ```
 
-The config it writes: a layout `MacHUD` with regions `left` (left half), `right` and `strip`
-parked `left` from `strip`; `apps.searchPaths` at the three build directories with
-`{"mode": "parked", "edge": "left"}`. `Ecosystem` is a one-screen loadout (a loadout is the
+The config it writes: a layout `MacHUD` with regions `left` (left half) and `right`; a loadout
+`Ecosystem` with Sift in `left` and Wormhole parked `right`; `apps.searchPaths` at the two
+build directories with `standardDirectories: false`; and `apps.JER.wormhole.placement` =
+`{"mode": "parked", "edge": "right"}`. `Ecosystem` is a one-screen loadout (a loadout is the
 display under the pointer, on the desktop showing); the config leaves `experimental` out, so
 multi-desktop loadouts (`experimental.multiDesktopLoadouts`, off by default, see
 [API.md](API.md#multi-desktop-loadouts-experimental)) are off in the run.
 
-## Recorded run (main display 1728 pt wide)
+## Sample run (main display 1728 pt wide)
 
 Replies are trimmed by the script's `jq` filters. Frames are Cocoa coordinates.
 
 ```
 $ machud apps
+{"ok":true,"apps":[{"id":"xyz.machud.sift","health":"notRunning"},{"id":"JER.wormhole","health":"notRunning","placement":{"edge":"right","mode":"parked"}}]}
 
+$ machud apps launch id=JER.wormhole
 {"ok":true,"placement":"pending","health":"launching"}
 
 $ machud apps
+{"ok":true,"apps":[{"id":"JER.wormhole","health":"running","placement":{"edge":"right","mode":"parked"},"placementResult":"applied"}]}
 
 $ machud park list
+{"ok":true,"parked":[{"id":"app:JER.wormhole","label":"Portal","kind":"cooperative","edge":"right"}]}
 
 $ machud panel show id=xyz.machud.sift/browser
 {"ok":true,"visible":false,"mode":"full"}
 
 $ machud panel show id=JER.wormhole/portal
-{"ok":true,"visible":false,"mode":"full"}
-
 {"ok":true,"visible":true,"mode":"parked"}
 
 $ machud panels
+{"ok":true,"panels":[{"id":"xyz.machud.sift/browser","health":"running","cooperative":true,"visible":true,"mode":"full"},{"id":"JER.wormhole/portal","health":"running","cooperative":true,"visible":true,"mode":"full"}]}
 
 $ machud apply loadout=Ecosystem
-{"ok":true,"placed":["left","right","strip"],"failed":{}}
+{"ok":true,"placed":["left","right"],"failed":{}}
 
 $ machud panels
+{"ok":true,"panels":[{"id":"xyz.machud.sift/browser","mode":"full","frame":{"h":1084,"w":864,"x":0,"y":0}},{"id":"JER.wormhole/portal","mode":"parked","frame":{"h":434,"w":692,"x":1728,"y":271}}]}
 
 $ machud park list
-{"ok":true,"parked":[{"id":"right","label":"Portal","kind":"cooperative","edge":"right","rest":{"h":434,"w":692,"x":1036,"y":271}},{"id":"strip","label":"Claude Sessions","kind":"cooperative","edge":"left","rest":{"h":434,"w":519,"x":0,"y":325}}],"orbs":[{"edge":"left","count":1},{"edge":"right","count":1}]}
+{"ok":true,"parked":[{"id":"right","label":"Portal","kind":"cooperative","edge":"right","rest":{"h":434,"w":692,"x":1036,"y":271}}],"orbs":[{"edge":"right","count":1}]}
 
 $ machud panels
+{"ok":true,"panels":[{"id":"xyz.machud.sift/browser","visible":true,"mode":"full","frame":{"h":1084,"w":864,"x":0,"y":0}},{"id":"JER.wormhole/portal","visible":true,"mode":"parked","frame":{"h":434,"w":692,"x":1728,"y":271}}]}
 
 $ machud park reveal edge=right pin=1
 {"ok":true,"revealed":1}
@@ -88,6 +97,7 @@ $ machud panels
 {"ok":true,"panels":[{"id":"JER.wormhole/portal","mode":"parked","frame":{"h":434,"w":692,"x":1728,"y":271}}]}
 
 $ machud settings-window show activate=0
+{"ok":true,"visible":true,"tabs":[{"id":"machud","status":"ready","schema":"socket","keys":["enabled","trigger","gap","browser","orbsHidden"]},{"id":"xyz.machud.sift","status":"ready","schema":"bundle","keys":["defaultFolder","collisionPolicy","showHidden","rulesAutoApply"]},{"id":"JER.wormhole","status":"ready","schema":"none","keys":["activeSet","hotkey","sets"]}]}
 
 $ machud settings get key=trigger
 {"ok":true,"value":"shift"}
@@ -104,8 +114,8 @@ $ machud apps quit id=xyz.machud.sift
 $ machud apps quit id=JER.wormhole
 {"ok":true,"id":"JER.wormhole","wasRunning":true}
 
-
 $ machud apps
+{"ok":true,"apps":[{"id":"xyz.machud.sift","health":"notRunning"},{"id":"JER.wormhole","health":"notRunning","placement":{"edge":"right","mode":"parked"},"placementResult":"applied"}]}
 
 $ machud park list
 {"ok":true,"parked":[],"orbs":[]}
@@ -119,11 +129,15 @@ What it shows:
   cooperatively (`app:<bundle id>`).
 - `panel show` answers with the state MacHUD had before the app confirmed; `panels` a
   moment later has every panel visible and cooperative.
-- After `apply`, Sift fills the left half (864 of 1728 pt), Wormhole's portal sits past the
-  (x -503). `park list` records both as `cooperative` with one orb per edge.
+- After `apply`, Sift fills the left half (864 of 1728 pt) and Wormhole's portal sits past the
+  right edge (x 1728, rest x 1036); the loadout's parking replaces the one from launch.
+  `park list` records it as `cooperative` with one orb on the right. Cooperative parking is
+  shown with Wormhole alone: Sift parks cooperatively too, but here it fills a region.
 - `park reveal edge=right` (what hovering the orb does) brings the portal back to its rest
   frame with `panel mode full`; `park conceal` parks it again.
 - The settings window has a tab per app plus MacHUD. MacHUD serves its schema over the
+  socket (`settings schema`); Sift's comes from its bundle; Wormhole ships none, so its tab lists the keys it reports.
+- The tool dock lists the hover apps first, then the windowed ones (Sift);
   at `topLeft` it has two arms, hover buttons against the left edge and windowed ones
   against the top. `capture name=HUD hud=only` records `dock.position` and each app's
   panels (Sift's `dock.edge` setting with them); after moving the dock to the bottom,
@@ -133,8 +147,10 @@ What it shows:
 
 ## Known gaps
 
-- The recorded replies above do not include the tool dock steps; the tool dock bullet
+- The sample replies above do not include the tool dock steps; the tool dock bullet
   under "What it shows" describes them.
+- The run parks at the right edge only; `ParkingTests` covers the other edges.
+- Sift, Stash, Scratch, ffmpegHUD, magickHUD, serversHUD, Wormhole and MacHUD's
   own panels honour the `edge=`/`peek=` that MacHUD sends with `panel mode parked`. HUDKit's
   default `setPanelMode(_:mode:options:)` drops the options, so each app opts in by
   implementing it. Archibald implements only `setPanelMode(_:mode:)`: it ignores `edge=` and
