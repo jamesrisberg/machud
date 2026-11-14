@@ -120,6 +120,7 @@ final class ExternalPanelSocketTests: XCTestCase {
     }
 
     func testParkedPanelParksOverTheSocketAndTheOrbRevealsIt() throws {
+        let screen = try XCTUnwrap(NSScreen.screens.max { $0.frame.maxX < $1.frame.maxX })
         let parking = ParkingController(panels: registry, stateURL: dir.appendingPathComponent("parking.json"))
         XCTAssertNil(parking.cooperativeTarget("portal"), "no resolver yet")
         LoadoutEngine.wireCooperativeParking(parking, panels: registry)
@@ -129,8 +130,9 @@ final class ExternalPanelSocketTests: XCTestCase {
         XCTAssertEqual(client.path, dir.appendingPathComponent("s.sock").path)
         XCTAssertEqual(panelID, "portal")
 
-        let rest = CGRect(x: 100, y: 100, width: 300, height: 200)
-        parking.park(target, id: "left", label: "Portal", rest: rest, edge: .right, peek: 6, screen: NSScreen.main)
+        // The rightmost display has no neighbour beyond the parking edge to suppress the peek.
+        let rest = CGRect(x: screen.frame.maxX - 320, y: screen.frame.midY - 100, width: 300, height: 200)
+        parking.park(target, id: "left", label: "Portal", rest: rest, edge: .right, peek: 6, screen: screen)
         XCTAssertTrue(spin { self.host.modes == [.parked] })
         XCTAssertEqual(host.frames.last, rest, "the app learns its rest frame before parking")
         XCTAssertEqual(host.modeOptions.last, HUDPanelModeOptions(edge: .right, peek: 6))
