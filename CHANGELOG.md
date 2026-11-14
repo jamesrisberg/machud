@@ -6,6 +6,14 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 
 ## [Unreleased]
 
+### Added
+- calHUD joins the app family with a calendar hover panel and calendar desktop widgets.
+
+### Changed
+- Saved calendar widgets use calHUD, keeping their position, size and settings in desktop
+  layouts and HUD loadouts. widgetHUD provides clock and weather widgets.
+
+
 ## [0.5.1] - 2026-11-14
 
 ### Fixed

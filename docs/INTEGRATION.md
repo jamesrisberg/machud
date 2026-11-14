@@ -161,3 +161,10 @@ What it shows:
   keeping AppKit from clamping frames below the menu bar.
 - A cooperative panel the user brings back through the app itself (its hotkey, `panel show`)
   stays in `park list` until it is re-parked, revealed or unparked.
+
+## Desktop widgets
+
+Calendar widgets are served by calHUD (`xyz.machud.calhud`, widget type `calendar`), alongside
+its `main` hover panel. Saved calendar widget records normalize their provider to calHUD while
+retaining instance IDs, placement and settings, including widgets saved in HUD loadouts.
+widgetHUD provides clock and weather widgets.
