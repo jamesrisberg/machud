@@ -41,6 +41,7 @@ development Mac; an item marked n/a does not apply to this project.
 | Local test fixture setup and reset authority | Temp dirs per test instance; no shared fixtures |
 | Shared resource coordinator | Orchestrator (live MacHUD, microphone, fn event tap, privacy grants) |
 | Generation and freshness commands | n/a |
+| Verification before publishing | Run the relevant test suites and release checks locally before pushing; GitHub Actions deploys the site only |
 | Fast integration check after each merge | `swift build` then `swift test` in the merged repo |
 | Focused test command and filter syntax | `swift test --filter <TestClass>[/<testMethod>]` |
 | Full integration checks | `swift test` and `./build.sh` in every touched repo; `scripts/hud-workspace.sh build` and `test` across the family; `scripts/integration-smoke.sh` for sibling-app behavior |
