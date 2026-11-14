@@ -6,6 +6,12 @@ also finds, supervises and hosts the sibling HUD apps. The format follows
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-14
+
+### Fixed
+- Panels recover onto the current desktop when macOS leaves them on another desktop,
+  while keeping keyboard focus in the app you are using.
+
 ## [0.5.0] - 2026-10-13
 
 ### Changed
