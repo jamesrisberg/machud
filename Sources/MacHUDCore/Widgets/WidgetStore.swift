@@ -132,6 +132,8 @@ struct WidgetRecord: Codable, Equatable {
         instance = try c.decode(String.self, forKey: .instance)
         app = try c.decode(String.self, forKey: .app)
         type = try c.decode(String.self, forKey: .type)
+        // Calendar widgets belong to calHUD; the record's placement and instance settings stay intact.
+        if app == "xyz.machud.widgethud", type == "calendar" { app = "xyz.machud.calhud" }
         size = (try? c.decodeIfPresent(HUDWidgetSize.self, forKey: .size)) ?? .small
         screen = try? c.decodeIfPresent(ScreenRef.self, forKey: .screen)
         let fx = try? c.decodeIfPresent(Double.self, forKey: .x), fy = try? c.decodeIfPresent(Double.self, forKey: .y)

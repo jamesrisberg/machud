@@ -29,8 +29,8 @@ apps that make up the rest of the HUD:
   most first), opens files Spotlight finds, applies or previews loadouts by name and inserts
   Stash's snippets, all from the keyboard. A quick tap of **⌃⌥Space** opens it, as does `machud search show`
   ([docs/API.md#search-bar](docs/API.md#search-bar)).
-- **Widgets**: glass tiles on the desktop that any sibling can serve (widgetHUD's clock, weather
-  and calendar, serversHUD's running dev servers, Stash's latest clips), placed on a grid, under your windows until **⌃⌥W** raises them.
+- **Widgets**: glass tiles on the desktop that any sibling can serve (widgetHUD's clock and weather,
+  calHUD's calendar, serversHUD's running dev servers, Stash's latest clips), placed on a grid, under your windows until **⌃⌥W** raises them.
 - **Parking**: tuck windows off an edge behind a hover orb.
 - **Menu bar**: hide menu bar items behind a separator, Hidden Bar style.
 - **Voice**: MacHUD runs its voice host (dictation and the agent brain) as a helper process,
@@ -152,8 +152,8 @@ script). See docs/API.md.
 ### Desktop widgets
 
 Any sibling app can serve widgets: small glass tiles on the desktop, such as a clock or the
-dev servers that are up. MacHUD places them and remembers where. widgetHUD serves a clock, the
-weather and a calendar; serversHUD and Stash each add a widget beside their panel
+dev servers that are up. MacHUD places them and remembers where. widgetHUD serves clocks and
+weather, calHUD serves calendars; serversHUD and Stash each add a widget beside their panel
 (Running Servers, Latest Clips).
 
 - **Add**: status menu › Widgets › Add Widget, or **Edit Widgets…**, which opens a gallery of
@@ -388,7 +388,8 @@ The repos sit next to this one (`~/dev/<name>`); `workspace.json` lists them.
 | [ffmpeghud](../ffmpeghud) | hover app | ffmpeg presets (GIF, compress, trim, extract audio) for dropped files |
 | [magickhud](../magickhud) | hover app | ImageMagick presets for dropped images |
 | [servershud](../servershud) | hover app | Every dev server listening on your Mac, with stop and open, and a Running Servers widget |
-| [widgethud](../widgethud) | widget app | Desktop widgets: a clock, the weather and a calendar (bundle `xyz.machud.widgethud`) |
+| [widgethud](../widgethud) | widget app | Clock and weather desktop widgets (bundle `xyz.machud.widgethud`) |
+| [calhud](../calhud) | hover + widgets | Calendar month grid, day agenda and calendar widgets (bundle `xyz.machud.calhud`) |
 | [usagehud](../usagehud) | hover app | Your Claude and Codex subscription usage: each window's percent used and when it resets, and Codex credits (bundle `xyz.machud.usagehud`) |
 | [wormhole](../wormhole) | menu bar app (Xcode) | Glowing drop target that sends files with Magic Wormhole |
 | [archibald](../archibald) | menu bar app (Xcode) | Wake-phrase voice agent with an orb and transcript panel |
